@@ -199,6 +199,23 @@ export interface Consumer {
   childAgeBracket: string;
   currentBrand?: string;
   quizResult?: string; // segment tag, not a medical assessment — PRD §6
+  /** Added in Phase 2 (0003 migration) to fix an RLS gap that let any NC edit
+   * any other NC's consumer rows — see the migration's comment. */
+  createdByNcId: string;
+  createdAt: number;
+}
+
+// --- Product master (Phase 2) — SKU picklist source for Stock Taking /
+// Offtake / Price Monitoring (PRD §5.1 "SKU list from product master").
+// Deliberately not FK-enforced from the report tables' `sku` columns — see
+// supabase/migrations/0003_products_and_reports.sql. ---
+
+export interface Product {
+  id: string;
+  sku: string;
+  name: string;
+  category?: string;
+  active: boolean;
   createdAt: number;
 }
 

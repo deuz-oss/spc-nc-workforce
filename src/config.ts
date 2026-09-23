@@ -1,4 +1,4 @@
-import { Role } from './types';
+import { NtgGwpStage, Role } from './types';
 
 export const APP_NAME = 'SPC NC Workforce';
 
@@ -37,6 +37,8 @@ export const MONITOR_ROLES: Role[] = ['super_admin', 'pm', 'reckitt_client', 'da
 export const STORE_MANAGER_ROLES: Role[] = ['super_admin', 'admin_data_entry', 'tl', 'arco'];
 /** Posisi yang boleh melakukan bulk account provisioning (PRD §13) */
 export const USER_MANAGER_ROLES: Role[] = ['super_admin'];
+/** Posisi yang boleh mengelola product master (SKU) — matches products RLS write policy, 0003 migration */
+export const PRODUCT_MANAGER_ROLES: Role[] = ['super_admin', 'admin_data_entry', 'data_analyst'];
 
 export const CHANNEL_LABEL_NOTE =
   'Definisi channel DMS/LMT/MTI masih menunggu konfirmasi client (PRD §15) — kode disimpan apa adanya.';
@@ -44,4 +46,23 @@ export const CHANNEL_LABEL_NOTE =
 export const CATEGORY_LABEL: Record<string, string> = {
   premium: 'Premium',
   super_premium: 'Super Premium',
+};
+
+/** NTG & GWP funnel stages, in forward-progression order (PRD §5.4). */
+export const NTG_GWP_STAGES: NtgGwpStage[] = [
+  'approached',
+  'quiz_completed',
+  'consultation_delivered',
+  'ntg_confirmed',
+  'gwp_given',
+  'wa_followup_scheduled',
+];
+
+export const NTG_GWP_STAGE_LABEL: Record<NtgGwpStage, string> = {
+  approached: 'Didekati',
+  quiz_completed: 'Nutrition Quiz Selesai',
+  consultation_delivered: 'Konsultasi Diberikan',
+  ntg_confirmed: 'NTG Terkonfirmasi',
+  gwp_given: 'GWP Diberikan',
+  wa_followup_scheduled: 'Follow-up WA Terjadwal',
 };

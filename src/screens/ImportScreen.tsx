@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Badge, Btn, Card, Chip, Empty, H, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { CATEGORY_LABEL, STORE_MANAGER_ROLES, USER_MANAGER_ROLES } from '../config';
+import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, STORE_MANAGER_ROLES, USER_MANAGER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Role, Store } from '../types';
@@ -364,19 +364,158 @@ function UserImportSection() {
   );
 }
 
-// --- Screen shell: switch between the two import modes ---------------------
+// --- Product master import (Phase 2 — PRD §5.1 "SKU list from product master") ---
+
+interface ProductRow {
+  sku: string;
+  name: string;
+  category?: string;
+}
+
+const PRODUCT_TEMPLATE = `sku,name,category
+ENF-A-400,Enfagrow A+ 400g,Premium
+ENF-A-900,Enfagrow A+ 900g,Premium`;
+
+function ProductImportSection() {
+  const navigation = useNavigation<any>();
+  const me = useCurrentUser()!;
+  const addProductsBulk = useStore((s) => s.addProductsBulk);
+
+  const [rows, setRows] = useState<ProductRow[] | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<{ created: number; errors: string[] } | null>(null);
+
+  const downloadTemplate = () => exportCsv('template_produk', PRODUCT_TEMPLATE);
+
+  const readFile = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'text/plain', 'application/vnd.ms-excel'],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled) return;
+      const asset: any = res.assets[0];
+      let text = '';
+      if (asset.file instanceof Blob) text = await asset.file.text();
+      else text = await (await fetch(asset.uri)).text();
+
+      const table = parseCsv(text);
+      if (table.length < 2) {
+        showDialog('File kosong atau tanpa baris data.');
+        return;
+      }
+      const header = table[0].map((h) => h.toLowerCase());
+      const out: ProductRow[] = [];
+      const errs: string[] = [];
+      table.slice(1).forEach((r, i) => {
+        const obj: Record<string, string> = {};
+        header.forEach((h, j) => (obj[h] = r[j] ?? ''));
+        const sku = pick(obj, ['sku', 'kode']);
+        const name = pick(obj, ['name', 'nama']);
+        if (!sku || !name) {
+          errs.push(`Baris ${i + 2}: sku/name kosong`);
+          return;
+        }
+        out.push({ sku, name, category: pick(obj, ['category', 'kategori']) || undefined });
+      });
+      setRows(out);
+      setErrors(errs);
+      setResult(null);
+    } catch {
+      showDialog('Gagal membaca file CSV.');
+    }
+  };
+
+  const doImport = async () => {
+    if (!rows?.length) return;
+    setImporting(true);
+    try {
+      const res = await addProductsBulk(rows);
+      setResult(res);
+      if (res.errors.length === 0) {
+        showDialog('Impor berhasil', `${res.created} produk ditambahkan ke master.`, [
+          { label: 'OK', onPress: () => navigation.goBack() },
+        ]);
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  if (!PRODUCT_MANAGER_ROLES.includes(me.role)) {
+    return (
+      <Card>
+        <Muted>Hanya Super Admin, Admin Data Entry, dan Data Analyst yang dapat mengelola master produk.</Muted>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card>
+        <Muted>
+          Format kolom CSV:{'\n'}
+          <Text style={{ fontFamily: F.bold, color: C.text }}>sku, name, category</Text>
+          {'\n'}Kolom wajib: sku, name. Kategori opsional. SKU dipakai sebagai picklist di Stock Taking &amp;
+          Offtake (PRD §5.1) — tidak mengunci input manual bila SKU belum terdaftar.
+        </Muted>
+        <View style={{ gap: 8, marginTop: 10 }}>
+          <Btn small variant="outline" title="Unduh Template CSV" onPress={downloadTemplate} />
+          <Btn small title="Pilih File CSV" onPress={readFile} />
+        </View>
+      </Card>
+
+      {rows && (
+        <Card>
+          <SectionHeader title={`${rows.length} produk terbaca`} />
+          <View style={{ marginTop: 10 }}>
+            <Btn title={`Impor ${rows.length} Produk`} onPress={doImport} disabled={importing} loading={importing} />
+          </View>
+        </Card>
+      )}
+
+      {errors.length > 0 && (
+        <Card>
+          <H>{errors.length} baris dilewati (validasi CSV)</H>
+          {errors.slice(0, 5).map((e) => (
+            <Muted key={e}>{e}</Muted>
+          ))}
+        </Card>
+      )}
+
+      {result && (
+        <Card>
+          <H>Hasil Impor</H>
+          <Muted style={{ marginTop: 4 }}>{result.created} produk berhasil ditambahkan.</Muted>
+          {result.errors.length > 0 && (
+            <>
+              <Muted style={{ marginTop: 6, fontFamily: F.semi }}>{result.errors.length} gagal/dilewati:</Muted>
+              {result.errors.slice(0, 10).map((e) => (
+                <Muted key={e}>{e}</Muted>
+              ))}
+            </>
+          )}
+        </Card>
+      )}
+    </>
+  );
+}
+
+// --- Screen shell: switch between import modes ------------------------------
 
 export default function ImportScreen() {
-  const [mode, setMode] = useState<'stores' | 'users'>('stores');
+  const [mode, setMode] = useState<'stores' | 'users' | 'products'>('stores');
 
   return (
     <ScrollView tabIndex={0} role="main" contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}>
-      <SectionHeader title="Impor Data" subtitle="Unggah CSV untuk toko atau akun pengguna" />
-      <View style={{ flexDirection: 'row', gap: 8 }}>
+      <SectionHeader title="Impor Data" subtitle="Unggah CSV untuk toko, akun pengguna, atau master produk" />
+      <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         <Chip label="Toko" active={mode === 'stores'} onPress={() => setMode('stores')} />
         <Chip label="Akun Pengguna (bulk)" active={mode === 'users'} onPress={() => setMode('users')} />
+        <Chip label="Master Produk" active={mode === 'products'} onPress={() => setMode('products')} />
       </View>
-      {mode === 'stores' ? <StoreImportSection /> : <UserImportSection />}
+      {mode === 'stores' ? <StoreImportSection /> : mode === 'users' ? <UserImportSection /> : <ProductImportSection />}
     </ScrollView>
   );
 }

@@ -9,8 +9,8 @@ import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurClock } from '../utils/format';
 
 /** The 7 report modules per PRD §5, grouped by task category per the client
- * brief's own grouping. Each row is a stub for now (Phase 2/3 — PRD §16) but
- * wired into navigation so the check-in-to-report flow is coherent end to end. */
+ * brief's own grouping. Stock Taking / Offtake / NTG & GWP are real screens as
+ * of Phase 2 (PRD §16); the rest still route to ComingSoonScreen (Phase 3). */
 const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence: string; phase: string }> = [
   { key: 'stock_taking', label: 'Stock Taking', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
   { key: 'offtake', label: 'Offtake', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
@@ -20,6 +20,12 @@ const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence
   { key: 'price_monitoring', label: 'Price Monitoring', group: 'Weekly/periodic Task', cadence: 'Bi-weekly', phase: 'Phase 3' },
   { key: 'survey', label: 'Survey / Nutrition Quiz', group: 'Weekly/periodic Task', cadence: 'Ad hoc', phase: 'Phase 3' },
 ];
+
+const MODULE_ROUTE: Record<string, string> = {
+  stock_taking: 'StockTaking',
+  offtake: 'Offtake',
+  ntg_gwp: 'Consumers',
+};
 
 export default function StoreVisitScreen() {
   const route = useRoute<any>();
@@ -112,21 +118,26 @@ export default function StoreVisitScreen() {
             Isi laporan sesuai kategori tugas selama kunjungan ini berlangsung.
           </Muted>
           <View style={{ gap: 8, marginTop: 10 }}>
-            {REPORT_MODULES.map((m) => (
-              <ListRow
-                key={m.key}
-                onPress={() =>
-                  navigation.navigate('ComingSoon', {
-                    title: m.label,
-                    phase: m.phase,
-                    note: `Modul ${m.label} (${m.group}, cadence ${m.cadence}) belum diimplementasikan di Phase 1 — lihat PRD §5 dan README.`,
-                  })
-                }
-                title={m.label}
-                subtitle={`${m.group} · ${m.cadence}`}
-                meta={m.phase}
-              />
-            ))}
+            {REPORT_MODULES.map((m) => {
+              const route = MODULE_ROUTE[m.key];
+              return (
+                <ListRow
+                  key={m.key}
+                  onPress={() =>
+                    route
+                      ? navigation.navigate(route, { visitId: visit.id, storeId: visit.storeId })
+                      : navigation.navigate('ComingSoon', {
+                          title: m.label,
+                          phase: m.phase,
+                          note: `Modul ${m.label} (${m.group}, cadence ${m.cadence}) belum diimplementasikan — lihat PRD §5 dan README.`,
+                        })
+                  }
+                  title={m.label}
+                  subtitle={`${m.group} · ${m.cadence}`}
+                  meta={m.phase}
+                />
+              );
+            })}
           </View>
         </Card>
 

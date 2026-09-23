@@ -4,9 +4,23 @@ import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
 import { TRACK_MIN_STEP_M } from '../config';
-import { Attendance, Role, RoutePoint, Store, Team, User, Visit } from '../types';
+import {
+  Attendance,
+  Consumer,
+  NtgGwp,
+  OfftakeRow,
+  Product,
+  Role,
+  RoutePoint,
+  StockTakingRow,
+  Store,
+  Team,
+  User,
+  Visit,
+} from '../types';
 import { haversineM } from '../utils/geo';
 import { loadQueue, saveQueue, QueuedOp } from '../utils/offlineQueue';
+import { extFromUri, uploadReportMedia } from '../utils/storage';
 import { uid } from '../utils/uuid';
 
 async function isOnline(): Promise<boolean> {
@@ -44,7 +58,13 @@ interface StoreState {
   stores: Store[];
   visits: Visit[];
   attendances: Attendance[];
-  /** Clock-in/out and store check-in/out writes still waiting for connectivity to reach Supabase. */
+  /** Phase 2 (PRD §16) — product master + the 3 core daily report modules. */
+  products: Product[];
+  stockTakingRows: StockTakingRow[];
+  offtakeRows: OfftakeRow[];
+  consumers: Consumer[];
+  ntgGwps: NtgGwp[];
+  /** Clock-in/out, store check-in/out, and Stock Taking/Offtake submissions still waiting for connectivity to reach Supabase. */
   pendingOps: QueuedOp[];
 
   /** Restores an existing Supabase session (if any) on cold app start. Call once from App.tsx. */
@@ -86,6 +106,31 @@ interface StoreState {
   ): Promise<string>;
   finishVisit(id: string): Promise<void>;
 
+  // --- Phase 2: product master + core daily report modules ---
+  upsertProduct(p: Product): Promise<void>;
+  /** Bulk create from CSV (Data Analyst/Admin Data Entry/Super Admin), mirrors addUsersBulk's shape. */
+  addProductsBulk(
+    rows: Array<{ sku: string; name: string; category?: string }>,
+  ): Promise<{ created: number; errors: string[] }>;
+
+  /** Stock Taking (PRD §5.1) — offline-queued like clock/check ops (text-primary, no required photo). */
+  submitStockTaking(
+    visitId: string,
+    storeId: string,
+    rows: Array<{ sku: string; qtyOnHand: number; outOfStock: boolean }>,
+    photoUri?: string,
+  ): Promise<{ queued: boolean }>;
+  /** Offtake (PRD §5.3) — offline-queued; outlier flag is server-computed (trigger), never set client-side. */
+  submitOfftake(
+    visitId: string,
+    storeId: string,
+    rows: Array<{ sku: string; unitsSold: number; revenue?: number }>,
+  ): Promise<{ queued: boolean; outlierSkus: string[] }>;
+
+  /** NTG & GWP consumer funnel (PRD §5.4) — online-required, like upsertStore (richer/less frequent than clock/check writes). */
+  upsertConsumer(c: Consumer): Promise<string | null>;
+  upsertNtgGwp(n: NtgGwp): Promise<string | null>;
+
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
   clockOut(pos: { lat: number; lng: number }): Promise<boolean>;
@@ -112,6 +157,21 @@ export function storeScope(s: Pick<StoreState, 'stores' | 'teams'>, viewer: User
   }
   if (viewer.role === 'nc') return s.stores.filter((st) => st.assignedNcId === viewer.id);
   return s.stores;
+}
+
+/** Consumers scoped by the NC who created them (PRD §5.4/§17 consumer flow) — mirrors scopeUsers/storeScope. */
+export function consumerScope(s: Pick<StoreState, 'consumers' | 'users' | 'teams'>, viewer: User): Consumer[] {
+  if (viewer.role === 'nc') return s.consumers.filter((c) => c.createdByNcId === viewer.id);
+  if (viewer.role === 'tl') {
+    const ncIds = new Set(s.users.filter((u) => u.teamId === viewer.teamId).map((u) => u.id));
+    return s.consumers.filter((c) => ncIds.has(c.createdByNcId));
+  }
+  if (viewer.role === 'arco') {
+    const myTeamIds = new Set(s.teams.filter((t) => t.arcoId === viewer.id).map((t) => t.id));
+    const ncIds = new Set(s.users.filter((u) => u.teamId && myTeamIds.has(u.teamId)).map((u) => u.id));
+    return s.consumers.filter((c) => ncIds.has(c.createdByNcId));
+  }
+  return s.consumers; // monitor roles: program-wide
 }
 
 function upsertById<T extends { id: string | number }>(list: T[], row: T): T[] {
@@ -193,6 +253,70 @@ function mapAttendance(a: any, route: RoutePoint[]): Attendance {
   };
 }
 
+function mapProduct(p: any): Product {
+  return {
+    id: p.id,
+    sku: p.sku,
+    name: p.name,
+    category: p.category ?? undefined,
+    active: p.active,
+    createdAt: new Date(p.created_at).getTime(),
+  };
+}
+
+function mapStockTaking(r: any): StockTakingRow {
+  return {
+    id: r.id,
+    visitId: r.visit_id,
+    storeId: r.store_id,
+    sku: r.sku,
+    qtyOnHand: r.qty_on_hand,
+    outOfStock: r.out_of_stock,
+    photoUrl: r.photo_url ?? undefined,
+    createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapOfftake(r: any): OfftakeRow {
+  return {
+    id: r.id,
+    visitId: r.visit_id,
+    storeId: r.store_id,
+    sku: r.sku,
+    unitsSold: r.units_sold,
+    revenue: r.revenue ?? undefined,
+    isOutlier: r.is_outlier,
+    createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapConsumer(c: any): Consumer {
+  return {
+    id: c.id,
+    name: c.name,
+    waContact: c.wa_contact,
+    consent: c.consent,
+    childAgeBracket: c.child_age_bracket ?? '',
+    currentBrand: c.current_brand ?? undefined,
+    quizResult: c.quiz_result ?? undefined,
+    createdByNcId: c.created_by_nc_id,
+    createdAt: new Date(c.created_at).getTime(),
+  };
+}
+
+function mapNtgGwp(g: any): NtgGwp {
+  return {
+    id: g.id,
+    consumerId: g.consumer_id,
+    visitId: g.visit_id,
+    stage: g.stage,
+    gwpItem: g.gwp_item ?? undefined,
+    gwpQty: g.gwp_qty ?? undefined,
+    offtakeId: g.offtake_id ?? undefined,
+    createdAt: new Date(g.created_at).getTime(),
+  };
+}
+
 /** Re-applies a queued op's optimistic local effect after a cold restart, before it's synced. */
 function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp) {
   switch (op.type) {
@@ -222,6 +346,18 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
       }
       break;
     }
+    case 'submitStockTaking': {
+      const existing = get().stockTakingRows;
+      const fresh = op.rows.filter((r) => !existing.some((x) => x.id === r.id));
+      if (fresh.length) set({ stockTakingRows: [...fresh, ...existing] });
+      break;
+    }
+    case 'submitOfftake': {
+      const existing = get().offtakeRows;
+      const fresh = op.rows.filter((r) => !existing.some((x) => x.id === r.id));
+      if (fresh.length) set({ offtakeRows: [...fresh, ...existing] });
+      break;
+    }
   }
 }
 
@@ -231,6 +367,33 @@ function visitRow(v: Visit) {
     lng: v.lng,
     store_distance_m: v.storeDistanceM,
     geo_valid: v.geoValid,
+  };
+}
+
+function stockTakingRow(r: StockTakingRow) {
+  return {
+    id: r.id,
+    visit_id: r.visitId,
+    store_id: r.storeId,
+    sku: r.sku,
+    qty_on_hand: r.qtyOnHand,
+    out_of_stock: r.outOfStock,
+    photo_url: r.photoUrl ?? null,
+    created_at: new Date(r.createdAt).toISOString(),
+  };
+}
+
+/** `is_outlier` deliberately omitted — the server trigger (offtake_flag_outlier,
+ * 0003 migration) sets it on insert; the client never writes this column. */
+function offtakeRow(r: OfftakeRow) {
+  return {
+    id: r.id,
+    visit_id: r.visitId,
+    store_id: r.storeId,
+    sku: r.sku,
+    units_sold: r.unitsSold,
+    revenue: r.revenue ?? null,
+    created_at: new Date(r.createdAt).toISOString(),
   };
 }
 
@@ -270,6 +433,17 @@ async function replayOp(get: () => StoreState, op: QueuedOp): Promise<boolean> {
       check_out_at: null,
       ...visitRow(v),
     });
+    return !error;
+  }
+  if (op.type === 'submitStockTaking') {
+    const { error } = await supabase.from('stock_taking').insert(op.rows.map(stockTakingRow));
+    return !error;
+  }
+  if (op.type === 'submitOfftake') {
+    // Replayed inserts don't read back is_outlier — the row's flag stays as last
+    // known (false) locally until the next hydrateAll/realtime update corrects
+    // it; the server-side value (set by the trigger) is authoritative regardless.
+    const { error } = await supabase.from('offtake').insert(op.rows.map(offtakeRow));
     return !error;
   }
   // finishVisit
@@ -346,6 +520,41 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
         ),
       });
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ products: get().products.filter((p) => p.id !== (payload.old as any).id) });
+      } else {
+        set({ products: upsertById(get().products, mapProduct(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_taking' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ stockTakingRows: get().stockTakingRows.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ stockTakingRows: upsertById(get().stockTakingRows, mapStockTaking(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'offtake' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ offtakeRows: get().offtakeRows.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ offtakeRows: upsertById(get().offtakeRows, mapOfftake(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'consumers' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ consumers: get().consumers.filter((c) => c.id !== (payload.old as any).id) });
+      } else {
+        set({ consumers: upsertById(get().consumers, mapConsumer(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'ntg_gwp' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ ntgGwps: get().ntgGwps.filter((g) => g.id !== (payload.old as any).id) });
+      } else {
+        set({ ntgGwps: upsertById(get().ntgGwps, mapNtgGwp(payload.new)) });
+      }
+    })
     .subscribe();
 }
 
@@ -358,13 +567,19 @@ async function hydrateAll(
   const { data: me, error: meErr } = await supabase.from('profiles').select('*').eq('id', userId).single();
   if (meErr || !me || !me.active) return false;
 
-  const [profilesRes, teamsRes, storesRes, visitsRes, attendancesRes] = await Promise.all([
-    supabase.from('profiles').select('*'),
-    supabase.from('teams').select('*'),
-    supabase.from('stores').select('*'),
-    supabase.from('visits').select('*'),
-    supabase.from('attendances').select('*'),
-  ]);
+  const [profilesRes, teamsRes, storesRes, visitsRes, attendancesRes, productsRes, stockTakingRes, offtakeRes, consumersRes, ntgGwpRes] =
+    await Promise.all([
+      supabase.from('profiles').select('*'),
+      supabase.from('teams').select('*'),
+      supabase.from('stores').select('*'),
+      supabase.from('visits').select('*'),
+      supabase.from('attendances').select('*'),
+      supabase.from('products').select('*'),
+      supabase.from('stock_taking').select('*'),
+      supabase.from('offtake').select('*'),
+      supabase.from('consumers').select('*'),
+      supabase.from('ntg_gwp').select('*'),
+    ]);
 
   const attendanceRows = attendancesRes.data ?? [];
   const attendanceIds = attendanceRows.map((a: any) => a.id);
@@ -391,6 +606,11 @@ async function hydrateAll(
     stores: (storesRes.data ?? []).map(mapStore),
     visits: (visitsRes.data ?? []).map(mapVisit),
     attendances: attendanceRows.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? [])),
+    products: (productsRes.data ?? []).map(mapProduct),
+    stockTakingRows: (stockTakingRes.data ?? []).map(mapStockTaking),
+    offtakeRows: (offtakeRes.data ?? []).map(mapOfftake),
+    consumers: (consumersRes.data ?? []).map(mapConsumer),
+    ntgGwps: (ntgGwpRes.data ?? []).map(mapNtgGwp),
   });
 
   subscribeRealtime(set, get);
@@ -412,6 +632,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   stores: [],
   visits: [],
   attendances: [],
+  products: [],
+  stockTakingRows: [],
+  offtakeRows: [],
+  consumers: [],
+  ntgGwps: [],
   pendingOps: [],
 
   init: async () => {
@@ -437,7 +662,19 @@ export const useStore = create<StoreState>()((set, get) => ({
       supabase.auth.onAuthStateChange((event) => {
         if (event === 'SIGNED_OUT') {
           teardownRealtime();
-          set({ sessionUserId: null, users: [], teams: [], stores: [], visits: [], attendances: [] });
+          set({
+            sessionUserId: null,
+            users: [],
+            teams: [],
+            stores: [],
+            visits: [],
+            attendances: [],
+            products: [],
+            stockTakingRows: [],
+            offtakeRows: [],
+            consumers: [],
+            ntgGwps: [],
+          });
         }
       });
     }
@@ -479,7 +716,19 @@ export const useStore = create<StoreState>()((set, get) => ({
   logout: async () => {
     teardownRealtime();
     await supabase.auth.signOut();
-    set({ sessionUserId: null, users: [], teams: [], stores: [], visits: [], attendances: [] });
+    set({
+            sessionUserId: null,
+            users: [],
+            teams: [],
+            stores: [],
+            visits: [],
+            attendances: [],
+            products: [],
+            stockTakingRows: [],
+            offtakeRows: [],
+            consumers: [],
+            ntgGwps: [],
+          });
   },
 
   addUser: async ({ name, username, password, role, teamId, city, phone }) => {
@@ -712,6 +961,219 @@ export const useStore = create<StoreState>()((set, get) => ({
       set({ visits: beforeVisits });
       throw new Error(error.message);
     }
+  },
+
+  // --- Phase 2: product master ------------------------------------------
+
+  upsertProduct: async (p) => {
+    const list = get().products;
+    const exists = list.some((x) => x.id === p.id);
+    set({ products: exists ? list.map((x) => (x.id === p.id ? p : x)) : [p, ...list] });
+    const { error } = await supabase.from('products').upsert({
+      id: p.id,
+      sku: p.sku,
+      name: p.name,
+      category: p.category,
+      active: p.active,
+      created_at: new Date(p.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ products: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan produk ke server. Periksa koneksi internet dan coba lagi.');
+    }
+  },
+
+  addProductsBulk: async (rows) => {
+    const seenSkus = new Set(get().products.map((p) => p.sku.toLowerCase()));
+    const errors: string[] = [];
+    const toInsert: Product[] = [];
+    rows.forEach((r, i) => {
+      const sku = r.sku.trim();
+      const name = r.name.trim();
+      if (!sku) {
+        errors.push(`Baris ${i + 1}: SKU kosong`);
+        return;
+      }
+      if (!name) {
+        errors.push(`Baris ${i + 1}: nama kosong`);
+        return;
+      }
+      if (seenSkus.has(sku.toLowerCase())) {
+        errors.push(`Baris ${i + 1}: SKU "${sku}" sudah ada`);
+        return;
+      }
+      seenSkus.add(sku.toLowerCase());
+      toInsert.push({ id: uid('p_'), sku, name, category: r.category?.trim() || undefined, active: true, createdAt: Date.now() });
+    });
+
+    if (!toInsert.length) return { created: 0, errors };
+
+    set({ products: [...toInsert, ...get().products] });
+    const { error } = await supabase.from('products').insert(
+      toInsert.map((p) => ({
+        id: p.id,
+        sku: p.sku,
+        name: p.name,
+        category: p.category,
+        active: p.active,
+        created_at: new Date(p.createdAt).toISOString(),
+      })),
+    );
+    if (error) {
+      set({ products: get().products.filter((p) => !toInsert.some((t) => t.id === p.id)) });
+      errors.push(`Gagal menyimpan ke server: ${error.message}`);
+      return { created: 0, errors };
+    }
+    return { created: toInsert.length, errors };
+  },
+
+  // --- Phase 2: Stock Taking / Offtake (PRD §5.1, §5.3) -------------------
+  // Offline-queued like clock/check ops — text-primary daily-critical reports,
+  // no required photo evidence (see offlineQueue.ts's QueuedOp comment).
+
+  submitStockTaking: async (visitId, storeId, rows, photoUri) => {
+    const clean = rows
+      .map((r) => ({ sku: r.sku.trim(), qtyOnHand: r.qtyOnHand, outOfStock: r.outOfStock }))
+      .filter((r) => r.sku && r.qtyOnHand >= 0);
+    if (!clean.length) throw new Error('Isi minimal satu SKU dengan jumlah valid (>= 0).');
+
+    const online = await isOnline();
+    let photoUrl: string | undefined;
+    if (photoUri) {
+      if (online) {
+        try {
+          photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+        } catch {
+          showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
+        }
+      } else {
+        showDialog(
+          'Offline',
+          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
+        );
+      }
+    }
+
+    const now = Date.now();
+    const newRows: StockTakingRow[] = clean.map((r) => ({
+      id: uid('stk_'),
+      visitId,
+      storeId,
+      sku: r.sku,
+      qtyOnHand: r.qtyOnHand,
+      outOfStock: r.outOfStock,
+      photoUrl,
+      createdAt: now,
+    }));
+
+    set({ stockTakingRows: [...newRows, ...get().stockTakingRows] });
+
+    if (!online) {
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitStockTaking', rows: newRows });
+      showDialog('Tersimpan Offline', 'Stock Taking tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
+      return { queued: true };
+    }
+
+    const { error } = await supabase.from('stock_taking').insert(newRows.map(stockTakingRow));
+    if (error) {
+      set({ stockTakingRows: get().stockTakingRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
+      throw new Error(error.message);
+    }
+    return { queued: false };
+  },
+
+  submitOfftake: async (visitId, storeId, rows) => {
+    const clean = rows
+      .map((r) => ({ sku: r.sku.trim(), unitsSold: r.unitsSold, revenue: r.revenue }))
+      .filter((r) => r.sku && r.unitsSold >= 0);
+    if (!clean.length) throw new Error('Isi minimal satu SKU dengan unit terjual valid (>= 0).');
+
+    const now = Date.now();
+    const newRows: OfftakeRow[] = clean.map((r) => ({
+      id: uid('otk_'),
+      visitId,
+      storeId,
+      sku: r.sku,
+      unitsSold: r.unitsSold,
+      revenue: r.revenue,
+      isOutlier: false, // server trigger (0003 migration) sets the real value on insert
+      createdAt: now,
+    }));
+
+    set({ offtakeRows: [...newRows, ...get().offtakeRows] });
+
+    if (!(await isOnline())) {
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitOfftake', rows: newRows });
+      showDialog(
+        'Tersimpan Offline',
+        'Offtake tersimpan di HP dan akan otomatis disinkron saat koneksi kembali. Deteksi outlier dihitung saat data tersinkron ke server.',
+      );
+      return { queued: true, outlierSkus: [] };
+    }
+
+    const { data, error } = await supabase.from('offtake').insert(newRows.map(offtakeRow)).select('sku, is_outlier');
+    if (error) {
+      set({ offtakeRows: get().offtakeRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
+      throw new Error(error.message);
+    }
+    const outlierSkus = (data ?? []).filter((r: any) => r.is_outlier).map((r: any) => r.sku as string);
+    if (outlierSkus.length) {
+      set({
+        offtakeRows: get().offtakeRows.map((x) =>
+          newRows.some((n) => n.id === x.id) && outlierSkus.includes(x.sku) ? { ...x, isOutlier: true } : x,
+        ),
+      });
+    }
+    return { queued: false, outlierSkus };
+  },
+
+  // --- Phase 2: NTG & GWP consumer funnel (PRD §5.4) -----------------------
+  // Online-required, like upsertStore — richer/less frequent than clock/check
+  // writes, so not worth extending the offline queue to (see PRD review note).
+
+  upsertConsumer: async (c) => {
+    const list = get().consumers;
+    const exists = list.some((x) => x.id === c.id);
+    set({ consumers: exists ? list.map((x) => (x.id === c.id ? c : x)) : [c, ...list] });
+    const { error } = await supabase.from('consumers').upsert({
+      id: c.id,
+      name: c.name,
+      wa_contact: c.waContact,
+      consent: c.consent,
+      child_age_bracket: c.childAgeBracket,
+      current_brand: c.currentBrand,
+      quiz_result: c.quizResult,
+      created_by_nc_id: c.createdByNcId,
+      created_at: new Date(c.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ consumers: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data konsumen ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  upsertNtgGwp: async (n) => {
+    const list = get().ntgGwps;
+    const exists = list.some((x) => x.id === n.id);
+    set({ ntgGwps: exists ? list.map((x) => (x.id === n.id ? n : x)) : [n, ...list] });
+    const { error } = await supabase.from('ntg_gwp').upsert({
+      id: n.id,
+      consumer_id: n.consumerId,
+      visit_id: n.visitId,
+      stage: n.stage,
+      gwp_item: n.gwpItem,
+      gwp_qty: n.gwpQty,
+      offtake_id: n.offtakeId,
+      created_at: new Date(n.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ ntgGwps: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
   },
 
   clockIn: async (pos, geoFenceOk) => {

@@ -1,4 +1,4 @@
-import { Attendance, Visit } from '../types';
+import { Attendance, NtgGwp, OfftakeRow, StockTakingRow, Visit } from '../types';
 import { C } from '../theme';
 import { polylineKm } from './geo';
 import { inRange } from './period';
@@ -76,6 +76,45 @@ export function computeNcStat(
     fencePct: a.length ? Math.round((100 * a.filter((x) => x.geoFenceOk).length) / a.length) : null,
     targetWorkMs: Math.max(1, days) * TARGETS.workHoursDay * 3600000,
   };
+}
+
+/**
+ * Phase 2 addition: today's completion glance for the 3 daily core-loop
+ * modules (Stock Taking, Offtake, NTG & GWP — PRD §16 phase 2). Deliberately
+ * NOT part of the scorecard engine (unscored, no weights) — that's still
+ * Phase 4; this only powers a same-day dashboard nudge for the NC.
+ */
+export interface TodaysReportStatus {
+  stockTaking: boolean;
+  offtake: boolean;
+  ntgGwp: boolean;
+  /** An open (not checked-out) visit today, if any — lets the dashboard link straight into it. */
+  activeVisitId: string | null;
+}
+
+export function todaysReportStatus(
+  ncId: string,
+  visits: Visit[],
+  stockTaking: StockTakingRow[],
+  offtake: OfftakeRow[],
+  ntgGwps: NtgGwp[],
+): TodaysReportStatus {
+  const today = new Date().toDateString();
+  const todaysVisitIds = new Set(
+    visits.filter((v) => v.ncId === ncId && new Date(v.checkInAt).toDateString() === today).map((v) => v.id),
+  );
+  const activeVisit = visits.find((v) => v.ncId === ncId && !v.checkOutAt);
+  return {
+    stockTaking: stockTaking.some((r) => todaysVisitIds.has(r.visitId)),
+    offtake: offtake.some((r) => todaysVisitIds.has(r.visitId)),
+    ntgGwp: ntgGwps.some((g) => todaysVisitIds.has(g.visitId)),
+    activeVisitId: activeVisit?.id ?? null,
+  };
+}
+
+/** Count of Offtake rows flagged by the server-side trigger (PRD §5.3) within a period — for a TL/ARCO glance later (Phase 4 console). */
+export function outlierCount(offtake: OfftakeRow[], range: { from: number; to: number }): number {
+  return offtake.filter((o) => o.isOutlier && inRange(o.createdAt, range)).length;
 }
 
 export function statusOf(s: NcStat): { label: string; color: string } {

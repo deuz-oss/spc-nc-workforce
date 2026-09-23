@@ -36,6 +36,10 @@ import AttendanceScreen from './src/screens/AttendanceScreen';
 import UsersScreen from './src/screens/UsersScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
 import ComingSoonScreen from './src/screens/ComingSoonScreen';
+import StockTakingScreen from './src/screens/StockTakingScreen';
+import OfftakeScreen from './src/screens/OfftakeScreen';
+import ConsumersScreen from './src/screens/ConsumersScreen';
+import ConsumerDetailScreen from './src/screens/ConsumerDetailScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
 
 const Stack = createNativeStackNavigator();
@@ -460,6 +464,14 @@ export default function App() {
               name="StoreVisit"
               component={StoreVisitScreen}
               options={{ title: 'Kunjungan Toko', headerBackTitle: 'Tutup' }}
+            />
+            <Stack.Screen name="StockTaking" component={StockTakingScreen} options={{ title: 'Stock Taking' }} />
+            <Stack.Screen name="Offtake" component={OfftakeScreen} options={{ title: 'Offtake' }} />
+            <Stack.Screen name="Consumers" component={ConsumersScreen} options={{ title: 'Konsumen NTG & GWP' }} />
+            <Stack.Screen
+              name="ConsumerDetail"
+              component={ConsumerDetailScreen}
+              options={{ title: 'Detail Konsumen' }}
             />
             <Stack.Screen
               name="ComingSoon"
