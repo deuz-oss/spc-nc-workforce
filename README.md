@@ -119,6 +119,66 @@ resolve on its own):
 - Whether Reckitt requires LIS integration (would change §11 from a role addition to a data-sync requirement)
 - No certifications data-entry UI exists yet, so 2 of Lead Trainer's scorecard KPIs can never compute in practice
 
+## iOS Validation Checklist (manual — needs a Mac + physical device + Apple Developer account)
+
+Nothing here can be executed from this environment (no Mac, no iOS hardware, no Apple ID). This is the exact
+sequence to run yourselves before iOS is considered launch-ready.
+
+**0. Blocking prerequisite — do this first, for both platforms, not just iOS:**
+`app.json` references `assets/icon.png`, `assets/android-icon-*.png`, `assets/favicon.png`,
+`assets/notification-icon.png` — none of these files exist yet. Any `eas build` (iOS or Android) will fail to
+resolve them. Generate/design real brand assets and drop them in `assets/` before attempting any build.
+
+**1. Real EAS project (also unblocks push notifications, PRD §17):**
+```
+npm i -g eas-cli        # or use `npx eas-cli` for every command below
+eas login               # your Expo/EAS account
+eas init                # creates a real project, fills extra.eas.projectId in app.json
+```
+Then replace `"owner": "REPLACE_WITH_EAS_OWNER"` in `app.json` with your actual EAS account/org slug.
+`registerPushToken()` in `src/store/useStore.ts` currently detects the placeholder project id and skips push
+registration on purpose — this is what turns it on.
+
+**2. Apple Developer Program:** required for *any* build that targets a **physical device or the App Store**
+(not required for a simulator-only build). Enroll at developer.apple.com if not already done ($99/year).
+
+**3. First pass — simulator build (no paid account needed if you skip step 2 for now):**
+Add an `ios` block to the `preview` profile in `eas.json` (`"ios": { "simulator": true }`), then:
+```
+eas build --platform ios --profile preview
+```
+This validates the build pipeline itself (dependencies, native config, `expo-task-manager`/`expo-location`
+plugin config) without needing a device yet. **Caveat:** background location cannot be meaningfully tested on
+a simulator — it doesn't suspend/resume apps realistically — so this step only proves "it builds," not
+"background tracking works."
+
+**4. Real device build:**
+```
+eas build --platform ios --profile development   # dev client, for iterating
+eas build --platform ios --profile preview        # ad-hoc, for stakeholder/UAT testing
+```
+EAS can auto-manage signing credentials (provisioning profile + certificate) if you let it during the
+interactive build setup — accept that unless your org has its own credentials process.
+
+**5. On-device validation checklist** (mirrors what was already proven on Android per the original
+`spc-field-force` foundation — PRD §3):
+- [ ] Location permission prompts show the correct Bahasa Indonesia copy (`NSLocationWhenInUseUsageDescription`
+  / `NSLocationAlwaysAndWhenInUseUsageDescription` in `app.json`)
+- [ ] Clock-in starts route recording; **lock the screen and background the app** for several minutes; confirm
+  route points keep appending (`route_points` table) once foregrounded again — this is the actual point of the
+  whole exercise, iOS background location has categorically different OS behavior than Android's
+- [ ] Store check-in geofence blocking (300m radius) works correctly on-device (GPS accuracy differs from
+  simulator/Android)
+- [ ] Camera + photo library permissions prompt correctly for report photo capture
+- [ ] Push notification permission prompt appears and a test chat message (§17) actually arrives as a native
+  push while the app is backgrounded
+- [ ] `expo-intent-launcher`'s battery-optimization prompt is Android-only — confirm it's simply absent/no-op on
+  iOS, not crashing
+
+**6. Before App Store submission** (separate from internal testing, do this last):
+`eas.json`'s `production` profile has no `eas submit` configuration (signing/App Store Connect API key) yet —
+add one once you're ready to actually ship, not before internal validation above passes.
+
 ## Reused vs New (PRD §3)
 
 | Area | Status |
