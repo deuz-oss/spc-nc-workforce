@@ -1,7 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
+import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
+import { showDialog } from '../components/dialog';
 import { CATEGORY_LABEL } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -83,6 +84,9 @@ export default function ManagementDashboard() {
   const ntgGwps = useStore((s) => s.ntgGwps);
   const visits = useStore((s) => s.visits);
   const targets = useStore((s) => s.targets);
+  const scorecards = useStore((s) => s.scorecards);
+  const computeScorecards = useStore((s) => s.computeScorecards);
+  const [computingScorecards, setComputingScorecards] = useState(false);
 
   const [periodKey, setPeriodKey] = useState<PeriodKey>('monthly');
   const [city, setCity] = useState<string | null>(null);
@@ -181,6 +185,26 @@ export default function ManagementDashboard() {
     return list;
   }, [users, tlId]);
 
+  const scorecardCounts = useMemo(() => {
+    const thisPeriod = scorecards.filter((sc) => sc.periodKey === monthlyKey);
+    return {
+      total: thisPeriod.length,
+      onTrack: thisPeriod.filter((sc) => sc.status === 'on_track').length,
+      needsAttention: thisPeriod.filter((sc) => sc.status === 'needs_attention').length,
+      belowTarget: thisPeriod.filter((sc) => sc.status === 'below_target').length,
+    };
+  }, [scorecards, monthlyKey]);
+
+  const doComputeScorecards = async () => {
+    setComputingScorecards(true);
+    try {
+      const err = await computeScorecards(monthlyKey);
+      if (!err) showDialog('Skorkartu Dihitung', `Skorkartu periode ${monthlyKey} berhasil dihitung ulang untuk semua posisi.`);
+    } finally {
+      setComputingScorecards(false);
+    }
+  };
+
   const doExport = async () => {
     const rows: Array<Array<string | number>> = [
       ['Metrik', 'Nilai'],
@@ -259,6 +283,36 @@ export default function ManagementDashboard() {
             subtitle="Question set untuk NC (PRD §5.7)"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
           />
+        </Card>
+      )}
+
+      {(me.role === 'pm' || me.role === 'data_analyst') && (
+        <Card>
+          <SectionHeader
+            title="Skorkartu Program"
+            subtitle={`Periode ${monthlyKey} · PRD §9`}
+            action={{ label: 'Lihat Detail', onPress: () => navigation.navigate('Scorecard') }}
+          />
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+            <KPICard title="On Track" value={String(scorecardCounts.onTrack)} status="ok" />
+            <KPICard title="Perlu Perhatian" value={String(scorecardCounts.needsAttention)} status="warn" />
+            <KPICard title="Di Bawah Target" value={String(scorecardCounts.belowTarget)} status={scorecardCounts.belowTarget > 0 ? 'warn' : 'neutral'} />
+          </View>
+          {scorecardCounts.total === 0 && (
+            <Muted style={{ marginTop: 8 }}>Belum ada skorkartu untuk periode ini — hitung dulu di bawah.</Muted>
+          )}
+          <View style={{ marginTop: 10 }}>
+            <Btn
+              title="Hitung Skorkartu"
+              variant="outline"
+              onPress={doComputeScorecards}
+              disabled={computingScorecards}
+              loading={computingScorecards}
+            />
+          </View>
+          <Muted style={{ marginTop: 6 }}>
+            Belum ada penjadwal otomatis (pg_cron/scheduled function) — hitung ulang manual tiap periode untuk sekarang.
+          </Muted>
         </Card>
       )}
 

@@ -1,12 +1,14 @@
 import React from 'react';
 import { ScrollView, View } from 'react-native';
-import { Btn, Card, H, Muted, SectionHeader } from '../components/ui';
+import { useNavigation } from '@react-navigation/native';
+import { Btn, Card, H, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { APP_NAME, ROLE_LABEL } from '../config';
+import { APP_NAME, ROLE_LABEL, SCORECARD_ROLES } from '../config';
 import { useCurrentUser, useStore } from '../store/useStore';
 
 export default function ProfileScreen() {
   const me = useCurrentUser()!;
+  const navigation = useNavigation<any>();
   const teams = useStore((s) => s.teams);
   const logout = useStore((s) => s.logout);
   const team = teams.find((t) => t.id === me.teamId);
@@ -23,6 +25,14 @@ export default function ProfileScreen() {
           <Muted>Tim: {team?.name ?? '-'}</Muted>
         </View>
       </Card>
+      {SCORECARD_ROLES.includes(me.role) && (
+        <Card>
+          <H>Kinerja</H>
+          <View style={{ marginTop: 8 }}>
+            <ListRow title="Lihat Skorkartu" subtitle="Skor KPI per periode (PRD §9)" onPress={() => navigation.navigate('Scorecard')} />
+          </View>
+        </Card>
+      )}
       <Card>
         <H>Tentang</H>
         <Muted style={{ marginTop: 4 }}>

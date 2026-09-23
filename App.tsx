@@ -50,6 +50,9 @@ import NutritionQuizScreen from './src/screens/NutritionQuizScreen';
 import ValidationQueueScreen from './src/screens/ValidationQueueScreen';
 import CoachingLogScreen from './src/screens/CoachingLogScreen';
 import NcTrackerScreen from './src/screens/NcTrackerScreen';
+import ScorecardScreen from './src/screens/ScorecardScreen';
+import ChatListScreen from './src/screens/ChatListScreen';
+import ChatThreadScreen from './src/screens/ChatThreadScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
 
 const Stack = createNativeStackNavigator();
@@ -292,13 +295,11 @@ function tabsForRole(role: Role): string[] {
   }
 }
 
-const COMING_SOON_PARAMS: Record<string, { title: string; phase: string; note: string }> = {
-  Chat: {
-    title: 'Pesan NC ↔ TL / TL ↔ ARCO',
-    phase: 'Phase 4b',
-    note: 'In-app messaging (PRD §17) butuh infrastruktur push notification baru — dijadwalkan setelah dashboard/validasi (Phase 4a) selesai.',
-  },
-};
+// Every tab now routes to a real screen (Phase 4b closes out the last two
+// ComingSoonScreen stubs — Validasi in Phase 4a, Chat here). ComingSoon
+// remains registered in the Stack.Navigator below for any future deferred
+// module, just no tab points at it anymore.
+const COMING_SOON_PARAMS: Record<string, { title: string; phase: string; note: string }> = {};
 
 function screenFor(name: string) {
   switch (name) {
@@ -313,7 +314,7 @@ function screenFor(name: string) {
     case 'Validasi':
       return ValidationQueueScreen;
     case 'Chat':
-      return ComingSoonScreen;
+      return ChatListScreen;
     default:
       return ProfileScreen;
   }
@@ -488,6 +489,12 @@ export default function App() {
             <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
             <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
             <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
+            <Stack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Skorkartu' }} />
+            <Stack.Screen
+              name="ChatThread"
+              component={ChatThreadScreen}
+              options={({ route }: any) => ({ title: route.params?.counterpartName || 'Pesan' })}
+            />
             <Stack.Screen
               name="ComingSoon"
               component={ComingSoonScreen}

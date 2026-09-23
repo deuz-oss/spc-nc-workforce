@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import NetInfo from '@react-native-community/netinfo';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
@@ -8,6 +10,9 @@ import {
   Attendance,
   CoachingLog,
   Consumer,
+  Conversation,
+  ConversationType,
+  Message,
   NtgGwp,
   OfftakeRow,
   PaidVisibilityRow,
@@ -18,6 +23,7 @@ import {
   ReportType,
   Role,
   RoutePoint,
+  Scorecard,
   ShareOfShelfRow,
   StockTakingRow,
   Store,
@@ -88,6 +94,15 @@ interface StoreState {
    * never wired into the store until Phase 4a needed "offtake vs. target" for the TL/ARCO and
    * PM/Reckitt dashboards. */
   targets: Target[];
+  /** Phase 4b (PRD §16) — server-computed scorecards (PRD §9). RLS already scopes
+   * `select *` to what the viewer may see (own + TL/ARCO's scope + monitor roles) —
+   * no realtime subscription for this one (see subscribeRealtime's comment): a
+   * single compute run can upsert 200+ rows at once, which would flood realtime
+   * events for no benefit; computeScorecards() refetches explicitly instead. */
+  scorecards: Scorecard[];
+  /** Phase 4b (PRD §16) — in-app messaging (PRD §17). */
+  conversations: Conversation[];
+  messages: Message[];
   /** Clock-in/out, store check-in/out, and Stock Taking/Offtake submissions still waiting for connectivity to reach Supabase. */
   pendingOps: QueuedOp[];
 
@@ -192,6 +207,24 @@ interface StoreState {
   upsertCoachingLog(log: CoachingLog): Promise<string | null>;
   /** Data Analyst/super_admin only (matches targets RLS write policy, 0001 migration). */
   upsertTarget(t: Target): Promise<string | null>;
+
+  // --- Phase 4b: scorecard computation (PRD §9) + in-app messaging (PRD §17) ---
+
+  /** Data Analyst/PM/super_admin only (matches compute_scorecards()'s internal role
+   * check, 0006 migration). Runs the server-side RPC then refetches `scorecards`
+   * directly (not via realtime — see the state field's comment). */
+  computeScorecards(periodKey: string): Promise<string | null>;
+
+  /** Finds or creates the single conversation for this (type, counterpart) pair.
+   * Never eagerly creates conversations for every possible counterpart — only
+   * when a chat thread is actually opened (see ChatListScreen). */
+  ensureConversation(type: ConversationType, otherUserId: string): Promise<string>;
+  /** Online-required (no offline queue — an intentionally new, unscoped-for-now
+   * queue class per the PRD §17 review note). Fires a best-effort push via the
+   * send-push edge function after a successful insert; never blocks on that. */
+  sendMessage(conversationId: string, body: string): Promise<void>;
+  /** Marks the other participant's unread messages in this conversation as read. Best-effort. */
+  markMessagesRead(conversationId: string): Promise<void>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -472,6 +505,40 @@ function mapCoachingLog(l: any): CoachingLog {
     date: new Date(l.date).getTime(),
     note: l.note,
     createdAt: new Date(l.created_at).getTime(),
+  };
+}
+
+function mapScorecard(s: any): Scorecard {
+  return {
+    id: s.id,
+    subjectId: s.subject_id,
+    role: s.role,
+    periodKey: s.period_key,
+    score: s.score,
+    status: s.status,
+    breakdown: s.breakdown ?? {},
+    computedAt: new Date(s.computed_at).getTime(),
+  };
+}
+
+function mapConversation(c: any): Conversation {
+  return {
+    id: c.id,
+    type: c.type,
+    participantA: c.participant_a,
+    participantB: c.participant_b,
+    createdAt: new Date(c.created_at).getTime(),
+  };
+}
+
+function mapMessage(m: any): Message {
+  return {
+    id: m.id,
+    conversationId: m.conversation_id,
+    senderId: m.sender_id,
+    body: m.body,
+    createdAt: new Date(m.created_at).getTime(),
+    readAt: m.read_at ? new Date(m.read_at).getTime() : null,
   };
 }
 
@@ -769,6 +836,22 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
         set({ targets: upsertById(get().targets, mapTarget(payload.new)) });
       }
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ conversations: get().conversations.filter((c) => c.id !== (payload.old as any).id) });
+      } else {
+        set({ conversations: upsertById(get().conversations, mapConversation(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
+      // This is the live-update path for ChatThreadScreen: new incoming
+      // messages and read_at updates both arrive here.
+      if (payload.eventType === 'DELETE') {
+        set({ messages: get().messages.filter((m) => m.id !== (payload.old as any).id) });
+      } else {
+        set({ messages: upsertById(get().messages, mapMessage(payload.new)) });
+      }
+    })
     .subscribe();
 }
 
@@ -800,6 +883,9 @@ async function hydrateAll(
     reportReviewsRes,
     coachingLogsRes,
     targetsRes,
+    scorecardsRes,
+    conversationsRes,
+    messagesRes,
   ] = await Promise.all([
     supabase.from('profiles').select('*'),
     supabase.from('teams').select('*'),
@@ -819,6 +905,9 @@ async function hydrateAll(
     supabase.from('report_reviews').select('*'),
     supabase.from('coaching_logs').select('*'),
     supabase.from('targets').select('*'),
+    supabase.from('scorecards').select('*'),
+    supabase.from('conversations').select('*'),
+    supabase.from('messages').select('*'),
   ]);
 
   const attendanceRows = attendancesRes.data ?? [];
@@ -859,6 +948,9 @@ async function hydrateAll(
     reportReviews: (reportReviewsRes.data ?? []).map(mapReportReview),
     coachingLogs: (coachingLogsRes.data ?? []).map(mapCoachingLog),
     targets: (targetsRes.data ?? []).map(mapTarget),
+    scorecards: (scorecardsRes.data ?? []).map(mapScorecard),
+    conversations: (conversationsRes.data ?? []).map(mapConversation),
+    messages: (messagesRes.data ?? []).map(mapMessage),
   });
 
   subscribeRealtime(set, get);
@@ -870,6 +962,36 @@ async function callAdminUsers(body: Record<string, unknown>): Promise<{ data?: a
   if (error) return { error: error.message ?? 'Gagal menghubungi server.' };
   if (data?.error) return { error: data.error };
   return { data };
+}
+
+/** Requests notification permission and syncs the Expo push token to the
+ * caller's own profile (PRD §17) — best-effort, fire-and-forget, never blocks
+ * login/init. No real EAS project is provisioned yet (app.json's
+ * extra.eas.projectId is still the placeholder "REPLACE_WITH_EAS_PROJECT_ID"),
+ * so getExpoPushTokenAsync() can't succeed until one exists; that's caught and
+ * logged, not surfaced to the user — push is additive to in-app chat, never a
+ * requirement to use it. */
+async function registerPushToken(): Promise<void> {
+  try {
+    const { status: existing } = await Notifications.getPermissionsAsync();
+    let status = existing;
+    if (status !== 'granted') {
+      const req = await Notifications.requestPermissionsAsync();
+      status = req.status;
+    }
+    if (status !== 'granted') return;
+
+    const projectId = (Constants.expoConfig?.extra as any)?.eas?.projectId;
+    if (!projectId || projectId === 'REPLACE_WITH_EAS_PROJECT_ID') {
+      console.warn('registerPushToken: no real EAS project id configured yet — skipping.');
+      return;
+    }
+    const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    const { error } = await supabase.rpc('set_my_push_token', { p_token: token });
+    if (error) console.warn('registerPushToken: failed to save token:', error.message);
+  } catch (err) {
+    console.warn('registerPushToken failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
 }
 
 export const useStore = create<StoreState>()((set, get) => ({
@@ -893,6 +1015,9 @@ export const useStore = create<StoreState>()((set, get) => ({
   reportReviews: [],
   coachingLogs: [],
   targets: [],
+  scorecards: [],
+  conversations: [],
+  messages: [],
   pendingOps: [],
 
   init: async () => {
@@ -909,6 +1034,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         for (const op of queue) applyQueuedOpLocally(set, get, op);
         set({ pendingOps: queue });
         if (queue.length) get().processPendingOps();
+        registerPushToken(); // fire-and-forget, PRD §17
       }
     }
     set({ ready: true });
@@ -938,6 +1064,9 @@ export const useStore = create<StoreState>()((set, get) => ({
             reportReviews: [],
             coachingLogs: [],
             targets: [],
+            scorecards: [],
+            conversations: [],
+            messages: [],
           });
         }
       });
@@ -974,6 +1103,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       await supabase.auth.signOut();
       return 'Akun dinonaktifkan atau tidak ditemukan. Hubungi admin.';
     }
+    registerPushToken(); // fire-and-forget, PRD §17
     return null;
   },
 
@@ -1000,6 +1130,9 @@ export const useStore = create<StoreState>()((set, get) => ({
             reportReviews: [],
             coachingLogs: [],
             targets: [],
+            scorecards: [],
+            conversations: [],
+            messages: [],
           });
   },
 
@@ -1713,6 +1846,120 @@ export const useStore = create<StoreState>()((set, get) => ({
       return error.message;
     }
     return null;
+  },
+
+  // --- Phase 4b: scorecard computation (PRD §9) ---------------------------
+
+  computeScorecards: async (periodKey) => {
+    const { error } = await supabase.rpc('compute_scorecards', { p_period_key: periodKey });
+    if (error) {
+      showDialog('Gagal Menghitung Skorkartu', error.message);
+      return error.message;
+    }
+    // Deliberate explicit refetch instead of relying on realtime — a single
+    // compute run can upsert 200+ rows, which isn't worth subscribing to live
+    // (see the `scorecards` state field's comment).
+    const { data, error: fetchErr } = await supabase.from('scorecards').select('*');
+    if (!fetchErr) set({ scorecards: (data ?? []).map(mapScorecard) });
+    return null;
+  },
+
+  // --- Phase 4b: in-app messaging (PRD §17) --------------------------------
+
+  ensureConversation: async (type, otherUserId) => {
+    const me = get().sessionUserId!;
+    const existing = get().conversations.find(
+      (c) =>
+        c.type === type &&
+        ((c.participantA === me && c.participantB === otherUserId) ||
+          (c.participantA === otherUserId && c.participantB === me)),
+    );
+    if (existing) return existing.id;
+
+    const c: Conversation = {
+      id: uid('cv_'),
+      type,
+      participantA: me,
+      participantB: otherUserId,
+      createdAt: Date.now(),
+    };
+    set({ conversations: [c, ...get().conversations] });
+    const { error } = await supabase.from('conversations').insert({
+      id: c.id,
+      type: c.type,
+      participant_a: c.participantA,
+      participant_b: c.participantB,
+      created_at: new Date(c.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ conversations: get().conversations.filter((x) => x.id !== c.id) });
+      throw new Error(error.message);
+    }
+    return c.id;
+  },
+
+  sendMessage: async (conversationId, body) => {
+    const trimmed = body.trim();
+    if (!trimmed) return;
+    const me = get().sessionUserId!;
+    if (!(await isOnline())) {
+      showDialog('Offline', 'Pesan tidak dapat dikirim tanpa koneksi internet. Coba lagi saat online.');
+      throw new Error('Tidak ada koneksi internet.');
+    }
+    const m: Message = {
+      id: uid('msg_'),
+      conversationId,
+      senderId: me,
+      body: trimmed,
+      createdAt: Date.now(),
+      readAt: null,
+    };
+    set({ messages: [...get().messages, m] });
+    const { error } = await supabase.from('messages').insert({
+      id: m.id,
+      conversation_id: m.conversationId,
+      sender_id: m.senderId,
+      body: m.body,
+      created_at: new Date(m.createdAt).toISOString(),
+      read_at: null,
+    });
+    if (error) {
+      set({ messages: get().messages.filter((x) => x.id !== m.id) });
+      showDialog('Gagal Mengirim', 'Tidak dapat mengirim pesan. Periksa koneksi internet dan coba lagi.');
+      throw new Error(error.message);
+    }
+
+    // Fire-and-forget push (PRD §17) — never blocks the send UI on delivery.
+    const convo = get().conversations.find((c) => c.id === conversationId);
+    const recipientId = convo ? (convo.participantA === me ? convo.participantB : convo.participantA) : null;
+    const sender = get().users.find((u) => u.id === me);
+    if (recipientId) {
+      supabase.functions
+        .invoke('send-push', { body: { recipientUserId: recipientId, title: sender?.name ?? 'Pesan baru', body: trimmed } })
+        .catch(() => {
+          // Best-effort only — push delivery failing must never affect the chat itself.
+        });
+    }
+  },
+
+  markMessagesRead: async (conversationId) => {
+    const me = get().sessionUserId!;
+    const before = get().messages;
+    const now = Date.now();
+    const toMark = before.filter((m) => m.conversationId === conversationId && m.senderId !== me && m.readAt == null);
+    if (!toMark.length) return;
+    set({
+      messages: before.map((m) =>
+        toMark.some((t) => t.id === m.id) ? { ...m, readAt: now } : m,
+      ),
+    });
+    const { error } = await supabase
+      .from('messages')
+      .update({ read_at: new Date(now).toISOString() })
+      .eq('conversation_id', conversationId)
+      .neq('sender_id', me)
+      .is('read_at', null);
+    if (error) console.warn('markMessagesRead failed (non-fatal):', error.message);
   },
 
   clockIn: async (pos, geoFenceOk) => {

@@ -131,3 +131,51 @@ export const REPORT_TYPE_LABEL: Record<string, string> = {
 /** Roles that see the PM/Reckitt-style management dashboard (PRD §10, §11) — same widgets,
  * Reckitt gets its PII hidden structurally (see ManagementDashboard's hidePii prop). */
 export const MANAGEMENT_DASHBOARD_ROLES: Role[] = ['pm', 'reckitt_client', 'data_analyst'];
+
+// --- Phase 4b (PRD §16): scorecard computation + in-app messaging ---
+
+/** Roles the scorecard engine actually scores (PRD §9's KPI table) — `trainer`
+ * (non-lead) has no KPI row in the PRD, and super_admin/reckitt_client are
+ * explicitly not scored (PRD §2). Matches the role loops in
+ * supabase/migrations/0006_phase4_scorecards.sql's compute_scorecards(). */
+export const SCORECARD_ROLES: Role[] = ['nc', 'tl', 'arco', 'pm', 'lead_trainer', 'data_analyst', 'admin_data_entry'];
+
+/** Human labels for every kpi_key the compute_scorecards() function can produce
+ * (computed or explicitly skipped) — see that migration for which KPIs are
+ * genuinely computable per role vs. documented-skip. */
+export const SCORECARD_KPI_LABEL: Record<string, string> = {
+  offtake_achievement: 'Pencapaian Offtake',
+  new_user_recruitment: 'Rekrutmen Pengguna Baru',
+  competitor_conversion: 'Konversi dari Kompetitor',
+  reporting_compliance: 'Kepatuhan Pelaporan',
+  attendance: 'Kehadiran',
+  team_offtake: 'Offtake Tim',
+  team_new_users_conversion: 'Pengguna Baru/Konversi Tim',
+  same_day_validation: 'Validasi Same-Day',
+  coaching_visits: 'Kunjungan Coaching',
+  team_retention: 'Retensi Tim',
+  regional_offtake: 'Offtake Regional',
+  regional_new_users_conversion: 'Pengguna Baru/Konversi Regional',
+  activation_execution: 'Eksekusi Aktivasi',
+  fulfilment_sla_retention: 'Fulfilment SLA/Retensi',
+  reporting_accuracy: 'Akurasi Pelaporan',
+  program_offtake_new_users: 'Offtake/Pengguna Baru Program',
+  fulfilment_sla: 'Fulfilment SLA',
+  attrition_vs_target: 'Attrisi vs Target',
+  client_review_score: 'Skor Review Klien',
+  training_schedule_adherence: 'Kepatuhan Jadwal Training',
+  certification_pass_rate: 'Tingkat Lulus Sertifikasi',
+  kpi_uplift_post_training: 'Peningkatan KPI Pasca-Training',
+  mystery_shopper: 'Mystery Shopper',
+  tl_coach_certification: 'Sertifikasi TL-Coach',
+  monthly_report_timeliness: 'Ketepatan Waktu Laporan Bulanan',
+  data_error_rate: 'Tingkat Error Data',
+  target_gwp_allocation_timeliness: 'Ketepatan Waktu Alokasi Target/GWP',
+  adopted_recommendations: 'Rekomendasi yang Diadopsi',
+  ad_hoc_turnaround: 'Turnaround Ad Hoc',
+  daily_consolidation_timeliness: 'Ketepatan Waktu Konsolidasi Harian',
+  payroll_incentive_accuracy: 'Akurasi Payroll/Insentif',
+  pjp_schedule_updates: 'Update PJP/Jadwal',
+  gwp_absorption_reporting: 'Pelaporan Absorpsi GWP',
+  competitor_activity_reports: 'Laporan Aktivitas Kompetitor',
+};
