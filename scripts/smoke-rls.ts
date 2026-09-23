@@ -155,7 +155,18 @@ async function main() {
       password: 'Smoke-test-123',
       options: { data: { username, name: 'Smoke Signup', role: 'super_admin', team_id: 't_jaksel' } },
     });
-    if (error) return `signup rejected outright (${error.message}) — public signup is disabled ✓`;
+    if (error) {
+      // Only a signup-disabled error proves anything. GoTrue also rejects
+      // undeliverable domains like @internal.spc ("email_address_invalid") —
+      // an attacker would just use a real address, so that is inconclusive.
+      if ((error as any).code === 'signup_disabled' || /signups? not allowed/i.test(error.message)) {
+        return 'public signup is disabled ✓';
+      }
+      throw new Skip(
+        `inconclusive — signup rejected for another reason (${error.message}). Verify manually that ` +
+          'Authentication → Providers → Email → "Allow new users to sign up" is OFF.',
+      );
+    }
     if (data.user) created.authUsers.push(data.user.id);
     const { data: prof } = await admin.from('profiles').select('active, team_id').eq('id', data.user!.id).single();
     expect(prof && prof.active === false, 'self-signed-up profile is ACTIVE — 0008 trigger not applied');
