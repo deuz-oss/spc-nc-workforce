@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import ManagementDashboard from './ManagementDashboard';
-import { MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES } from '../config';
+import { MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
@@ -181,6 +181,16 @@ export default function DashboardScreen() {
           <Muted style={{ marginTop: 4 }}>
             Console validasi same-day, peta live tim, dan coaching log (PRD §8) ada di tab "Validasi".
           </Muted>
+        </Card>
+      )}
+
+      {TARGET_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Target Bulanan"
+            subtitle="Target offtake & alokasi GWP per NC (PRD §9)"
+            action={{ label: 'Atur Target', onPress: () => navigation.navigate('Targets') }}
+          />
         </Card>
       )}
 

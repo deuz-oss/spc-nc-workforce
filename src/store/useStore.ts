@@ -223,6 +223,9 @@ interface StoreState {
   upsertCoachingLog(log: CoachingLog): Promise<string | null>;
   /** Data Analyst/super_admin only (matches targets RLS write policy, 0001 migration). */
   upsertTarget(t: Target): Promise<string | null>;
+  /** TargetsScreen's batch save: upserts `rows` and deletes `deleteIds` (a
+   * target cleared back to empty). All-or-nothing locally — rolls back on error. */
+  saveTargets(rows: Target[], deleteIds: string[]): Promise<string | null>;
 
   // --- Phase 4b: scorecard computation (PRD §9) + in-app messaging (PRD §17) ---
 
@@ -628,6 +631,18 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
       break;
     }
   }
+}
+
+function targetRow(t: Target) {
+  return {
+    id: t.id,
+    store_id: t.storeId,
+    nc_id: t.ncId,
+    period_key: t.periodKey,
+    offtake_target: t.offtakeTarget ?? null,
+    gwp_allocation: t.gwpAllocation ?? null,
+    set_by: t.setBy,
+  };
 }
 
 /** Mutable store columns (id/created_at are set once on insert). */
@@ -2250,18 +2265,35 @@ export const useStore = create<StoreState>()((set, get) => ({
     const list = get().targets;
     const exists = list.some((x) => x.id === t.id);
     set({ targets: exists ? list.map((x) => (x.id === t.id ? t : x)) : [t, ...list] });
-    const { error } = await supabase.from('targets').upsert({
-      id: t.id,
-      store_id: t.storeId,
-      nc_id: t.ncId,
-      period_key: t.periodKey,
-      offtake_target: t.offtakeTarget,
-      gwp_allocation: t.gwpAllocation,
-      set_by: t.setBy,
-    });
+    const { error } = await supabase.from('targets').upsert(targetRow(t));
     if (error) {
       set({ targets: list });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan target ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  saveTargets: async (rows, deleteIds) => {
+    const before = get().targets;
+    let next = before.filter((t) => !deleteIds.includes(t.id));
+    for (const r of rows) next = upsertById(next, r);
+    set({ targets: next });
+
+    // targets_select is `using (true)`, so a plain upsert is safe here (no
+    // read-back RLS trap like stores/consumers — see upsertStore).
+    const { error: upErr } = rows.length ? await supabase.from('targets').upsert(rows.map(targetRow)) : { error: null };
+    const { error: delErr } =
+      !upErr && deleteIds.length ? await supabase.from('targets').delete().in('id', deleteIds) : { error: null };
+    const error = upErr ?? delErr;
+    if (error) {
+      set({ targets: before });
+      showDialog(
+        'Gagal Menyimpan',
+        error.code === '23505'
+          ? 'Target untuk salah satu NC di periode ini baru saja disimpan oleh pengguna lain. Muat ulang aplikasi lalu coba lagi.'
+          : 'Tidak dapat menyimpan target ke server. Periksa koneksi internet dan coba lagi.',
+      );
       return error.message;
     }
     return null;

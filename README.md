@@ -56,8 +56,8 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0008`). Existing projects: run only the ones not yet applied —
-   `0008_audit_hardening.sql` is required (security fixes; see its header).
+   the SQL Editor, in filename order (`0001` … `0009`). Existing projects: run only the ones not yet applied —
+   `0008_audit_hardening.sql` (security fixes) and `0009_targets_uniqueness.sql` (Targets screen) are required.
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
    ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and

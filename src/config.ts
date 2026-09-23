@@ -89,6 +89,9 @@ export const COMPLIANCE_CHECKLIST_ITEMS: Array<{ key: string; label: string }> =
   { key: 'periode_berlaku', label: 'Berlaku dalam periode kampanye' },
 ];
 
+/** Posisi yang boleh mengatur target offtake/alokasi GWP per NC (matches targets RLS write policy, 0001 migration). */
+export const TARGET_MANAGER_ROLES: Role[] = ['data_analyst', 'super_admin'];
+
 /** Posisi yang boleh membuat/mengelola Survey (matches surveys RLS write policy, 0001 migration). */
 export const SURVEY_BUILDER_ROLES: Role[] = ['data_analyst', 'super_admin'];
 

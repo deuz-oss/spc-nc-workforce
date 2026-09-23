@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { CATEGORY_LABEL } from '../config';
+import { CATEGORY_LABEL, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
@@ -286,6 +286,20 @@ export default function ManagementDashboard() {
             title="Survey"
             subtitle="Question set untuk NC (PRD §5.7)"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
+          />
+        </Card>
+      )}
+
+      {TARGET_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Target Bulanan"
+            subtitle={
+              targetSum
+                ? `Periode ${monthlyKey} · total target offtake ${targetSum}`
+                : `Periode ${monthlyKey} · belum ada target — skor offtake belum bisa dihitung`
+            }
+            action={{ label: 'Atur Target', onPress: () => navigation.navigate('Targets') }}
           />
         </Card>
       )}

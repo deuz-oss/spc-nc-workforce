@@ -51,6 +51,7 @@ import ValidationQueueScreen from './src/screens/ValidationQueueScreen';
 import CoachingLogScreen from './src/screens/CoachingLogScreen';
 import NcTrackerScreen from './src/screens/NcTrackerScreen';
 import ScorecardScreen from './src/screens/ScorecardScreen';
+import TargetsScreen from './src/screens/TargetsScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatThreadScreen from './src/screens/ChatThreadScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
@@ -490,6 +491,7 @@ export default function App() {
             <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
             <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
             <Stack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Skorkartu' }} />
+            <Stack.Screen name="Targets" component={TargetsScreen} options={{ title: 'Target Bulanan' }} />
             <Stack.Screen
               name="ChatThread"
               component={ChatThreadScreen}
