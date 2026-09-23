@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  app:
+    name: App (types, Expo health, web bundle)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Type check
+        run: npx tsc --noEmit
+
+      # Catches SDK version drift, missing app.json assets, and config errors
+      # that otherwise only surface as a failed EAS build.
+      - name: Expo doctor
+        run: npx expo-doctor
+
+      # Proves Metro can resolve and bundle every import. The Supabase values
+      # are dummies: they're inlined at bundle time but never contacted.
+      - name: Web bundle
+        run: npx expo export --platform web --output-dir dist-ci
+        env:
+          EXPO_PUBLIC_SUPABASE_URL: https://ci-placeholder.supabase.co
+          EXPO_PUBLIC_SUPABASE_ANON_KEY: ci-placeholder
+
+  edge-functions:
+    name: Edge functions (Deno type check)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+      # --node-modules-dir=none: resolve jsr:/npm: imports from Deno's cache,
+      # as Supabase's runtime does, instead of the app's root package.json.
+      - name: Type check
+        run: deno check --node-modules-dir=none supabase/functions/*/index.ts

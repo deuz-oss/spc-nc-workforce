@@ -115,9 +115,11 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   env vars configured via EAS (`eas env:create`), and `production` has no `eas submit` (signing/Play Store
   service account) configured yet.
 - ⬜ Real 47-city store master data and the real 215-person account roster (seed script is demo data only).
-- ⬜ `assets/` (icon.png, android-icon-*.png, favicon.png, notification-icon.png) referenced by `app.json` are
-  still **not present in this repo** — no image-generation tool was available while scaffolding. TypeScript
-  compiles fine without them, but Expo will fail to resolve the icons at runtime/build time.
+- 🟨 `assets/` holds **placeholder** icons (gold "NC" badge on navy, generated from the app's own theme and
+  font) so builds can run. Replace them with real brand artwork before any store submission — same filenames and
+  sizes: `icon.png` 1024² opaque, `android-icon-foreground.png` 1024² transparent with content inside the centre
+  ~66%, `android-icon-background.png` 1024², `android-icon-monochrome.png` 1024² single-colour silhouette,
+  `notification-icon.png` 96² white-on-transparent, `favicon.png` 48².
 
 **Known open dependencies** (from the PRD's own open-questions list, §15 — not something this codebase can
 resolve on its own):
@@ -133,10 +135,8 @@ resolve on its own):
 Nothing here can be executed from this environment (no Mac, no iOS hardware, no Apple ID). This is the exact
 sequence to run yourselves before iOS is considered launch-ready.
 
-**0. Blocking prerequisite — do this first, for both platforms, not just iOS:**
-`app.json` references `assets/icon.png`, `assets/android-icon-*.png`, `assets/favicon.png`,
-`assets/notification-icon.png` — none of these files exist yet. Any `eas build` (iOS or Android) will fail to
-resolve them. Generate/design real brand assets and drop them in `assets/` before attempting any build.
+**0. Brand assets:** `assets/` currently holds placeholder icons (see Status & Gaps) — enough to build and test,
+but replace them with real brand artwork before any App Store / Play Store submission.
 
 **1. Real EAS project (also unblocks push notifications, PRD §17):**
 ```
@@ -187,6 +187,14 @@ interactive build setup — accept that unless your org has its own credentials 
 **6. Before App Store submission** (separate from internal testing, do this last):
 `eas.json`'s `production` profile has no `eas submit` configuration (signing/App Store Connect API key) yet —
 add one once you're ready to actually ship, not before internal validation above passes.
+
+## Checks
+
+- **CI** (`.github/workflows/ci.yml`, runs on push/PR once the repo is on GitHub): `tsc`, `expo-doctor`
+  (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
+- **Backend smoke test** (manual, writes to a real project — staging/demo only):
+  `npm run smoke -- --project <project-ref>` — 22 RLS/RPC/edge-function checks as each demo role; see
+  `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)
 
