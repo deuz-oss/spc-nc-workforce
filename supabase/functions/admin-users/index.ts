@@ -40,6 +40,11 @@ type SetPasswordBody = {
 
 type Body = CreateBody | SetPasswordBody;
 
+const VALID_ROLES = [
+  'super_admin', 'reckitt_client', 'pm', 'arco', 'tl', 'nc', 'lead_trainer', 'trainer', 'data_analyst', 'admin_data_entry',
+];
+const MIN_PASSWORD = 6;
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: CORS_HEADERS });
@@ -61,10 +66,11 @@ Deno.serve(async (req) => {
 
     const { data: callerProfile, error: profileErr } = await callerClient
       .from('profiles')
-      .select('role')
+      .select('role, active')
       .eq('id', caller.id)
       .single();
-    if (profileErr || callerProfile?.role !== 'super_admin') {
+    // A deactivated super_admin's JWT stays valid until it expires — check `active` too.
+    if (profileErr || callerProfile?.role !== 'super_admin' || !callerProfile.active) {
       return json({ error: 'Forbidden: super_admin only' }, 403);
     }
 
@@ -77,25 +83,46 @@ Deno.serve(async (req) => {
     const body = (await req.json()) as Body;
 
     if (body.action === 'create') {
-      const email = `${body.username.trim().toLowerCase()}@internal.spc`;
+      const username = (body.username ?? '').trim().toLowerCase();
+      if (!username || !/^[a-z0-9._-]+$/.test(username)) {
+        return json({ error: 'Username hanya boleh huruf kecil, angka, titik, garis bawah, atau strip.' }, 400);
+      }
+      if (!VALID_ROLES.includes(body.role)) return json({ error: `Role tidak dikenal: ${body.role}` }, 400);
+      if ((body.password ?? '').length < MIN_PASSWORD) {
+        return json({ error: `Password minimal ${MIN_PASSWORD} karakter.` }, 400);
+      }
+      const email = `${username}@internal.spc`;
       const { data, error } = await admin.auth.admin.createUser({
         email,
         password: body.password,
         email_confirm: true,
         user_metadata: {
           name: body.name,
-          username: body.username,
-          role: body.role,
-          team_id: body.teamId,
+          username,
           city: body.city ?? null,
           phone: body.phone ?? null,
         },
       });
       if (error) return json({ error: error.message }, 400);
+
+      // The handle_new_auth_user trigger (0008 migration) creates every profile
+      // INACTIVE and never trusts user metadata for role/team — this
+      // service-role update is what actually grants the account its role.
+      const { error: activateErr } = await admin
+        .from('profiles')
+        .update({ role: body.role, team_id: body.teamId, active: true })
+        .eq('id', data.user.id);
+      if (activateErr) {
+        await admin.auth.admin.deleteUser(data.user.id);
+        return json({ error: `Gagal mengaktifkan profil: ${activateErr.message}` }, 400);
+      }
       return json({ id: data.user.id });
     }
 
     if (body.action === 'setPassword') {
+      if ((body.password ?? '').length < MIN_PASSWORD) {
+        return json({ error: `Password minimal ${MIN_PASSWORD} karakter.` }, 400);
+      }
       const { error } = await admin.auth.admin.updateUserById(body.userId, { password: body.password });
       if (error) return json({ error: error.message }, 400);
       return json({ ok: true });

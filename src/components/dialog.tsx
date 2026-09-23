@@ -14,7 +14,7 @@ interface DialogState {
   buttons: DialogButton[];
 }
 
-let listener: ((s: DialogState | null) => void) | null = null;
+let listener: ((s: DialogState) => void) | null = null;
 let announceListener: ((msg: string) => void) | null = null;
 
 /**
@@ -36,11 +36,15 @@ export function announce(message: string) {
 }
 
 export function DialogHost() {
-  const [state, setState] = useState<DialogState | null>(null);
+  // FIFO queue — a dialog raised while another is open (e.g. the background
+  // offline-sync "Tersinkron" notice) waits its turn instead of replacing the
+  // open one and silently discarding that dialog's button callbacks.
+  const [queue, setQueue] = useState<DialogState[]>([]);
+  const state = queue[0] ?? null;
   const [liveMessage, setLiveMessage] = useState('');
 
   useEffect(() => {
-    listener = setState;
+    listener = (s) => setQueue((q) => [...q, s]);
     return () => {
       listener = null;
     };
@@ -58,7 +62,7 @@ export function DialogHost() {
   }, []);
 
   const close = (fn?: () => void) => {
-    setState(null);
+    setQueue((q) => q.slice(1));
     fn?.();
   };
 

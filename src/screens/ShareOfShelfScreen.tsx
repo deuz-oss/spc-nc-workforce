@@ -6,7 +6,7 @@ import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, Sticky
 import { showDialog } from '../components/dialog';
 import { CATEGORY_LABEL } from '../config';
 import { C } from '../theme';
-import { useStore } from '../store/useStore';
+import { ShownError, useStore } from '../store/useStore';
 import { StoreCategory } from '../types';
 
 /** Share of Shelf (PRD §5.2) — one row per visit, required photo (evidence is
@@ -80,8 +80,8 @@ export default function ShareOfShelfScreen() {
       showDialog('Share of Shelf Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
       // store action already showed a dialog for offline/upload-failure cases
-      if (e?.message && !['Tidak ada koneksi internet.', 'Upload foto gagal.'].includes(e.message)) {
-        showDialog('Gagal Menyimpan', e.message);
+      if (!(e instanceof ShownError)) {
+        showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');
       }
     } finally {
       setBusy(false);

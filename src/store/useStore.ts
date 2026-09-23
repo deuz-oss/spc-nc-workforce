@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
@@ -42,6 +42,10 @@ import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, u
 import { fmtDate } from '../utils/format';
 import { uid } from '../utils/uuid';
 
+/** Thrown by actions that have already explained the failure to the user via
+ * showDialog — screens must not show a second dialog for it. */
+export class ShownError extends Error {}
+
 async function isOnline(): Promise<boolean> {
   const state = await NetInfo.fetch();
   return state.isConnected === true;
@@ -57,6 +61,9 @@ const TEAMLESS_ROLES: Role[] = [
   'trainer',
   'admin_data_entry',
 ];
+
+/** Must match MIN_PASSWORD in supabase/functions/admin-users/index.ts. */
+export const MIN_PASSWORD = 6;
 
 export interface NewStoreInput {
   name: string;
@@ -133,9 +140,14 @@ interface StoreState {
     id: string,
     patch: Partial<Pick<User, 'name' | 'role' | 'teamId' | 'phone' | 'city'>>,
   ): Promise<string | null>;
+  /** super_admin only, via the admin-users edge function. */
+  setUserPassword(id: string, password: string): Promise<string | null>;
   addTeam(p: { name: string; city: string; tlId: string | null; arcoId: string | null }): Promise<void>;
 
   upsertStore(s: Store): Promise<void>;
+  /** CSV import path — batched inserts, awaited, with a real per-chunk result
+   * (instead of N concurrent fire-and-forget upsertStore calls). */
+  addStoresBulk(stores: Store[]): Promise<{ created: number; errors: string[] }>;
   assignStores(ids: string[], ncId: string | null): Promise<void>;
 
   startVisit(
@@ -170,7 +182,8 @@ interface StoreState {
 
   /** NTG & GWP consumer funnel (PRD §5.4) — online-required, like upsertStore (richer/less frequent than clock/check writes). */
   upsertConsumer(c: Consumer): Promise<string | null>;
-  upsertNtgGwp(n: NtgGwp): Promise<string | null>;
+  /** Appends one funnel-stage row (history is append-only). */
+  addNtgGwp(n: NtgGwp): Promise<string | null>;
 
   // --- Phase 3/5: bi-weekly/periodic modules (PRD §5.2, §5.5, §5.6, §5.7/§6) ---
   // Share of Shelf/Paid Visibility (required photo) and Price Monitoring
@@ -617,6 +630,23 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
   }
 }
 
+/** Mutable store columns (id/created_at are set once on insert). */
+function storeRow(m: Store) {
+  return {
+    name: m.name,
+    address: m.address,
+    city: m.city,
+    channel: m.channel,
+    account: m.account ?? null,
+    category: m.category,
+    lat: m.lat,
+    lng: m.lng,
+    assigned_nc_id: m.assignedNcId,
+    team_id: m.teamId,
+    source: m.source,
+  };
+}
+
 function visitRow(v: Visit) {
   return {
     lat: v.lat,
@@ -692,8 +722,41 @@ function priceMonitoringRow(r: PriceMonitoringRow) {
   };
 }
 
-/** Replays one queued op against Supabase. Returns whether it can be dropped from the queue. */
-async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp): Promise<boolean> {
+/**
+ * Outcome of replaying one queued op:
+ * - `done`: landed server-side (or already had — a duplicate-key insert means a
+ *   previous attempt succeeded but its response was lost), drop it.
+ * - `retry`: transient (network/5xx/upload) failure, keep it and stop replaying
+ *   later ops so their order is preserved (clock-out never lands before clock-in).
+ * - `failed`: the server rejected it deterministically (constraint, RLS, missing
+ *   parent row) — retrying would fail forever and block every op behind it, so
+ *   it's dropped and reported to the user.
+ * - `dropped`: unrecoverable and already explained to the user by the handler.
+ */
+type ReplayResult = 'done' | 'retry' | 'failed' | 'dropped';
+
+/** Postgres error classes that fail identically on every retry: 22 data
+ * exception, 23 integrity constraint, 42 syntax/privilege (incl. 42501 RLS),
+ * P0 raised by a function (e.g. finish_visit's "not found"). */
+function settle(error: { code?: string } | null): ReplayResult {
+  if (!error || error.code === '23505') return 'done';
+  return error.code && /^(22|23|42|P0)/.test(error.code) ? 'failed' : 'retry';
+}
+
+const OP_LABEL: Record<QueuedOp['type'], string> = {
+  clockIn: 'Clock-in',
+  clockOut: 'Clock-out',
+  startVisit: 'Check-in toko',
+  finishVisit: 'Check-out toko',
+  submitStockTaking: 'Stock Taking',
+  submitOfftake: 'Offtake',
+  submitPriceMonitoring: 'Price Monitoring',
+  submitShareOfShelf: 'Share of Shelf',
+  submitPaidVisibility: 'Paid Visibility',
+};
+
+/** Replays one queued op against Supabase. */
+async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp): Promise<ReplayResult> {
   if (op.type === 'clockIn') {
     const a = op.attendance;
     const { error } = await supabase.from('attendances').insert({
@@ -705,7 +768,19 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       clock_out_at: null,
       geo_fence_ok: a.geoFenceOk,
     });
-    return !error;
+    if (!error) {
+      // The clock-in position is the route's first point — the online path
+      // inserts it too; without this an offline clock-in's route starts late.
+      const { error: rpErr } = await supabase.from('route_points').insert({
+        attendance_id: a.id,
+        user_id: a.userId,
+        lat: a.clockInLat,
+        lng: a.clockInLng,
+        recorded_at: new Date(a.clockInAt).toISOString(),
+      });
+      if (rpErr) console.warn('replay clockIn route point failed:', rpErr.message);
+    }
+    return settle(error);
   }
   if (op.type === 'clockOut') {
     const { error } = await supabase
@@ -716,7 +791,7 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
         clock_out_lng: op.lng,
       })
       .eq('id', op.attendanceId);
-    return !error;
+    return settle(error);
   }
   if (op.type === 'startVisit') {
     const v = op.visit;
@@ -728,7 +803,7 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       check_out_at: null,
       ...visitRow(v),
     });
-    return !error;
+    return settle(error);
   }
   if (op.type === 'submitStockTaking') {
     return replayOptionalPhotoBatch(set, get, 'stockTakingRows', 'stock_taking', op.rows, stockTakingRow, op.localPhotoUri, 'Stock Taking');
@@ -738,7 +813,7 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
     // known (false) locally until the next hydrateAll/realtime update corrects
     // it; the server-side value (set by the trigger) is authoritative regardless.
     const { error } = await supabase.from('offtake').insert(op.rows.map(offtakeRow));
-    return !error;
+    return settle(error);
   }
   if (op.type === 'submitPriceMonitoring') {
     return replayOptionalPhotoBatch(
@@ -767,9 +842,12 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       'Paid Visibility',
     );
   }
-  // finishVisit
-  const { error } = await supabase.rpc('finish_visit', { p_visit_id: op.visitId });
-  return !error;
+  // finishVisit — pass the real (offline) check-out time, not the replay time.
+  const { error } = await supabase.rpc('finish_visit', {
+    p_visit_id: op.visitId,
+    p_check_out_at: new Date(op.checkOutAt).toISOString(),
+  });
+  return settle(error);
 }
 
 /** Shared replay logic for optional-photo batch reports (Stock Taking, Price
@@ -787,7 +865,7 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
   toDbRow: (r: R) => Record<string, unknown>,
   localPhotoUri: string | undefined,
   label: string,
-): Promise<boolean> {
+): Promise<ReplayResult> {
   let photoUrl: string | undefined;
   let photoLost = false;
   if (localPhotoUri) {
@@ -795,7 +873,7 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
       try {
         photoUrl = await uploadReportMedia(rows[0]?.visitId ?? uid(), localPhotoUri, extFromUri(localPhotoUri));
       } catch {
-        return false; // transient upload failure — keep retrying, don't drop the row
+        return 'retry'; // transient upload failure — keep retrying, don't drop the row
       }
     } else {
       photoLost = true;
@@ -804,7 +882,8 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
 
   const rowsWithPhoto = rows.map((r) => ({ ...r, photoUrl }));
   const { error } = await supabase.from(table).insert(rowsWithPhoto.map(toDbRow));
-  if (error) return false;
+  const result = settle(error);
+  if (result !== 'done') return result;
 
   if (photoUrl) {
     await discardLocalPhoto(localPhotoUri!);
@@ -822,7 +901,7 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
       `Foto ${label} yang tersimpan offline sudah tidak ada di perangkat (mungkin cache terhapus). Laporan tetap disimpan tanpa foto.`,
     );
   }
-  return true;
+  return 'done';
 }
 
 /** Shared replay logic for required-photo single-row reports (Share of Shelf,
@@ -838,7 +917,7 @@ async function replayRequiredPhotoRow<K extends 'shareOfShelfRows' | 'paidVisibi
   toDbRow: (r: R) => Record<string, unknown>,
   localPhotoUri: string,
   label: string,
-): Promise<boolean> {
+): Promise<ReplayResult> {
   if (!(await localPhotoExists(localPhotoUri))) {
     // Unrecoverable — drop from the queue rather than retry forever, and
     // remove the optimistic local row since it will never reach the server.
@@ -848,31 +927,43 @@ async function replayRequiredPhotoRow<K extends 'shareOfShelfRows' | 'paidVisibi
       'Laporan Tidak Tersinkron',
       `Foto ${label} untuk toko "${storeName}" (${fmtDate(row.createdAt)}) hilang dari perangkat sebelum sempat disinkron. Laporan ini tidak tersimpan — silakan isi ulang.`,
     );
-    return true; // drop the op — it can never succeed
+    return 'dropped'; // it can never succeed, and the user has been told
   }
 
   let photoUrl: string;
   try {
     photoUrl = await uploadReportMedia(row.visitId, localPhotoUri, extFromUri(localPhotoUri));
   } catch {
-    return false; // transient upload failure — keep retrying
+    return 'retry'; // transient upload failure — keep retrying
   }
 
   const fullRow = { ...row, photoUrl } as unknown as R;
   const { error } = await supabase.from(table).insert(toDbRow(fullRow));
-  if (error) return false;
+  const result = settle(error);
+  if (result !== 'done') return result;
 
   await discardLocalPhoto(localPhotoUri);
   set({
     [stateKey]: (get()[stateKey] as unknown as R[]).map((r) => (r.id === row.id ? { ...r, photoUrl } : r)),
   } as unknown as Partial<StoreState>);
-  return true;
+  return 'done';
 }
 
 async function enqueueOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp) {
   const next = [...get().pendingOps, op];
   set({ pendingOps: next });
-  await saveQueue(next);
+  const userId = get().sessionUserId;
+  if (userId) await saveQueue(userId, next);
+}
+
+/** Loads the signed-in user's persisted queue and re-applies each op's
+ * optimistic effect — queued writes don't exist server-side yet, so
+ * hydrateAll() alone would make them vanish from the UI after a restart. */
+async function restoreQueue(set: (p: Partial<StoreState>) => void, get: () => StoreState, userId: string) {
+  const queue = await loadQueue(userId);
+  for (const op of queue) applyQueuedOpLocally(set, get, op);
+  set({ pendingOps: queue });
+  if (queue.length) get().processPendingOps();
 }
 
 // --- module-scope (non-reactive) helpers: realtime channel + debounce ------
@@ -880,6 +971,9 @@ async function enqueueOp(set: (p: Partial<StoreState>) => void, get: () => Store
 let channel: RealtimeChannel | null = null;
 let authListenerBound = false;
 let netInfoListenerBound = false;
+/** Guards processPendingOps against overlapping runs (init + NetInfo + AppState
+ * can all fire at once), which would replay the same op twice. */
+let replayingQueue = false;
 
 function teardownRealtime() {
   if (channel) {
@@ -888,7 +982,7 @@ function teardownRealtime() {
   }
 }
 
-function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () => StoreState) {
+function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () => StoreState, userId: string) {
   teardownRealtime();
   channel = supabase
     .channel('app-sync')
@@ -928,12 +1022,16 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
         set({ attendances: upsertById(get().attendances, mapAttendance(payload.new, existing?.route ?? [])) });
       }
     })
-    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'route_points' }, (payload) => {
+    // Own points only — see hydrateAll's route_points comment. Unfiltered, a
+    // monitor role would receive every NC's GPS ping (~13 events/s program-wide).
+    .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'route_points', filter: `user_id=eq.${userId}` }, (payload) => {
       const p = payload.new as any;
+      const t = new Date(p.recorded_at).getTime();
       set({
         attendances: get().attendances.map((a) =>
-          a.id === p.attendance_id
-            ? { ...a, route: [...a.route, { lat: p.lat, lng: p.lng, t: new Date(p.recorded_at).getTime() }] }
+          // addRoutePoint already appended this point optimistically — skip the echo.
+          a.id === p.attendance_id && !a.route.some((r) => r.t === t)
+            ? { ...a, route: [...a.route, { lat: p.lat, lng: p.lng, t }].sort((x, y) => x.t - y.t) }
             : a,
         ),
       });
@@ -1048,6 +1146,58 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
     .subscribe();
 }
 
+/** PostgREST caps every response at `max_rows` (1000 on Supabase by default)
+ * and truncates silently — a plain select('*') on visits/offtake/etc. would
+ * quietly drop everything past the first 1000 rows once the program has a few
+ * days of data. Pages through with a stable order (every table's `id` is its PK). */
+const PAGE_SIZE = 1000;
+
+async function fetchAll(table: string): Promise<{ data: any[]; error: { message: string } | null }> {
+  const out: any[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from(table)
+      .select('*')
+      .order('id', { ascending: true })
+      .range(from, from + PAGE_SIZE - 1);
+    if (error) return { data: out, error };
+    out.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) return { data: out, error: null };
+  }
+}
+
+/** Route points are by far the largest table (a ping every ~15s per clocked-in
+ * user). Only the viewer's OWN recent route is used anywhere in the app
+ * (Absensi km, NC monthly stats, clock-out), so only that is loaded. */
+const ROUTE_HISTORY_DAYS = 35;
+const ROUTE_ID_CHUNK = 100; // keeps the `in (...)` filter well under URL length limits
+
+async function fetchOwnRoutePoints(userId: string, attendanceRows: any[]): Promise<any[]> {
+  const since = Date.now() - ROUTE_HISTORY_DAYS * 86400000;
+  const ids = attendanceRows
+    .filter((a) => a.user_id === userId && new Date(a.clock_in_at).getTime() >= since)
+    .map((a) => a.id as string);
+  const out: any[] = [];
+  for (let i = 0; i < ids.length; i += ROUTE_ID_CHUNK) {
+    const chunk = ids.slice(i, i + ROUTE_ID_CHUNK);
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from('route_points')
+        .select('*')
+        .in('attendance_id', chunk)
+        .order('id', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) {
+        console.warn('route_points hydrate failed:', error.message);
+        break;
+      }
+      out.push(...(data ?? []));
+      if (!data || data.length < PAGE_SIZE) break;
+    }
+  }
+  return out;
+}
+
 /** Fetches the caller's profile + every scoped row (RLS-filtered) and hydrates the store. */
 async function hydrateAll(
   set: (partial: Partial<StoreState>) => void,
@@ -1079,47 +1229,42 @@ async function hydrateAll(
     scorecardsRes,
     conversationsRes,
     messagesRes,
-  ] = await Promise.all([
-    supabase.from('profiles').select('*'),
-    supabase.from('teams').select('*'),
-    supabase.from('stores').select('*'),
-    supabase.from('visits').select('*'),
-    supabase.from('attendances').select('*'),
-    supabase.from('products').select('*'),
-    supabase.from('stock_taking').select('*'),
-    supabase.from('offtake').select('*'),
-    supabase.from('consumers').select('*'),
-    supabase.from('ntg_gwp').select('*'),
-    supabase.from('share_of_shelf').select('*'),
-    supabase.from('paid_visibility').select('*'),
-    supabase.from('price_monitoring').select('*'),
-    supabase.from('surveys').select('*'),
-    supabase.from('survey_responses').select('*'),
-    supabase.from('report_reviews').select('*'),
-    supabase.from('coaching_logs').select('*'),
-    supabase.from('targets').select('*'),
-    supabase.from('scorecards').select('*'),
-    supabase.from('conversations').select('*'),
-    supabase.from('messages').select('*'),
-  ]);
+  ] = await Promise.all(
+    [
+      'profiles',
+      'teams',
+      'stores',
+      'visits',
+      'attendances',
+      'products',
+      'stock_taking',
+      'offtake',
+      'consumers',
+      'ntg_gwp',
+      'share_of_shelf',
+      'paid_visibility',
+      'price_monitoring',
+      'surveys',
+      'survey_responses',
+      'report_reviews',
+      'coaching_logs',
+      'targets',
+      'scorecards',
+      'conversations',
+      'messages',
+    ].map(fetchAll),
+  );
 
-  const attendanceRows = attendancesRes.data ?? [];
-  const attendanceIds = attendanceRows.map((a: any) => a.id);
-  const { data: routePoints } =
-    attendanceIds.length > 0
-      ? await supabase
-          .from('route_points')
-          .select('*')
-          .in('attendance_id', attendanceIds)
-          .order('recorded_at', { ascending: true })
-      : { data: [] as any[] };
+  const attendanceRows = attendancesRes.data;
+  const routePoints = await fetchOwnRoutePoints(userId, attendanceRows);
 
   const routesByAttendance = new Map<string, RoutePoint[]>();
-  for (const p of routePoints ?? []) {
+  for (const p of routePoints) {
     const arr = routesByAttendance.get(p.attendance_id) ?? [];
     arr.push({ lat: p.lat, lng: p.lng, t: new Date(p.recorded_at).getTime() });
     routesByAttendance.set(p.attendance_id, arr);
   }
+  for (const arr of routesByAttendance.values()) arr.sort((a, b) => a.t - b.t);
 
   set({
     sessionUserId: userId,
@@ -1146,7 +1291,7 @@ async function hydrateAll(
     messages: (messagesRes.data ?? []).map(mapMessage),
   });
 
-  subscribeRealtime(set, get);
+  subscribeRealtime(set, get, userId);
   return true;
 }
 
@@ -1187,6 +1332,33 @@ async function registerPushToken(): Promise<void> {
   }
 }
 
+/** Everything scoped to a session — reset on logout / SIGNED_OUT. */
+const SIGNED_OUT_STATE: Partial<StoreState> = {
+  sessionUserId: null,
+  users: [],
+  teams: [],
+  stores: [],
+  visits: [],
+  attendances: [],
+  products: [],
+  stockTakingRows: [],
+  offtakeRows: [],
+  consumers: [],
+  ntgGwps: [],
+  shareOfShelfRows: [],
+  paidVisibilityRows: [],
+  priceMonitoringRows: [],
+  surveys: [],
+  surveyResponses: [],
+  reportReviews: [],
+  coachingLogs: [],
+  targets: [],
+  scorecards: [],
+  conversations: [],
+  messages: [],
+  pendingOps: [],
+};
+
 export const useStore = create<StoreState>()((set, get) => ({
   ready: false,
   sessionUserId: null,
@@ -1221,12 +1393,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       const ok = await hydrateAll(set, get, session.user.id);
       if (!ok) await supabase.auth.signOut();
       else {
-        // queued writes from a previous offline session don't exist server-side yet —
-        // re-apply their optimistic effect so the UI still reflects them after a restart.
-        const queue = await loadQueue();
-        for (const op of queue) applyQueuedOpLocally(set, get, op);
-        set({ pendingOps: queue });
-        if (queue.length) get().processPendingOps();
+        await restoreQueue(set, get, session.user.id);
         registerPushToken(); // fire-and-forget, PRD §17
       }
     }
@@ -1237,30 +1404,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       supabase.auth.onAuthStateChange((event) => {
         if (event === 'SIGNED_OUT') {
           teardownRealtime();
-          set({
-            sessionUserId: null,
-            users: [],
-            teams: [],
-            stores: [],
-            visits: [],
-            attendances: [],
-            products: [],
-            stockTakingRows: [],
-            offtakeRows: [],
-            consumers: [],
-            ntgGwps: [],
-            shareOfShelfRows: [],
-            paidVisibilityRows: [],
-            priceMonitoringRows: [],
-            surveys: [],
-            surveyResponses: [],
-            reportReviews: [],
-            coachingLogs: [],
-            targets: [],
-            scorecards: [],
-            conversations: [],
-            messages: [],
-          });
+          set(SIGNED_OUT_STATE);
         }
       });
     }
@@ -1269,20 +1413,43 @@ export const useStore = create<StoreState>()((set, get) => ({
       NetInfo.addEventListener((state) => {
         if (state.isConnected && get().pendingOps.length) get().processPendingOps();
       });
+      // NetInfo only fires on connectivity *changes* — a replay that failed
+      // transiently while online would otherwise wait for the next drop/reconnect.
+      AppState.addEventListener('change', (s) => {
+        if (s === 'active' && get().pendingOps.length) get().processPendingOps();
+      });
     }
   },
 
   processPendingOps: async () => {
-    const queue = get().pendingOps;
-    if (!queue.length) return;
-    const remaining: QueuedOp[] = [];
-    for (const op of queue) {
-      const done = await replayOp(set, get, op);
-      if (!done) remaining.push(op);
+    const userId = get().sessionUserId;
+    if (replayingQueue || !userId || !get().pendingOps.length) return;
+    replayingQueue = true;
+    const failed: string[] = [];
+    let synced = 0;
+    try {
+      // Head-first, one op at a time, re-reading pendingOps each iteration so
+      // ops enqueued mid-replay are neither lost nor replayed out of order.
+      for (;;) {
+        const op = get().pendingOps[0];
+        if (!op || get().sessionUserId !== userId) break;
+        const result = await replayOp(set, get, op);
+        if (result === 'retry') break; // keep this op and everything after it
+        if (result === 'failed') failed.push(OP_LABEL[op.type]);
+        if (result === 'done') synced++;
+        const next = get().pendingOps.filter((o) => o.id !== op.id);
+        set({ pendingOps: next });
+        await saveQueue(userId, next);
+      }
+    } finally {
+      replayingQueue = false;
     }
-    set({ pendingOps: remaining });
-    await saveQueue(remaining);
-    if (remaining.length < queue.length && !remaining.length) {
+    if (failed.length) {
+      showDialog(
+        'Sebagian Data Offline Ditolak Server',
+        `Data berikut tidak bisa disimpan dan perlu diisi ulang: ${failed.join(', ')}. Hubungi TL/admin bila berulang.`,
+      );
+    } else if (synced && !get().pendingOps.length) {
       showDialog('Tersinkron', 'Data yang tersimpan offline berhasil dikirim ke server.');
     }
   },
@@ -1290,12 +1457,20 @@ export const useStore = create<StoreState>()((set, get) => ({
   login: async (username, password) => {
     const email = `${username.trim().toLowerCase()}@internal.spc`;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) return 'Username atau password salah.';
+    if (error) {
+      // AuthApiError (4xx) = bad credentials; anything else is connectivity.
+      return error.status && error.status >= 400 && error.status < 500
+        ? 'Username atau password salah.'
+        : 'Tidak dapat terhubung ke server. Periksa koneksi internet dan coba lagi.';
+    }
     const ok = await hydrateAll(set, get, data.user.id);
     if (!ok) {
       await supabase.auth.signOut();
       return 'Akun dinonaktifkan atau tidak ditemukan. Hubungi admin.';
     }
+    // init() only restores a queue when a session already existed at cold
+    // start — a queue persisted before the session expired must load here.
+    await restoreQueue(set, get, data.user.id);
     registerPushToken(); // fire-and-forget, PRD §17
     return null;
   },
@@ -1303,30 +1478,9 @@ export const useStore = create<StoreState>()((set, get) => ({
   logout: async () => {
     teardownRealtime();
     await supabase.auth.signOut();
-    set({
-            sessionUserId: null,
-            users: [],
-            teams: [],
-            stores: [],
-            visits: [],
-            attendances: [],
-            products: [],
-            stockTakingRows: [],
-            offtakeRows: [],
-            consumers: [],
-            ntgGwps: [],
-            shareOfShelfRows: [],
-            paidVisibilityRows: [],
-            priceMonitoringRows: [],
-            surveys: [],
-            surveyResponses: [],
-            reportReviews: [],
-            coachingLogs: [],
-            targets: [],
-            scorecards: [],
-            conversations: [],
-            messages: [],
-          });
+    // The persisted queue stays on disk under this user's key and resumes on
+    // their next login; only the in-memory copy is cleared.
+    set(SIGNED_OUT_STATE);
   },
 
   addUser: async ({ name, username, password, role, teamId, city, phone }) => {
@@ -1334,7 +1488,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (!name.trim()) return 'Nama wajib diisi.';
     if (!uname) return 'Username wajib diisi.';
     if (get().users.some((u) => u.username.toLowerCase() === uname)) return 'Username sudah dipakai.';
-    if (password.length < 4) return 'Password minimal 4 karakter.';
+    if (password.length < MIN_PASSWORD) return `Password minimal ${MIN_PASSWORD} karakter.`;
     const { error } = await callAdminUsers({
       action: 'create',
       username: uname,
@@ -1373,8 +1527,8 @@ export const useStore = create<StoreState>()((set, get) => ({
         errors.push(`Baris ${i + 1}: username "${uname}" sudah dipakai`);
         continue;
       }
-      if (r.password.length < 4) {
-        errors.push(`Baris ${i + 1}: password minimal 4 karakter`);
+      if (r.password.length < MIN_PASSWORD) {
+        errors.push(`Baris ${i + 1}: password minimal ${MIN_PASSWORD} karakter`);
         continue;
       }
       const { error } = await callAdminUsers({
@@ -1441,6 +1595,12 @@ export const useStore = create<StoreState>()((set, get) => ({
     return null;
   },
 
+  setUserPassword: async (id, password) => {
+    if (password.length < MIN_PASSWORD) return `Password minimal ${MIN_PASSWORD} karakter.`;
+    const { error } = await callAdminUsers({ action: 'setPassword', userId: id, password });
+    return error ?? null;
+  },
+
   addTeam: async ({ name, city, tlId, arcoId }) => {
     const t: Team = { id: uid('t_'), name: name.trim() || city.trim(), city: city.trim(), tlId, arcoId };
     set({ teams: [...get().teams, t] });
@@ -1458,30 +1618,43 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   upsertStore: async (m) => {
-    const list = get().stores;
-    const exists = list.some((x) => x.id === m.id);
-    set({ stores: exists ? list.map((x) => (x.id === m.id ? m : x)) : [m, ...list] });
-    const { error } = await supabase.from('stores').upsert({
-      id: m.id,
-      name: m.name,
-      address: m.address,
-      city: m.city,
-      channel: m.channel,
-      account: m.account,
-      category: m.category,
-      lat: m.lat,
-      lng: m.lng,
-      assigned_nc_id: m.assignedNcId,
-      team_id: m.teamId,
-      source: m.source,
-      created_at: new Date(m.createdAt).toISOString(),
-    });
+    const before = get().stores.find((x) => x.id === m.id);
+    set({ stores: upsertById(get().stores, m) });
+    // Explicit insert vs update rather than PostgREST upsert: INSERT ... ON
+    // CONFLICT DO UPDATE also requires the *new* row to pass the SELECT policy,
+    // which fails for rows the writer can create but not read back.
+    const { error } = before
+      ? await supabase.from('stores').update(storeRow(m)).eq('id', m.id)
+      : await supabase.from('stores').insert({ id: m.id, ...storeRow(m), created_at: new Date(m.createdAt).toISOString() });
     if (error) {
-      // rollback to the pre-write list — the local cache must not show a
-      // store/edit that never actually landed server-side.
-      set({ stores: list });
+      // Roll back only this store — restoring a whole-list snapshot would also
+      // wipe any other store written concurrently.
+      set({
+        stores: before ? get().stores.map((x) => (x.id === m.id ? before : x)) : get().stores.filter((x) => x.id !== m.id),
+      });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data toko ke server. Periksa koneksi internet dan coba lagi.');
     }
+  },
+
+  addStoresBulk: async (stores) => {
+    const errors: string[] = [];
+    let created = 0;
+    const CHUNK = 500;
+    for (let i = 0; i < stores.length; i += CHUNK) {
+      const chunk = stores.slice(i, i + CHUNK);
+      const { error } = await supabase
+        .from('stores')
+        .insert(chunk.map((m) => ({ id: m.id, ...storeRow(m), created_at: new Date(m.createdAt).toISOString() })));
+      if (error) {
+        errors.push(`Baris ${i + 1}-${i + chunk.length}: ${error.message}`);
+        continue;
+      }
+      created += chunk.length;
+      let list = get().stores;
+      for (const m of chunk) list = upsertById(list, m);
+      set({ stores: list });
+    }
+    return { created, errors };
   },
 
   assignStores: async (ids, ncId) => {
@@ -1554,7 +1727,10 @@ export const useStore = create<StoreState>()((set, get) => ({
       return;
     }
 
-    const { error } = await supabase.rpc('finish_visit', { p_visit_id: id });
+    const { error } = await supabase.rpc('finish_visit', {
+      p_visit_id: id,
+      p_check_out_at: new Date(checkOutAt).toISOString(),
+    });
     if (error) {
       set({ visits: beforeVisits });
       throw new Error(error.message);
@@ -1741,33 +1917,42 @@ export const useStore = create<StoreState>()((set, get) => ({
   // writes, so not worth extending the offline queue to (see PRD review note).
 
   upsertConsumer: async (c) => {
-    const list = get().consumers;
-    const exists = list.some((x) => x.id === c.id);
-    set({ consumers: exists ? list.map((x) => (x.id === c.id ? c : x)) : [c, ...list] });
-    const { error } = await supabase.from('consumers').upsert({
-      id: c.id,
+    const before = get().consumers.find((x) => x.id === c.id);
+    set({ consumers: upsertById(get().consumers, c) });
+    const fields = {
       name: c.name,
       wa_contact: c.waContact,
       consent: c.consent,
       child_age_bracket: c.childAgeBracket,
-      current_brand: c.currentBrand,
-      quiz_result: c.quizResult,
-      created_by_nc_id: c.createdByNcId,
-      created_at: new Date(c.createdAt).toISOString(),
-    });
+      current_brand: c.currentBrand ?? null,
+      quiz_result: c.quizResult ?? null,
+    };
+    // Insert vs update explicitly — see upsertStore. Ownership/creation time
+    // are write-once.
+    const { error } = before
+      ? await supabase.from('consumers').update(fields).eq('id', c.id)
+      : await supabase.from('consumers').insert({
+          id: c.id,
+          ...fields,
+          created_by_nc_id: c.createdByNcId,
+          created_at: new Date(c.createdAt).toISOString(),
+        });
     if (error) {
-      set({ consumers: list });
+      set({
+        consumers: before
+          ? get().consumers.map((x) => (x.id === c.id ? before : x))
+          : get().consumers.filter((x) => x.id !== c.id),
+      });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data konsumen ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;
   },
 
-  upsertNtgGwp: async (n) => {
-    const list = get().ntgGwps;
-    const exists = list.some((x) => x.id === n.id);
-    set({ ntgGwps: exists ? list.map((x) => (x.id === n.id ? n : x)) : [n, ...list] });
-    const { error } = await supabase.from('ntg_gwp').upsert({
+  addNtgGwp: async (n) => {
+    set({ ntgGwps: [n, ...get().ntgGwps] });
+    // Funnel history is append-only (ntg_gwp_insert policy, 0008 migration).
+    const { error } = await supabase.from('ntg_gwp').insert({
       id: n.id,
       consumer_id: n.consumerId,
       visit_id: n.visitId,
@@ -1778,7 +1963,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       created_at: new Date(n.createdAt).toISOString(),
     });
     if (error) {
-      set({ ntgGwps: list });
+      set({ ntgGwps: get().ntgGwps.filter((x) => x.id !== n.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
@@ -1786,9 +1971,9 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   // --- Phase 3: Share of Shelf / Paid Visibility (PRD §5.2, §5.5) ---------
-  // Required-photo modules — no offline queue for these (see offlineQueue.ts
-  // comment): fail outright rather than partially save a required-evidence
-  // report without its photo.
+  // Required-photo modules: offline-queued on native with the photo persisted
+  // locally (see offlineQueue.ts); online they fail outright rather than save
+  // a required-evidence report without its photo.
 
   submitShareOfShelf: async (visitId, storeId, input, photoUri) => {
     if (input.ownFacingCount < 0 || input.totalFacingCount < 0) {
@@ -1817,14 +2002,14 @@ export const useStore = create<StoreState>()((set, get) => ({
       // online-required behavior (see offlineQueue.ts's QueuedOp comment).
       if (Platform.OS === 'web') {
         showDialog('Offline', 'Share of Shelf butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-        throw new Error('Tidak ada koneksi internet.');
+        throw new ShownError('Tidak ada koneksi internet.');
       }
       let localPhotoUri: string;
       try {
         localPhotoUri = await persistPhotoLocally(photoUri);
       } catch {
         showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
-        throw new Error('Gagal menyimpan foto secara lokal.');
+        throw new ShownError('Gagal menyimpan foto secara lokal.');
       }
       set({ shareOfShelfRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().shareOfShelfRows] });
       await enqueueOp(set, get, { id: uid('op_'), type: 'submitShareOfShelf', row: baseRow, localPhotoUri });
@@ -1837,7 +2022,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
     } catch {
       showDialog('Gagal Upload Foto', 'Foto wajib untuk Share of Shelf tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
-      throw new Error('Upload foto gagal.');
+      throw new ShownError('Upload foto gagal.');
     }
     const row: ShareOfShelfRow = { ...baseRow, photoUrl };
     set({ shareOfShelfRows: [row, ...get().shareOfShelfRows] });
@@ -1845,7 +2030,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ shareOfShelfRows: get().shareOfShelfRows.filter((x) => x.id !== row.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Share of Shelf ke server. Periksa koneksi internet dan coba lagi.');
-      throw new Error(error.message);
+      throw new ShownError(error.message);
     }
     return { queued: false };
   },
@@ -1865,14 +2050,14 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (!(await isOnline())) {
       if (Platform.OS === 'web') {
         showDialog('Offline', 'Paid Visibility butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-        throw new Error('Tidak ada koneksi internet.');
+        throw new ShownError('Tidak ada koneksi internet.');
       }
       let localPhotoUri: string;
       try {
         localPhotoUri = await persistPhotoLocally(photoUri);
       } catch {
         showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
-        throw new Error('Gagal menyimpan foto secara lokal.');
+        throw new ShownError('Gagal menyimpan foto secara lokal.');
       }
       set({ paidVisibilityRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().paidVisibilityRows] });
       await enqueueOp(set, get, { id: uid('op_'), type: 'submitPaidVisibility', row: baseRow, localPhotoUri });
@@ -1885,7 +2070,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
     } catch {
       showDialog('Gagal Upload Foto', 'Foto wajib untuk Paid Visibility tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
-      throw new Error('Upload foto gagal.');
+      throw new ShownError('Upload foto gagal.');
     }
     const row: PaidVisibilityRow = { ...baseRow, photoUrl };
     set({ paidVisibilityRows: [row, ...get().paidVisibilityRows] });
@@ -1893,7 +2078,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ paidVisibilityRows: get().paidVisibilityRows.filter((x) => x.id !== row.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Paid Visibility ke server. Periksa koneksi internet dan coba lagi.');
-      throw new Error(error.message);
+      throw new ShownError(error.message);
     }
     return { queued: false };
   },
@@ -1958,7 +2143,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ priceMonitoringRows: get().priceMonitoringRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Price Monitoring ke server. Periksa koneksi internet dan coba lagi.');
-      throw new Error(error.message);
+      throw new ShownError(error.message);
     }
     return { queued: false };
   },
@@ -2138,7 +2323,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const me = get().sessionUserId!;
     if (!(await isOnline())) {
       showDialog('Offline', 'Pesan tidak dapat dikirim tanpa koneksi internet. Coba lagi saat online.');
-      throw new Error('Tidak ada koneksi internet.');
+      throw new ShownError('Tidak ada koneksi internet.');
     }
     const m: Message = {
       id: uid('msg_'),
@@ -2160,7 +2345,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ messages: get().messages.filter((x) => x.id !== m.id) });
       showDialog('Gagal Mengirim', 'Tidak dapat mengirim pesan. Periksa koneksi internet dan coba lagi.');
-      throw new Error(error.message);
+      throw new ShownError(error.message);
     }
 
     // Fire-and-forget push (PRD §17) — never blocks the send UI on delivery.
@@ -2187,12 +2372,9 @@ export const useStore = create<StoreState>()((set, get) => ({
         toMark.some((t) => t.id === m.id) ? { ...m, readAt: now } : m,
       ),
     });
-    const { error } = await supabase
-      .from('messages')
-      .update({ read_at: new Date(now).toISOString() })
-      .eq('conversation_id', conversationId)
-      .neq('sender_id', me)
-      .is('read_at', null);
+    // RPC, not a direct UPDATE: messages has no UPDATE policy (a row-level
+    // policy would let the recipient edit the body too) — see 0008 migration.
+    const { error } = await supabase.rpc('mark_messages_read', { p_conversation_id: conversationId });
     if (error) console.warn('markMessagesRead failed (non-fatal):', error.message);
   },
 

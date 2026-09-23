@@ -55,15 +55,24 @@ Production builds (APK/IPA/store) use the matching `eas.json` profile (`eas buil
 Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` (`0001_init.sql` = schema/RLS/
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
-1. Create a project at [supabase.com](https://supabase.com), run `0001_init.sql` then `0002_visit_media_storage.sql`
-   in the SQL Editor, in that order.
+1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
+   the SQL Editor, in filename order (`0001` … `0008`). Existing projects: run only the ones not yet applied —
+   `0008_audit_hardening.sql` is required (security fixes; see its header).
+   Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
+   ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and
    `SUPABASE_SERVICE_ROLE_KEY` (from Project Settings → API). **Never commit `.env`.**
 3. `npm run seed:supabase` — one-time, creates 10 demo accounts (one per role) + 2 demo stores (see
    `src/store/seed.ts`). This is demo data only — real 47-city store master data and the real 215-account
    roster come in via the CSV bulk-import flow (Import screen), not this script.
-4. Deploy the admin edge function (required for account creation, including bulk provisioning):
-   `npx supabase functions deploy admin-users --project-ref <ref>` (see `supabase/functions/admin-users/index.ts`).
+4. Deploy both edge functions (redeploy after pulling `0008` — they changed with it):
+   `npx supabase functions deploy admin-users --project-ref <ref>` (account creation incl. bulk, password reset) and
+   `npx supabase functions deploy send-push --project-ref <ref>` (chat push notifications).
+   New auth users start **inactive** with no trusted role (`handle_new_auth_user`, 0008); `admin-users` and the
+   seed script are what grant the role/team and activate them.
+
+The login screen's demo-account shortcuts only appear in dev builds, or when `EXPO_PUBLIC_SHOW_DEMO_ACCOUNTS=true`
+is set (e.g. a UAT build against the demo project) — never enable that against real data.
 
 Login uses a plain username in the UI, mapped under the hood to a synthetic email `{username}@internal.spc`
 through Supabase Auth (`src/store/useStore.ts`).

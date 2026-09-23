@@ -6,7 +6,7 @@ import { showDialog } from '../components/dialog';
 import { CATEGORY_LABEL } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
-import { getRange, PERIODS, PeriodKey, inRange } from '../utils/period';
+import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
 import { toCsv } from '../utils/csv';
 import { exportCsv } from '../utils/export';
 
@@ -63,10 +63,14 @@ function TrendBars({ title, data }: { title: string; data: Array<{ label: string
 
 function dayBuckets(range: { from: number; to: number }, maxBuckets = 31): Array<{ from: number; to: number; label: string }> {
   const DAY = 86400000;
-  const totalDays = Math.max(1, Math.min(maxBuckets, Math.round((range.to - range.from) / DAY)));
+  const spanDays = Math.round((range.to - range.from) / DAY);
+  const totalDays = Math.max(1, Math.min(maxBuckets, spanDays));
+  // Ranges longer than maxBuckets (e.g. "Semua", whose range starts at epoch 0)
+  // show the most recent days, not the first days of the range (1 Jan 1970).
+  const start = spanDays > maxBuckets ? range.to - maxBuckets * DAY : range.from;
   const out: Array<{ from: number; to: number; label: string }> = [];
   for (let i = 0; i < totalDays; i++) {
-    const from = range.from + i * DAY;
+    const from = start + i * DAY;
     out.push({ from, to: from + DAY, label: dayLabel(from) });
   }
   return out;
@@ -139,7 +143,7 @@ export default function ManagementDashboard() {
   const sosPct = totalFacing > 0 ? Math.round((100 * ownFacing) / totalFacing) : null;
   const offtakeSum = offtakeInRange.reduce((t, r) => t + r.unitsSold, 0);
 
-  const monthlyKey = new Date().toISOString().slice(0, 7);
+  const monthlyKey = monthKey();
   const targetSum = targets
     .filter((t) => t.periodKey === monthlyKey && (t.storeId === null || storeIds.has(t.storeId)))
     .reduce((sum, t) => sum + (t.offtakeTarget ?? 0), 0);

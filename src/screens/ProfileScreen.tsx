@@ -11,6 +11,7 @@ export default function ProfileScreen() {
   const navigation = useNavigation<any>();
   const teams = useStore((s) => s.teams);
   const logout = useStore((s) => s.logout);
+  const pendingCount = useStore((s) => s.pendingOps.length);
   const team = teams.find((t) => t.id === me.teamId);
 
   return (
@@ -44,10 +45,16 @@ export default function ProfileScreen() {
         title="Keluar"
         variant="danger"
         onPress={() =>
-          showDialog('Keluar dari akun?', undefined, [
-            { label: 'Batal' },
-            { label: 'Keluar', destructive: true, onPress: () => logout() },
-          ])
+          showDialog(
+            'Keluar dari akun?',
+            pendingCount
+              ? `Masih ada ${pendingCount} data offline yang belum tersinkron. Data tetap tersimpan di HP ini dan baru terkirim setelah Anda login lagi di HP ini — sebaiknya sambungkan internet dulu sebelum keluar.`
+              : undefined,
+            [
+              { label: 'Batal' },
+              { label: 'Keluar', destructive: true, onPress: () => logout() },
+            ],
+          )
         }
       />
     </ScrollView>

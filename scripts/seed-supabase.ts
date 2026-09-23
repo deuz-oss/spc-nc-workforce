@@ -51,24 +51,30 @@ async function main() {
       email,
       password: u.password,
       email_confirm: true,
-      user_metadata: { name: u.name, username: u.username, role: u.role, team_id: u.teamId, city: u.city, phone: u.phone },
+      user_metadata: { name: u.name, username: u.username, city: u.city, phone: u.phone },
     });
+    let userId: string;
     if (error) {
-      if (error.message.toLowerCase().includes('already')) {
-        const { data: list, error: listErr } = await supabase.auth.admin.listUsers();
-        if (listErr) throw listErr;
-        const existing = list.users.find((x) => x.email === email);
-        if (!existing) throw error;
-        idMap.set(u.id, existing.id);
-        usernameToUuid.set(u.username, existing.id);
-        console.log(`  ${u.username} already exists, reusing ${existing.id}`);
-        continue;
-      }
-      throw error;
+      if (!error.message.toLowerCase().includes('already')) throw error;
+      const { data: list, error: listErr } = await supabase.auth.admin.listUsers({ perPage: 1000 });
+      if (listErr) throw listErr;
+      const existing = list.users.find((x) => x.email === email);
+      if (!existing) throw error;
+      userId = existing.id;
+      console.log(`  ${u.username} already exists, reusing ${existing.id}`);
+    } else {
+      userId = data.user.id;
+      console.log(`  created ${u.username} -> ${data.user.id}`);
     }
-    idMap.set(u.id, data.user.id);
-    usernameToUuid.set(u.username, data.user.id);
-    console.log(`  created ${u.username} -> ${data.user.id}`);
+    // handle_new_auth_user (0008 migration) creates profiles inactive and never
+    // trusts user metadata for role/team — grant them here with the service role.
+    const { error: activateErr } = await supabase
+      .from('profiles')
+      .update({ role: u.role, team_id: u.teamId, active: true })
+      .eq('id', userId);
+    if (activateErr) throw activateErr;
+    idMap.set(u.id, userId);
+    usernameToUuid.set(u.username, userId);
   }
 
   // 3. Wire team.tl_id / team.arco_id now that the real uuids exist.

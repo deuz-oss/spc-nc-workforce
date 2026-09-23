@@ -34,20 +34,36 @@ export type QueuedOp =
   | { id: string; type: 'submitShareOfShelf'; row: Omit<ShareOfShelfRow, 'photoUrl'>; localPhotoUri: string }
   | { id: string; type: 'submitPaidVisibility'; row: Omit<PaidVisibilityRow, 'photoUrl'>; localPhotoUri: string };
 
-const QUEUE_KEY = 'spc_nc_offline_queue_v1';
+/** Pre-audit single shared key — any ops found here are migrated into the
+ * first user's queue that loads after upgrading. */
+const LEGACY_QUEUE_KEY = 'spc_nc_offline_queue_v1';
 
-export async function loadQueue(): Promise<QueuedOp[]> {
+/** One queue per user: ops carry that user's ids and can only pass RLS under
+ * that user's session, so a queue left behind at logout must never be
+ * replayed by whoever logs in next on the same device. */
+const queueKey = (userId: string) => `spc_nc_offline_queue_v2:${userId}`;
+
+export async function loadQueue(userId: string): Promise<QueuedOp[]> {
   try {
-    const raw = await AsyncStorage.getItem(QUEUE_KEY);
-    return raw ? (JSON.parse(raw) as QueuedOp[]) : [];
+    const raw = await AsyncStorage.getItem(queueKey(userId));
+    const queue = raw ? (JSON.parse(raw) as QueuedOp[]) : [];
+    const legacyRaw = await AsyncStorage.getItem(LEGACY_QUEUE_KEY);
+    if (legacyRaw) {
+      const legacy = JSON.parse(legacyRaw) as QueuedOp[];
+      const merged = [...legacy.filter((l) => !queue.some((q) => q.id === l.id)), ...queue];
+      await AsyncStorage.setItem(queueKey(userId), JSON.stringify(merged));
+      await AsyncStorage.removeItem(LEGACY_QUEUE_KEY);
+      return merged;
+    }
+    return queue;
   } catch {
     return [];
   }
 }
 
-export async function saveQueue(queue: QueuedOp[]): Promise<void> {
+export async function saveQueue(userId: string, queue: QueuedOp[]): Promise<void> {
   try {
-    await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
+    await AsyncStorage.setItem(queueKey(userId), JSON.stringify(queue));
   } catch {
     /* best-effort — worst case the queue is lost on next cold start */
   }

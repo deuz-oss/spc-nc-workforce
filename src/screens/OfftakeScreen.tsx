@@ -21,7 +21,9 @@ export default function OfftakeScreen() {
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 
-  const products = useStore((s) => s.products.filter((p) => p.active));
+  const allProducts = useStore((s) => s.products);
+  // Filter outside the selector — a selector returning a new array each call is an unstable snapshot under zustand v5.
+  const products = useMemo(() => allProducts.filter((p) => p.active), [allProducts]);
   const submitOfftake = useStore((s) => s.submitOfftake);
 
   const [query, setQuery] = useState('');

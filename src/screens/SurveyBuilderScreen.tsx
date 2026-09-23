@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Empty, Field, H, Input, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { SURVEY_BUILDER_ROLES } from '../config';
+import { NUTRITION_QUIZ_CAMPAIGN_TAG, SURVEY_BUILDER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { SurveyQuestion } from '../types';
@@ -19,7 +19,10 @@ interface DraftQuestion extends SurveyQuestion {
 export default function SurveyBuilderScreen() {
   const navigation = useNavigation<any>();
   const me = useCurrentUser()!;
-  const surveys = useStore((s) => s.surveys.filter((sv) => sv.campaignTag !== 'nutrition_quiz_v1'));
+  const allSurveys = useStore((s) => s.surveys);
+  // Filter outside the selector: a selector returning a fresh array every call
+  // makes zustand re-render on every store change.
+  const surveys = useMemo(() => allSurveys.filter((sv) => sv.campaignTag !== NUTRITION_QUIZ_CAMPAIGN_TAG), [allSurveys]);
   const upsertSurvey = useStore((s) => s.upsertSurvey);
 
   const [creating, setCreating] = useState(false);
@@ -49,11 +52,18 @@ export default function SurveyBuilderScreen() {
     setQuestions([]);
   };
 
-  const canSave = title.trim().length > 0 && questions.length > 0 && questions.every((q) => q.text.trim().length > 0);
+  const optionsOf = (q: DraftQuestion) => q.optionsText.split(',').map((o) => o.trim()).filter(Boolean);
+  const canSave =
+    title.trim().length > 0 &&
+    questions.length > 0 &&
+    questions.every((q) => q.text.trim().length > 0 && (q.type !== 'multiple_choice' || optionsOf(q).length >= 2));
 
   const save = async () => {
     if (!canSave) {
-      showDialog('Belum lengkap', 'Isi judul survey dan minimal satu pertanyaan (semua pertanyaan harus punya teks).');
+      showDialog(
+        'Belum lengkap',
+        'Isi judul survey dan minimal satu pertanyaan. Semua pertanyaan harus punya teks, dan pilihan ganda minimal 2 pilihan.',
+      );
       return;
     }
     setBusy(true);
@@ -65,7 +75,7 @@ export default function SurveyBuilderScreen() {
           id: q.id,
           text: q.text.trim(),
           type: q.type,
-          options: q.type === 'multiple_choice' ? q.optionsText.split(',').map((o) => o.trim()).filter(Boolean) : undefined,
+          options: q.type === 'multiple_choice' ? optionsOf(q) : undefined,
         })),
         campaignTag: campaignTag.trim() || undefined,
         createdBy: me.id,

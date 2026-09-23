@@ -23,11 +23,13 @@ export default function ConsumerDetailScreen() {
   const ntgGwps = useStore((s) => s.ntgGwps);
   const offtakeRows = useStore((s) => s.offtakeRows);
   const upsertConsumer = useStore((s) => s.upsertConsumer);
-  const upsertNtgGwp = useStore((s) => s.upsertNtgGwp);
+  const addNtgGwp = useStore((s) => s.addNtgGwp);
 
   const existing = consumerId ? consumers.find((c) => c.id === consumerId) : undefined;
   const history = useMemo(
-    () => (consumerId ? ntgGwps.filter((g) => g.consumerId === consumerId) : []),
+    // Newest first — explicit sort, since hydrated/realtime rows arrive in no particular order.
+    () =>
+      consumerId ? ntgGwps.filter((g) => g.consumerId === consumerId).sort((a, b) => b.createdAt - a.createdAt) : [],
     [ntgGwps, consumerId],
   );
   const currentStage: NtgGwpStage = history[0]?.stage ?? 'approached';
@@ -78,7 +80,9 @@ export default function ConsumerDetailScreen() {
       const cErr = await upsertConsumer(consumer);
       if (cErr) return; // upsertConsumer already showed a dialog
 
-      if (canAdvanceStage && visitId) {
+      // Only record a funnel row when the stage actually moves (or on create) —
+      // saving a contact-detail edit must not append a duplicate stage entry.
+      if (canAdvanceStage && visitId && (isCreate || stage !== currentStage)) {
         const ntg = {
           id: uid('ntg_'),
           consumerId: consumer.id,
@@ -89,7 +93,7 @@ export default function ConsumerDetailScreen() {
           offtakeId: stage === 'gwp_given' ? offtakeId : undefined,
           createdAt: now,
         };
-        const gErr = await upsertNtgGwp(ntg);
+        const gErr = await addNtgGwp(ntg);
         if (gErr) return;
       }
 

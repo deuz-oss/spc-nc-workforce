@@ -15,6 +15,7 @@ export default function StoreDetailScreen() {
   const navigation = useNavigation<any>();
   const me = useCurrentUser()!;
   const store = useStore((s) => s.stores.find((m) => m.id === route.params.storeId));
+  const stores = useStore((s) => s.stores);
   const users = useStore((s) => s.users);
   const visits = useStore((s) => s.visits);
   const attendances = useStore((s) => s.attendances);
@@ -51,6 +52,20 @@ export default function StoreDetailScreen() {
       showDialog('Belum Clock-in', 'Clock-in terlebih dahulu di tab Dashboard sebelum check-in ke toko.');
       return;
     }
+    // One store at a time — reports and CFT are attributed per visit.
+    const openElsewhere = visits.find((v) => v.ncId === me.id && !v.checkOutAt && v.storeId !== store.id);
+    if (openElsewhere) {
+      const other = stores.find((s) => s.id === openElsewhere.storeId);
+      showDialog(
+        'Masih Check-in di Toko Lain',
+        `Selesaikan kunjungan di ${other?.name ?? 'toko sebelumnya'} (check-out) sebelum check-in ke toko ini.`,
+        [
+          { label: 'Batal' },
+          { label: 'Buka Kunjungan', onPress: () => navigation.navigate('StoreVisit', { visitId: openElsewhere.id }) },
+        ],
+      );
+      return;
+    }
     setChecking(true);
     let lat: number, lng: number;
     try {
@@ -77,7 +92,10 @@ export default function StoreDetailScreen() {
       }
     }
     try {
-      const id = await startVisit(store.id, me.id, { lat, lng }, dist, true);
+      // A store without a GPS pin can't be geofence-verified — record the
+      // visit, but never as geo-valid (it would otherwise count toward the
+      // PRD §7 valid-visit KPI with zero location evidence).
+      const id = await startVisit(store.id, me.id, { lat, lng }, dist, dist != null);
       navigation.navigate('StoreVisit', { visitId: id });
     } catch {
       showDialog('Gagal Check-in', 'Tidak dapat menyimpan kunjungan ke server. Periksa koneksi internet dan coba lagi.');

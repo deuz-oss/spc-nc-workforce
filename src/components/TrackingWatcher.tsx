@@ -29,24 +29,35 @@ export function TrackingWatcher() {
   useEffect(() => {
     if (!me || !activeId) {
       if (Platform.OS !== 'web') {
-        Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME).then((started) => {
-          if (started) Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME);
-        });
+        Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
+          .then((started) => (started ? Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME) : undefined))
+          .catch(() => {});
       }
       return;
     }
 
+    const userId = me.id; // narrowed for the async closure below
     let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
 
     (async () => {
+      try {
+        await startTracking();
+      } catch (e) {
+        // e.g. background permission denied, or the foreground service can't
+        // start — clock-in itself stays valid, only route recording is lost.
+        console.warn('Route tracking could not start:', e instanceof Error ? e.message : e);
+      }
+    })();
+
+    async function startTracking() {
       const fg = await Location.requestForegroundPermissionsAsync();
       if (fg.status !== 'granted' || cancelled) return;
 
       if (Platform.OS === 'web') {
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, timeInterval: TRACK_INTERVAL_MS, distanceInterval: 10 },
-          (pos) => addRoutePoint(me.id, { lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          (pos) => addRoutePoint(userId, { lat: pos.coords.latitude, lng: pos.coords.longitude }),
         );
         return;
       }
@@ -68,7 +79,7 @@ export function TrackingWatcher() {
           notificationBody: 'Merekam rute perjalanan selama sesi absensi aktif.',
         },
       });
-    })();
+    }
 
     return () => {
       cancelled = true;

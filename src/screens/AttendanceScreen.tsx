@@ -6,6 +6,7 @@ import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDate, fmtDurClock, fmtDurShort, fmtKm, fmtTime } from '../utils/format';
 import { polylineKm } from '../utils/geo';
+import { getCurrentCoords } from '../utils/location';
 
 /** Mirror ringkas dari sesi aktif — tab ini bisa clock-out tanpa harus balik ke Dashboard. */
 function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
@@ -26,8 +27,11 @@ function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
   const doClockOut = async () => {
     setBusy(true);
     try {
+      // Record where the user actually is at clock-out; the last route point
+      // can be stale (tracking stopped/denied). Fall back to it only if no fix.
       const last = active.route[active.route.length - 1] ?? { lat: active.clockInLat, lng: active.clockInLng };
-      const queued = await clockOutStore(last);
+      const pos = (await getCurrentCoords()) ?? last;
+      const queued = await clockOutStore(pos);
       if (!queued) showDialog('Clock Out berhasil');
     } catch {
       showDialog('Gagal Clock Out', 'Tidak dapat menyimpan clock-out ke server. Periksa koneksi internet dan coba lagi.');
@@ -46,7 +50,7 @@ function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
       <Muted style={{ marginBottom: 8 }}>
         Masuk {fmtTime(active.clockInAt)} · {fmtKm(polylineKm(active.route))} · {active.route.length} titik rute
       </Muted>
-      <Btn title="CLOCK OUT" variant="danger" onPress={doClockOut} disabled={busy} />
+      <Btn title="CLOCK OUT" variant="danger" onPress={doClockOut} disabled={busy} loading={busy} />
     </Card>
   );
 }

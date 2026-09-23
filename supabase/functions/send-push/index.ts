@@ -34,10 +34,11 @@ Deno.serve(async (req) => {
     const authHeader = req.headers.get('Authorization');
     if (!authHeader) return json({ error: 'Missing Authorization header' }, 401);
 
-    // Confirms the caller is a real authenticated user. The actual
-    // authorization for "may this person message this recipient" already
-    // happened at the messages_insert RLS layer before the app ever calls
-    // this function — this is just push delivery, not a second permission gate.
+    // Confirms the caller is a real authenticated user. This function is
+    // callable directly (not only after a successful messages insert), so it
+    // must authorize on its own: the caller has to share a conversation with
+    // the recipient, and the notification title is the caller's real profile
+    // name — never a client-supplied string, which would allow spoofed pushes.
     const callerClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       global: { headers: { Authorization: authHeader } },
     });
@@ -51,8 +52,26 @@ Deno.serve(async (req) => {
     if (!body.recipientUserId || !body.body) {
       return json({ error: 'Missing recipientUserId/body' }, 400);
     }
+    // Interpolated into a PostgREST filter below — must be a bare uuid.
+    if (!/^[0-9a-f-]{36}$/i.test(body.recipientUserId)) {
+      return json({ error: 'Invalid recipientUserId' }, 400);
+    }
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+
+    const { data: shared } = await admin
+      .from('conversations')
+      .select('id')
+      .or(
+        `and(participant_a.eq.${caller.id},participant_b.eq.${body.recipientUserId}),` +
+          `and(participant_a.eq.${body.recipientUserId},participant_b.eq.${caller.id})`,
+      )
+      .limit(1);
+    if (!shared?.length) return json({ error: 'Forbidden: no conversation with recipient' }, 403);
+
+    const { data: sender } = await admin.from('profiles').select('name, active').eq('id', caller.id).single();
+    if (!sender?.active) return json({ error: 'Forbidden' }, 403);
+
     const { data: recipient, error: recErr } = await admin
       .from('profiles')
       .select('push_token')
@@ -70,8 +89,8 @@ Deno.serve(async (req) => {
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({
         to: recipient.push_token,
-        title: body.title,
-        body: body.body,
+        title: sender.name,
+        body: String(body.body).slice(0, 200),
         sound: 'default',
       }),
     });

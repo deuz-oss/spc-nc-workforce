@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { C, F } from '../theme';
-import { useStore } from '../store/useStore';
+import { ShownError, useStore } from '../store/useStore';
 
 interface DraftRow {
   key: string;
@@ -25,7 +25,9 @@ export default function PriceMonitoringScreen() {
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 
-  const products = useStore((s) => s.products.filter((p) => p.active));
+  const allProducts = useStore((s) => s.products);
+  // Filter outside the selector — a selector returning a new array each call is an unstable snapshot under zustand v5.
+  const products = useMemo(() => allProducts.filter((p) => p.active), [allProducts]);
   const submitPriceMonitoring = useStore((s) => s.submitPriceMonitoring);
 
   const [query, setQuery] = useState('');
@@ -99,8 +101,8 @@ export default function PriceMonitoringScreen() {
       );
       showDialog('Price Monitoring Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
-      if (e?.message && e.message !== 'Tidak ada koneksi internet.') {
-        showDialog('Gagal Menyimpan', e.message);
+      if (!(e instanceof ShownError)) {
+        showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');
       }
     } finally {
       setBusy(false);

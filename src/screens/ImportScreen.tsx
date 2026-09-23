@@ -41,11 +41,12 @@ function StoreImportSection() {
   const navigation = useNavigation<any>();
   const me = useCurrentUser()!;
   const users = useStore((s) => s.users);
-  const upsertStore = useStore((s) => s.upsertStore);
+  const addStoresBulk = useStore((s) => s.addStoresBulk);
 
   const [rows, setRows] = useState<StoreRow[] | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [ncId, setNcId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
 
   const ncs = useMemo(() => users.filter((u) => u.role === 'nc' && u.active), [users]);
   const assignable = me.role === 'tl' ? ncs.filter((a) => a.teamId === me.teamId) : ncs;
@@ -103,31 +104,44 @@ function StoreImportSection() {
     }
   };
 
-  const doImport = () => {
+  const doImport = async () => {
     if (!rows?.length) return;
     const nc = ncId ? users.find((u) => u.id === ncId) : null;
-    rows.forEach((r) => {
-      upsertStore({
-        id: uid('st_'),
-        name: r.name,
-        address: r.address,
-        city: r.city,
-        channel: r.channel,
-        account: r.account,
-        category: r.category,
-        lat: r.lat,
-        lng: r.lng,
-        assignedNcId: nc?.id ?? null,
-        teamId: nc?.teamId ?? me.teamId ?? null,
-        source: 'imported',
-        createdAt: Date.now(),
-      });
-    });
-    showDialog(
-      'Impor berhasil',
-      `${rows.length} toko ditambahkan${nc ? ` dan di-assign ke ${nc.name}` : ' (belum di-assign)'}.`,
-      [{ label: 'OK', onPress: () => navigation.goBack() }],
-    );
+    const now = Date.now();
+    setImporting(true);
+    try {
+      const res = await addStoresBulk(
+        rows.map((r) => ({
+          id: uid('st_'),
+          name: r.name,
+          address: r.address,
+          city: r.city,
+          channel: r.channel,
+          account: r.account,
+          category: r.category,
+          lat: r.lat,
+          lng: r.lng,
+          assignedNcId: nc?.id ?? null,
+          teamId: nc?.teamId ?? me.teamId ?? null,
+          source: 'imported' as const,
+          createdAt: now,
+        })),
+      );
+      if (res.errors.length === 0) {
+        showDialog(
+          'Impor berhasil',
+          `${res.created} toko ditambahkan${nc ? ` dan di-assign ke ${nc.name}` : ' (belum di-assign)'}.`,
+          [{ label: 'OK', onPress: () => navigation.goBack() }],
+        );
+      } else {
+        showDialog(
+          res.created ? 'Impor Sebagian' : 'Impor Gagal',
+          `${res.created} dari ${rows.length} toko tersimpan.\n${res.errors.slice(0, 3).join('\n')}`,
+        );
+      }
+    } finally {
+      setImporting(false);
+    }
   };
 
   if (!STORE_MANAGER_ROLES.includes(me.role)) {
@@ -168,7 +182,7 @@ function StoreImportSection() {
               </View>
             )}
             <View style={{ marginTop: 10 }}>
-              <Btn title={`Impor ${rows.length} Toko`} onPress={doImport} />
+              <Btn title={`Impor ${rows.length} Toko`} onPress={doImport} disabled={importing} loading={importing} />
             </View>
           </Card>
 
@@ -319,7 +333,7 @@ function UserImportSection() {
           Format kolom CSV:{'\n'}
           <Text style={{ fontFamily: F.bold, color: C.text }}>nama, username, password, role, kota, telepon</Text>
           {'\n'}Role valid: {VALID_ROLES.join(', ')}.{'\n'}
-          Tim (teamId) diatur belakangan lewat layar Pengguna — impor CSV ini fokus pada penyediaan akun 215 orang
+          Tim diatur belakangan lewat tombol "Ubah" di layar Pengguna — impor CSV ini fokus pada penyediaan akun 215 orang
           secara massal (PRD §13), bukan penugasan tim.
         </Muted>
         <View style={{ gap: 8, marginTop: 10 }}>

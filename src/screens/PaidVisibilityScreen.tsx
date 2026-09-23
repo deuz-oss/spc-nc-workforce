@@ -7,7 +7,7 @@ import { Btn, Card, Chip, H, Muted, SectionHeader, StickyFooter } from '../compo
 import { showDialog } from '../components/dialog';
 import { COMPLIANCE_CHECKLIST_ITEMS, VISIBILITY_TYPES } from '../config';
 import { C, F } from '../theme';
-import { useStore } from '../store/useStore';
+import { ShownError, useStore } from '../store/useStore';
 
 /** Paid Visibility (PRD §5.5) — required photo, compliance checklist. Visibility
  * type list and checklist items aren't specified by the client brief; defaults
@@ -58,8 +58,8 @@ export default function PaidVisibilityScreen() {
       await submitPaidVisibility(visitId, storeId, { visibilityType, complianceChecklist: checklist }, photoUri);
       showDialog('Paid Visibility Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
-      if (e?.message && !['Tidak ada koneksi internet.', 'Upload foto gagal.'].includes(e.message)) {
-        showDialog('Gagal Menyimpan', e.message);
+      if (!(e instanceof ShownError)) {
+        showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');
       }
     } finally {
       setBusy(false);

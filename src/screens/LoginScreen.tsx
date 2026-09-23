@@ -8,6 +8,11 @@ import { C, F, T } from '../theme';
 import { useBreakpoint } from '../utils/responsive';
 import { useStore } from '../store/useStore';
 
+/** Demo logins (from `npm run seed:supabase`) are only advertised in dev builds
+ * or when explicitly enabled — in a production build they would publish working
+ * credentials (including super admin) to anyone who opens the app. */
+const SHOW_DEMO_ACCOUNTS = __DEV__ || process.env.EXPO_PUBLIC_SHOW_DEMO_ACCOUNTS === 'true';
+
 const DEMO_ACCOUNTS = [
   { role: 'Super Admin', u: 'superadmin', p: 'super123' },
   { role: 'Reckitt (Client, Read-only)', u: 'reckitt', p: 'reckitt123' },
@@ -53,10 +58,20 @@ export default function LoginScreen() {
   const [busy, setBusy] = useState(false);
 
   const submit = async () => {
+    if (!username.trim() || !password) {
+      setErr('Isi username dan password.');
+      return;
+    }
     setBusy(true);
-    const error = await login(username, password);
+    let error: string | null;
+    try {
+      error = await login(username, password);
+    } catch {
+      error = 'Tidak dapat terhubung ke server. Periksa koneksi internet dan coba lagi.';
+    } finally {
+      setBusy(false);
+    }
     setErr(error);
-    setBusy(false);
     if (error) announce(error);
   };
 
@@ -104,27 +119,31 @@ export default function LoginScreen() {
         <Btn title="Masuk" onPress={submit} loading={busy} disabled={busy} />
       </Card>
 
-      <TouchableOpacity
-        onPress={() => setShowDemo((v) => !v)}
-        activeOpacity={0.7}
-        style={styles.demoToggle}
-      >
-        <Ionicons name="flask-outline" size={14} color={toggleColor} />
-        <Text style={[styles.demoToggleText, { color: toggleColor }]}>
-          {showDemo ? 'Sembunyikan akun demo' : 'Lingkungan Demo — lihat akun contoh'}
-        </Text>
-        <Ionicons name={showDemo ? 'chevron-up' : 'chevron-down'} size={14} color={toggleColor} />
-      </TouchableOpacity>
+      {SHOW_DEMO_ACCOUNTS && (
+        <>
+          <TouchableOpacity
+            onPress={() => setShowDemo((v) => !v)}
+            activeOpacity={0.7}
+            style={styles.demoToggle}
+          >
+            <Ionicons name="flask-outline" size={14} color={toggleColor} />
+            <Text style={[styles.demoToggleText, { color: toggleColor }]}>
+              {showDemo ? 'Sembunyikan akun demo' : 'Lingkungan Demo — lihat akun contoh'}
+            </Text>
+            <Ionicons name={showDemo ? 'chevron-up' : 'chevron-down'} size={14} color={toggleColor} />
+          </TouchableOpacity>
 
-      {showDemo && (
-        <Card style={{ marginTop: 10 }}>
-          <Muted>Ketuk salah satu peran untuk isi otomatis (hanya tersedia setelah `npm run seed:supabase`):</Muted>
-          <View style={{ gap: 8, marginTop: 10 }}>
-            {DEMO_ACCOUNTS.map((a) => (
-              <Btn key={a.u} small variant="outline" title={`${a.role} · ${a.u}`} onPress={() => quick(a.u, a.p)} />
-            ))}
-          </View>
-        </Card>
+          {showDemo && (
+            <Card style={{ marginTop: 10 }}>
+              <Muted>Ketuk salah satu peran untuk isi otomatis (hanya tersedia setelah `npm run seed:supabase`):</Muted>
+              <View style={{ gap: 8, marginTop: 10 }}>
+                {DEMO_ACCOUNTS.map((a) => (
+                  <Btn key={a.u} small variant="outline" title={`${a.role} · ${a.u}`} onPress={() => quick(a.u, a.p)} />
+                ))}
+              </View>
+            </Card>
+          )}
+        </>
       )}
 
       <Text style={[styles.footer, { color: toggleColor }]}>© 2026 SPC Group · NC Workforce — Reckitt/Mead Johnson</Text>

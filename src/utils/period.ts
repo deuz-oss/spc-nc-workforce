@@ -50,6 +50,13 @@ export const MONTHS_SHORT = [
   'Des',
 ];
 
+/** 'YYYY-MM' in LOCAL time — the targets/scorecards period_key format. Never
+ * derive this from toISOString(): that's UTC, so from 00:00-07:00 WIB on the
+ * 1st it still names the previous month. */
+export function monthKey(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+}
+
 export function inRange(ts: number, r: TimeRange): boolean {
   return ts >= r.from && ts < r.to;
 }

@@ -17,7 +17,7 @@ import { uid } from '../utils/uuid';
  *   - explicit consent screen before any question
  *   - first question (age bracket) branches: under 1 year gets an ASI/MPASI-
  *     only informational branch with NO product recommendation and NO stage
- *     advancement / follow-up trigger (finishUnder1 never calls upsertNtgGwp)
+ *     advancement / follow-up trigger (finishUnder1 never calls addNtgGwp)
  *   - no child weight/height/name/DOB anywhere — only the existing bracket
  *   - output is a rule-based segment tag, not a medical assessment
  */
@@ -94,7 +94,7 @@ export default function NutritionQuizScreen() {
   const consumers = useStore((s) => s.consumers);
   const surveys = useStore((s) => s.surveys);
   const upsertConsumer = useStore((s) => s.upsertConsumer);
-  const upsertNtgGwp = useStore((s) => s.upsertNtgGwp);
+  const addNtgGwp = useStore((s) => s.addNtgGwp);
   const submitSurveyResponse = useStore((s) => s.submitSurveyResponse);
 
   const consumer = consumers.find((c) => c.id === consumerId);
@@ -141,7 +141,7 @@ export default function NutritionQuizScreen() {
       });
       if (err) return;
       await upsertConsumer({ ...consumer, childAgeBracket: ageBracket ?? consumer.childAgeBracket });
-      // Deliberately NOT calling upsertNtgGwp here — under-1-year branch must
+      // Deliberately NOT calling addNtgGwp here — under-1-year branch must
       // not advance the funnel stage or trigger any NC follow-up (PRD §6).
       setStep('done_under1');
     } finally {
@@ -178,7 +178,7 @@ export default function NutritionQuizScreen() {
   const markQuizCompleted = async () => {
     setBusy(true);
     try {
-      const err = await upsertNtgGwp({
+      const err = await addNtgGwp({
         id: uid('ntg_'),
         consumerId,
         visitId,

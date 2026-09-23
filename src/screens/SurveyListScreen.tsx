@@ -1,7 +1,8 @@
-import React from 'react';
+import React, { useMemo } from 'react';
 import { FlatList, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Empty, ListRow, SectionHeader } from '../components/ui';
+import { NUTRITION_QUIZ_CAMPAIGN_TAG } from '../config';
 import { useStore } from '../store/useStore';
 
 /** Survey (PRD §5.7) — generic, ad hoc/campaign-driven question sets, tied to
@@ -14,7 +15,13 @@ export default function SurveyListScreen() {
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 
-  const surveys = useStore((s) => s.surveys);
+  const allSurveys = useStore((s) => s.surveys);
+  // The Nutrition Quiz's backing row has no questions (its flow lives in
+  // NutritionQuizScreen) — listed here it would be an unsubmittable empty form.
+  const surveys = useMemo(
+    () => allSurveys.filter((s) => s.campaignTag !== NUTRITION_QUIZ_CAMPAIGN_TAG && s.questions.length > 0),
+    [allSurveys],
+  );
 
   return (
     <View role="main" style={{ flex: 1 }}>

@@ -13,14 +13,14 @@ import { fmtDateTime, fmtDurClock } from '../utils/format';
  * MODULE_ROUTE. The Nutrition Quiz (§6) isn't listed separately here: it's
  * reached from a consumer's NTG & GWP funnel (ConsumerDetailScreen), not from
  * this generic report list. */
-const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence: string; phase: string }> = [
-  { key: 'stock_taking', label: 'Stock Taking', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
-  { key: 'offtake', label: 'Offtake', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
-  { key: 'ntg_gwp', label: 'NTG & GWP', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
-  { key: 'share_of_shelf', label: 'Share of Shelf', group: 'Sales & Stock', cadence: 'Bi-weekly', phase: 'Phase 3' },
-  { key: 'paid_visibility', label: 'Paid Visibility', group: 'Asset Tracking', cadence: 'Bi-weekly', phase: 'Phase 3' },
-  { key: 'price_monitoring', label: 'Price Monitoring', group: 'Weekly/periodic Task', cadence: 'Bi-weekly', phase: 'Phase 3' },
-  { key: 'survey', label: 'Survey', group: 'Weekly/periodic Task', cadence: 'Ad hoc', phase: 'Phase 3' },
+const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence: string }> = [
+  { key: 'stock_taking', label: 'Stock Taking', group: 'Sales & Stock', cadence: 'Harian' },
+  { key: 'offtake', label: 'Offtake', group: 'Sales & Stock', cadence: 'Harian' },
+  { key: 'ntg_gwp', label: 'NTG & GWP', group: 'Sales & Stock', cadence: 'Harian' },
+  { key: 'share_of_shelf', label: 'Share of Shelf', group: 'Sales & Stock', cadence: 'Bi-weekly' },
+  { key: 'paid_visibility', label: 'Paid Visibility', group: 'Asset Tracking', cadence: 'Bi-weekly' },
+  { key: 'price_monitoring', label: 'Price Monitoring', group: 'Weekly/periodic Task', cadence: 'Bi-weekly' },
+  { key: 'survey', label: 'Survey', group: 'Weekly/periodic Task', cadence: 'Ad hoc' },
 ];
 
 const MODULE_ROUTE: Record<string, string> = {
@@ -60,13 +60,14 @@ export default function StoreVisitScreen() {
     );
 
   const done = !!visit.checkOutAt;
-  const editable = !done && me.role === 'nc' && visit.ncId === me.id;
+  const isOwner = me.role === 'nc' && visit.ncId === me.id;
+  const editable = !done && isOwner;
   const isStale = !done && now - visit.checkInAt > 12 * 3600000;
 
   const checkOut = () => {
     showDialog(
       'Selesaikan Kunjungan?',
-      'Laporan (Stock Taking, Offtake, dll) untuk kunjungan ini diisi lewat modul masing-masing di Phase 2/3. Check-out hanya menutup sesi kunjungan toko.',
+      'Pastikan laporan (Stock Taking, Offtake, dll) untuk kunjungan ini sudah diisi. Check-out menutup sesi kunjungan toko.',
       [
         { label: 'Batal' },
         {
@@ -118,34 +119,26 @@ export default function StoreVisitScreen() {
           </View>
         </Card>
 
-        <Card>
-          <H>Laporan Kunjungan</H>
-          <Muted style={{ marginTop: 2 }}>
-            Isi laporan sesuai kategori tugas selama kunjungan ini berlangsung.
-          </Muted>
-          <View style={{ gap: 8, marginTop: 10 }}>
-            {REPORT_MODULES.map((m) => {
-              const route = MODULE_ROUTE[m.key];
-              return (
+        {/* Report forms are submit-only and RLS lets only the visit's own NC
+            insert — other roles review reports from the Validasi tab instead. */}
+        {isOwner && (
+          <Card>
+            <H>Laporan Kunjungan</H>
+            <Muted style={{ marginTop: 2 }}>
+              Isi laporan sesuai kategori tugas selama kunjungan ini berlangsung.
+            </Muted>
+            <View style={{ gap: 8, marginTop: 10 }}>
+              {REPORT_MODULES.map((m) => (
                 <ListRow
                   key={m.key}
-                  onPress={() =>
-                    route
-                      ? navigation.navigate(route, { visitId: visit.id, storeId: visit.storeId })
-                      : navigation.navigate('ComingSoon', {
-                          title: m.label,
-                          phase: m.phase,
-                          note: `Modul ${m.label} (${m.group}, cadence ${m.cadence}) belum diimplementasikan — lihat PRD §5 dan README.`,
-                        })
-                  }
+                  onPress={() => navigation.navigate(MODULE_ROUTE[m.key], { visitId: visit.id, storeId: visit.storeId })}
                   title={m.label}
                   subtitle={`${m.group} · ${m.cadence}`}
-                  meta={m.phase}
                 />
-              );
-            })}
-          </View>
-        </Card>
+              ))}
+            </View>
+          </Card>
+        )}
 
         {done && (
           <Card>

@@ -17,7 +17,7 @@ import { showDialog } from '../components/dialog';
 import { REPORT_TYPE_LABEL } from '../config';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
-import { getRange, PERIODS, PeriodKey, inRange } from '../utils/period';
+import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
 import { ReportType } from '../types';
 
@@ -119,7 +119,7 @@ export default function ValidationQueueScreen() {
         const offtakeInRange = offtakeRows
           .filter((r) => visitsById.get(r.visitId)?.ncId === nc.id && inRange(r.createdAt, range))
           .reduce((t, r) => t + r.unitsSold, 0);
-        const periodKeyMonthly = new Date().toISOString().slice(0, 7);
+        const periodKeyMonthly = monthKey();
         const target = targets.find((t) => t.ncId === nc.id && t.periodKey === periodKeyMonthly)?.offtakeTarget;
         return { nc, todays, risk, offtakeInRange, target };
       }),

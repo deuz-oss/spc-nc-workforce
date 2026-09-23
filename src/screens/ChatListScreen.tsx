@@ -88,7 +88,11 @@ export default function ChatListScreen() {
         rows.map((row) => {
           const convo = findConversation(conversations, row.type, me.id, row.id);
           const convoMessages = convo ? messages.filter((m) => m.conversationId === convo.id) : [];
-          const last = convoMessages[convoMessages.length - 1];
+          // Store order isn't chronological (hydrate order + realtime prepends) — pick the newest explicitly.
+          const last = convoMessages.reduce<(typeof convoMessages)[number] | undefined>(
+            (newest, m) => (!newest || m.createdAt > newest.createdAt ? m : newest),
+            undefined,
+          );
           const unread = convoMessages.some((m) => m.senderId !== me.id && m.readAt == null);
           return (
             <ListRow

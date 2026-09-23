@@ -6,6 +6,16 @@ import { uid } from './uuid';
 
 const BUCKET = 'report-media';
 
+const MIME_BY_EXT: Record<string, string> = {
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  png: 'image/png',
+  webp: 'image/webp',
+  heic: 'image/heic',
+  heif: 'image/heif',
+  pdf: 'application/pdf',
+};
+
 /**
  * Uploads a locally-picked photo/document (report evidence — stock taking,
  * share of shelf, paid visibility, price monitoring, per PRD §5) to Supabase
@@ -20,15 +30,16 @@ export async function uploadReportMedia(
   contentType?: string,
 ): Promise<string> {
   const path = `${visitId}/${uid()}.${ext}`;
+  // Without a real image type, Storage serves evidence photos as
+  // application/octet-stream and browsers download them instead of showing them.
+  const type = contentType ?? MIME_BY_EXT[ext.toLowerCase()] ?? 'application/octet-stream';
   if (Platform.OS === 'web') {
     const blob = await (await fetch(uri)).blob();
-    const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType });
+    const { error } = await supabase.storage.from(BUCKET).upload(path, blob, { contentType: contentType ?? (blob.type || type) });
     if (error) throw error;
   } else {
     const base64 = await FileSystem.readAsStringAsync(uri, { encoding: FileSystem.EncodingType.Base64 });
-    const { error } = await supabase.storage.from(BUCKET).upload(path, decode(base64), {
-      contentType: contentType ?? 'application/octet-stream',
-    });
+    const { error } = await supabase.storage.from(BUCKET).upload(path, decode(base64), { contentType: type });
     if (error) throw error;
   }
   return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
@@ -76,20 +87,6 @@ export async function localPhotoExists(uri: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/** Best-effort cleanup when a photo/doc is removed from a report; failures are non-fatal. */
-export function deleteReportMedia(publicUrl: string): void {
-  const marker = `/object/public/${BUCKET}/`;
-  const i = publicUrl.indexOf(marker);
-  if (i === -1) return;
-  const path = publicUrl.slice(i + marker.length);
-  supabase.storage
-    .from(BUCKET)
-    .remove([path])
-    .then(({ error }) => {
-      if (error) console.warn('deleteReportMedia failed:', error.message);
-    });
 }
 
 /** Best-effort file extension from a local URI, falling back to a default. */
