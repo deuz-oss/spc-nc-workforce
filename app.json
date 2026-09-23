@@ -1,0 +1,78 @@
+{
+  "expo": {
+    "name": "SPC NC Workforce",
+    "slug": "spc-nc-workforce",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "scheme": "spcncworkforce",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.spc.ncworkforce",
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Aplikasi memerlukan lokasi untuk check-in toko, absensi, dan pelacakan rute.",
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Aplikasi memerlukan lokasi untuk check-in toko, absensi, dan pelacakan rute.",
+        "NSCameraUsageDescription": "Kamera digunakan untuk foto bukti laporan (stok, share of shelf, visibility, dll).",
+        "NSPhotoLibraryUsageDescription": "Galeri digunakan untuk melampirkan foto bukti laporan.",
+        "UIBackgroundModes": ["location", "remote-notification"]
+      }
+    },
+    "android": {
+      "package": "com.spc.ncworkforce",
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1B3A",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "permissions": [
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "android.permission.POST_NOTIFICATIONS",
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      [
+        "expo-location",
+        {
+          "locationWhenInUsePermission": "Aplikasi memerlukan lokasi untuk check-in toko, absensi, dan pelacakan rute.",
+          "locationAlwaysAndWhenInUsePermission": "Aplikasi memerlukan lokasi untuk check-in toko, absensi, dan pelacakan rute.",
+          "isAndroidBackgroundLocationEnabled": true,
+          "isIosBackgroundLocationEnabled": true
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "cameraPermission": "Kamera digunakan untuk foto bukti laporan lapangan.",
+          "photosPermission": "Galeri digunakan untuk melampirkan foto bukti laporan."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#C9A227"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+      }
+    },
+    "owner": "REPLACE_WITH_EAS_OWNER"
+  }
+}
