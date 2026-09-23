@@ -1,3 +1,4 @@
+import { NUTRITION_QUIZ_CAMPAIGN_TAG, NUTRITION_QUIZ_SURVEY_ID } from '../config';
 import { Role, Store, Team } from '../types';
 
 /**
@@ -19,10 +20,19 @@ export interface SeedUser {
   phone?: string;
 }
 
+export interface SeedSurvey {
+  id: string;
+  title: string;
+  campaignTag?: string;
+  createdByUsername: string; // remapped to a real auth uuid by the seed script, like assignedNcUsername
+  createdAt: number;
+}
+
 export interface SeedResult {
   teams: Team[];
   users: SeedUser[];
   stores: Array<Omit<Store, 'assignedNcId'> & { assignedNcUsername: string | null }>;
+  surveys: SeedSurvey[];
 }
 
 export function buildSeed(): SeedResult {
@@ -76,5 +86,20 @@ export function buildSeed(): SeedResult {
     },
   ];
 
-  return { teams, users, stores };
+  // Backs the Nutrition Quiz (PRD §6, NutritionQuizScreen) — `questions` is
+  // deliberately empty: the quiz's branching logic lives in code, not the
+  // generic Survey question-list renderer, so this row exists only so
+  // survey_responses has something to attach to (and so it appears in
+  // survey listings/exports later), not as the source of the quiz content.
+  const surveys: SeedSurvey[] = [
+    {
+      id: NUTRITION_QUIZ_SURVEY_ID,
+      title: 'Quick Nutrition Check',
+      campaignTag: NUTRITION_QUIZ_CAMPAIGN_TAG,
+      createdByUsername: 'analyst',
+      createdAt: Date.now(),
+    },
+  ];
+
+  return { teams, users, stores, surveys };
 }

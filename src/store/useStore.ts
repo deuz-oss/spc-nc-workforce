@@ -9,11 +9,17 @@ import {
   Consumer,
   NtgGwp,
   OfftakeRow,
+  PaidVisibilityRow,
+  PriceMonitoringRow,
   Product,
   Role,
   RoutePoint,
+  ShareOfShelfRow,
   StockTakingRow,
   Store,
+  StoreCategory,
+  Survey,
+  SurveyResponse,
   Team,
   User,
   Visit,
@@ -64,6 +70,12 @@ interface StoreState {
   offtakeRows: OfftakeRow[];
   consumers: Consumer[];
   ntgGwps: NtgGwp[];
+  /** Phase 3 (PRD §16) — bi-weekly/periodic modules. */
+  shareOfShelfRows: ShareOfShelfRow[];
+  paidVisibilityRows: PaidVisibilityRow[];
+  priceMonitoringRows: PriceMonitoringRow[];
+  surveys: Survey[];
+  surveyResponses: SurveyResponse[];
   /** Clock-in/out, store check-in/out, and Stock Taking/Offtake submissions still waiting for connectivity to reach Supabase. */
   pendingOps: QueuedOp[];
 
@@ -130,6 +142,37 @@ interface StoreState {
   /** NTG & GWP consumer funnel (PRD §5.4) — online-required, like upsertStore (richer/less frequent than clock/check writes). */
   upsertConsumer(c: Consumer): Promise<string | null>;
   upsertNtgGwp(n: NtgGwp): Promise<string | null>;
+
+  // --- Phase 3: bi-weekly/periodic modules (PRD §5.2, §5.5, §5.6, §5.7/§6) ---
+  // All online-required (no offline queue) — required-photo modules can't queue
+  // the photo (see offlineQueue.ts comment), and Price Monitoring/Survey are
+  // low-frequency enough not to justify extending the queue further.
+
+  /** Share of Shelf (PRD §5.2) — required photo; fails outright if offline or the upload fails. */
+  submitShareOfShelf(
+    visitId: string,
+    storeId: string,
+    input: { channel: string; category: StoreCategory; ownFacingCount: number; totalFacingCount: number },
+    photoUri: string,
+  ): Promise<void>;
+  /** Paid Visibility (PRD §5.5) — required photo, same online-or-fail contract as Share of Shelf. */
+  submitPaidVisibility(
+    visitId: string,
+    storeId: string,
+    input: { visibilityType: string; complianceChecklist: Record<string, boolean> },
+    photoUri: string,
+  ): Promise<void>;
+  /** Price Monitoring (PRD §5.6) — optional photo; a failed optional-photo upload is a soft-fail (row still saves). */
+  submitPriceMonitoring(
+    visitId: string,
+    storeId: string,
+    rows: Array<{ sku: string; ownPrice: number; competitorPrices: number[] }>,
+    photoUri?: string,
+  ): Promise<void>;
+
+  /** Survey (PRD §5.7) — generic question sets; also backs the Nutrition Quiz (§6) via NutritionQuizScreen. */
+  upsertSurvey(s: Survey): Promise<string | null>;
+  submitSurveyResponse(r: SurveyResponse): Promise<string | null>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -314,6 +357,67 @@ function mapNtgGwp(g: any): NtgGwp {
     gwpQty: g.gwp_qty ?? undefined,
     offtakeId: g.offtake_id ?? undefined,
     createdAt: new Date(g.created_at).getTime(),
+  };
+}
+
+function mapShareOfShelf(r: any): ShareOfShelfRow {
+  return {
+    id: r.id,
+    visitId: r.visit_id,
+    storeId: r.store_id,
+    channel: r.channel,
+    category: r.category,
+    ownFacingCount: r.own_facing_count,
+    totalFacingCount: r.total_facing_count,
+    photoUrl: r.photo_url,
+    createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapPaidVisibility(r: any): PaidVisibilityRow {
+  return {
+    id: r.id,
+    visitId: r.visit_id,
+    storeId: r.store_id,
+    visibilityType: r.visibility_type,
+    complianceChecklist: r.compliance_checklist ?? {},
+    photoUrl: r.photo_url,
+    createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapPriceMonitoring(r: any): PriceMonitoringRow {
+  return {
+    id: r.id,
+    visitId: r.visit_id,
+    storeId: r.store_id,
+    sku: r.sku,
+    ownPrice: r.own_price,
+    competitorPrices: r.competitor_prices ?? [],
+    photoUrl: r.photo_url ?? undefined,
+    createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapSurvey(s: any): Survey {
+  return {
+    id: s.id,
+    title: s.title,
+    questions: s.questions ?? [],
+    campaignTag: s.campaign_tag ?? undefined,
+    createdBy: s.created_by,
+    createdAt: new Date(s.created_at).getTime(),
+  };
+}
+
+function mapSurveyResponse(r: any): SurveyResponse {
+  return {
+    id: r.id,
+    surveyId: r.survey_id,
+    visitId: r.visit_id ?? null,
+    consumerId: r.consumer_id ?? null,
+    answers: r.answers ?? {},
+    createdAt: new Date(r.created_at).getTime(),
   };
 }
 
@@ -555,6 +659,41 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
         set({ ntgGwps: upsertById(get().ntgGwps, mapNtgGwp(payload.new)) });
       }
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'share_of_shelf' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ shareOfShelfRows: get().shareOfShelfRows.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ shareOfShelfRows: upsertById(get().shareOfShelfRows, mapShareOfShelf(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'paid_visibility' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ paidVisibilityRows: get().paidVisibilityRows.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ paidVisibilityRows: upsertById(get().paidVisibilityRows, mapPaidVisibility(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'price_monitoring' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ priceMonitoringRows: get().priceMonitoringRows.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ priceMonitoringRows: upsertById(get().priceMonitoringRows, mapPriceMonitoring(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ surveys: get().surveys.filter((s) => s.id !== (payload.old as any).id) });
+      } else {
+        set({ surveys: upsertById(get().surveys, mapSurvey(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'survey_responses' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ surveyResponses: get().surveyResponses.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ surveyResponses: upsertById(get().surveyResponses, mapSurveyResponse(payload.new)) });
+      }
+    })
     .subscribe();
 }
 
@@ -567,19 +706,39 @@ async function hydrateAll(
   const { data: me, error: meErr } = await supabase.from('profiles').select('*').eq('id', userId).single();
   if (meErr || !me || !me.active) return false;
 
-  const [profilesRes, teamsRes, storesRes, visitsRes, attendancesRes, productsRes, stockTakingRes, offtakeRes, consumersRes, ntgGwpRes] =
-    await Promise.all([
-      supabase.from('profiles').select('*'),
-      supabase.from('teams').select('*'),
-      supabase.from('stores').select('*'),
-      supabase.from('visits').select('*'),
-      supabase.from('attendances').select('*'),
-      supabase.from('products').select('*'),
-      supabase.from('stock_taking').select('*'),
-      supabase.from('offtake').select('*'),
-      supabase.from('consumers').select('*'),
-      supabase.from('ntg_gwp').select('*'),
-    ]);
+  const [
+    profilesRes,
+    teamsRes,
+    storesRes,
+    visitsRes,
+    attendancesRes,
+    productsRes,
+    stockTakingRes,
+    offtakeRes,
+    consumersRes,
+    ntgGwpRes,
+    shareOfShelfRes,
+    paidVisibilityRes,
+    priceMonitoringRes,
+    surveysRes,
+    surveyResponsesRes,
+  ] = await Promise.all([
+    supabase.from('profiles').select('*'),
+    supabase.from('teams').select('*'),
+    supabase.from('stores').select('*'),
+    supabase.from('visits').select('*'),
+    supabase.from('attendances').select('*'),
+    supabase.from('products').select('*'),
+    supabase.from('stock_taking').select('*'),
+    supabase.from('offtake').select('*'),
+    supabase.from('consumers').select('*'),
+    supabase.from('ntg_gwp').select('*'),
+    supabase.from('share_of_shelf').select('*'),
+    supabase.from('paid_visibility').select('*'),
+    supabase.from('price_monitoring').select('*'),
+    supabase.from('surveys').select('*'),
+    supabase.from('survey_responses').select('*'),
+  ]);
 
   const attendanceRows = attendancesRes.data ?? [];
   const attendanceIds = attendanceRows.map((a: any) => a.id);
@@ -611,6 +770,11 @@ async function hydrateAll(
     offtakeRows: (offtakeRes.data ?? []).map(mapOfftake),
     consumers: (consumersRes.data ?? []).map(mapConsumer),
     ntgGwps: (ntgGwpRes.data ?? []).map(mapNtgGwp),
+    shareOfShelfRows: (shareOfShelfRes.data ?? []).map(mapShareOfShelf),
+    paidVisibilityRows: (paidVisibilityRes.data ?? []).map(mapPaidVisibility),
+    priceMonitoringRows: (priceMonitoringRes.data ?? []).map(mapPriceMonitoring),
+    surveys: (surveysRes.data ?? []).map(mapSurvey),
+    surveyResponses: (surveyResponsesRes.data ?? []).map(mapSurveyResponse),
   });
 
   subscribeRealtime(set, get);
@@ -637,6 +801,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   offtakeRows: [],
   consumers: [],
   ntgGwps: [],
+  shareOfShelfRows: [],
+  paidVisibilityRows: [],
+  priceMonitoringRows: [],
+  surveys: [],
+  surveyResponses: [],
   pendingOps: [],
 
   init: async () => {
@@ -674,6 +843,11 @@ export const useStore = create<StoreState>()((set, get) => ({
             offtakeRows: [],
             consumers: [],
             ntgGwps: [],
+            shareOfShelfRows: [],
+            paidVisibilityRows: [],
+            priceMonitoringRows: [],
+            surveys: [],
+            surveyResponses: [],
           });
         }
       });
@@ -728,6 +902,11 @@ export const useStore = create<StoreState>()((set, get) => ({
             offtakeRows: [],
             consumers: [],
             ntgGwps: [],
+            shareOfShelfRows: [],
+            paidVisibilityRows: [],
+            priceMonitoringRows: [],
+            surveys: [],
+            surveyResponses: [],
           });
   },
 
@@ -1171,6 +1350,195 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ ntgGwps: list });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  // --- Phase 3: Share of Shelf / Paid Visibility (PRD §5.2, §5.5) ---------
+  // Required-photo modules — no offline queue for these (see offlineQueue.ts
+  // comment): fail outright rather than partially save a required-evidence
+  // report without its photo.
+
+  submitShareOfShelf: async (visitId, storeId, input, photoUri) => {
+    if (input.ownFacingCount < 0 || input.totalFacingCount < 0) {
+      throw new Error('Jumlah facing tidak boleh negatif.');
+    }
+    if (input.ownFacingCount > input.totalFacingCount) {
+      throw new Error('Own facing tidak boleh melebihi total facing.');
+    }
+    if (!(await isOnline())) {
+      showDialog('Offline', 'Share of Shelf butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
+      throw new Error('Tidak ada koneksi internet.');
+    }
+    let photoUrl: string;
+    try {
+      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+    } catch {
+      showDialog('Gagal Upload Foto', 'Foto wajib untuk Share of Shelf tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
+      throw new Error('Upload foto gagal.');
+    }
+    const row: ShareOfShelfRow = {
+      id: uid('sos_'),
+      visitId,
+      storeId,
+      channel: input.channel,
+      category: input.category,
+      ownFacingCount: input.ownFacingCount,
+      totalFacingCount: input.totalFacingCount,
+      photoUrl,
+      createdAt: Date.now(),
+    };
+    set({ shareOfShelfRows: [row, ...get().shareOfShelfRows] });
+    const { error } = await supabase.from('share_of_shelf').insert({
+      id: row.id,
+      visit_id: row.visitId,
+      store_id: row.storeId,
+      channel: row.channel,
+      category: row.category,
+      own_facing_count: row.ownFacingCount,
+      total_facing_count: row.totalFacingCount,
+      photo_url: row.photoUrl,
+      created_at: new Date(row.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ shareOfShelfRows: get().shareOfShelfRows.filter((x) => x.id !== row.id) });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Share of Shelf ke server. Periksa koneksi internet dan coba lagi.');
+      throw new Error(error.message);
+    }
+  },
+
+  submitPaidVisibility: async (visitId, storeId, input, photoUri) => {
+    if (!input.visibilityType) throw new Error('Pilih jenis visibility.');
+    if (!(await isOnline())) {
+      showDialog('Offline', 'Paid Visibility butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
+      throw new Error('Tidak ada koneksi internet.');
+    }
+    let photoUrl: string;
+    try {
+      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+    } catch {
+      showDialog('Gagal Upload Foto', 'Foto wajib untuk Paid Visibility tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
+      throw new Error('Upload foto gagal.');
+    }
+    const row: PaidVisibilityRow = {
+      id: uid('pv_'),
+      visitId,
+      storeId,
+      visibilityType: input.visibilityType,
+      complianceChecklist: input.complianceChecklist,
+      photoUrl,
+      createdAt: Date.now(),
+    };
+    set({ paidVisibilityRows: [row, ...get().paidVisibilityRows] });
+    const { error } = await supabase.from('paid_visibility').insert({
+      id: row.id,
+      visit_id: row.visitId,
+      store_id: row.storeId,
+      visibility_type: row.visibilityType,
+      compliance_checklist: row.complianceChecklist,
+      photo_url: row.photoUrl,
+      created_at: new Date(row.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ paidVisibilityRows: get().paidVisibilityRows.filter((x) => x.id !== row.id) });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Paid Visibility ke server. Periksa koneksi internet dan coba lagi.');
+      throw new Error(error.message);
+    }
+  },
+
+  // --- Phase 3: Price Monitoring (PRD §5.6) — optional photo -------------
+
+  submitPriceMonitoring: async (visitId, storeId, rows, photoUri) => {
+    const clean = rows
+      .map((r) => ({
+        sku: r.sku.trim(),
+        ownPrice: r.ownPrice,
+        competitorPrices: r.competitorPrices.filter((p) => p >= 0).slice(0, 3),
+      }))
+      .filter((r) => r.sku && r.ownPrice >= 0);
+    if (!clean.length) throw new Error('Isi minimal satu SKU dengan harga sendiri yang valid (>= 0).');
+    if (!(await isOnline())) {
+      showDialog('Offline', 'Price Monitoring butuh koneksi internet untuk disimpan (tidak masuk antrian offline). Coba lagi saat online.');
+      throw new Error('Tidak ada koneksi internet.');
+    }
+
+    let photoUrl: string | undefined;
+    if (photoUri) {
+      try {
+        photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+      } catch {
+        showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
+      }
+    }
+
+    const now = Date.now();
+    const newRows: PriceMonitoringRow[] = clean.map((r) => ({
+      id: uid('pm_'),
+      visitId,
+      storeId,
+      sku: r.sku,
+      ownPrice: r.ownPrice,
+      competitorPrices: r.competitorPrices,
+      photoUrl,
+      createdAt: now,
+    }));
+    set({ priceMonitoringRows: [...newRows, ...get().priceMonitoringRows] });
+    const { error } = await supabase.from('price_monitoring').insert(
+      newRows.map((r) => ({
+        id: r.id,
+        visit_id: r.visitId,
+        store_id: r.storeId,
+        sku: r.sku,
+        own_price: r.ownPrice,
+        competitor_prices: r.competitorPrices,
+        photo_url: r.photoUrl ?? null,
+        created_at: new Date(r.createdAt).toISOString(),
+      })),
+    );
+    if (error) {
+      set({ priceMonitoringRows: get().priceMonitoringRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Price Monitoring ke server. Periksa koneksi internet dan coba lagi.');
+      throw new Error(error.message);
+    }
+  },
+
+  // --- Phase 3: Survey (PRD §5.7) + Nutrition Quiz (PRD §6, via NutritionQuizScreen) ---
+
+  upsertSurvey: async (s) => {
+    const list = get().surveys;
+    const exists = list.some((x) => x.id === s.id);
+    set({ surveys: exists ? list.map((x) => (x.id === s.id ? s : x)) : [s, ...list] });
+    const { error } = await supabase.from('surveys').upsert({
+      id: s.id,
+      title: s.title,
+      questions: s.questions,
+      campaign_tag: s.campaignTag,
+      created_by: s.createdBy,
+      created_at: new Date(s.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ surveys: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan survey ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  submitSurveyResponse: async (r) => {
+    const list = get().surveyResponses;
+    set({ surveyResponses: [r, ...list] });
+    const { error } = await supabase.from('survey_responses').insert({
+      id: r.id,
+      survey_id: r.surveyId,
+      visit_id: r.visitId,
+      consumer_id: r.consumerId,
+      answers: r.answers,
+      created_at: new Date(r.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ surveyResponses: get().surveyResponses.filter((x) => x.id !== r.id) });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan jawaban survey ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;

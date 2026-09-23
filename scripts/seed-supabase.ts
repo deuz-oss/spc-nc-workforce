@@ -28,9 +28,9 @@ const supabase = createClient(url, serviceKey, {
 });
 
 async function main() {
-  const { teams, users, stores } = buildSeed();
+  const { teams, users, stores, surveys } = buildSeed();
 
-  console.log(`Seeding ${teams.length} teams, ${users.length} users, ${stores.length} stores...`);
+  console.log(`Seeding ${teams.length} teams, ${users.length} users, ${stores.length} stores, ${surveys.length} surveys...`);
 
   // 1. Teams (tl_id/arco_id filled in after users exist — circular FK).
   const { error: teamsErr } = await supabase.from('teams').upsert(
@@ -103,6 +103,22 @@ async function main() {
   );
   if (storesErr) throw storesErr;
   console.log('stores done');
+
+  // 5. Surveys (remap createdByUsername -> real auth uuid). `questions: []` —
+  //    the Nutrition Quiz's content/branching lives in NutritionQuizScreen's
+  //    code, not this row; see src/store/seed.ts's comment.
+  const { error: surveysErr } = await supabase.from('surveys').upsert(
+    surveys.map((s) => ({
+      id: s.id,
+      title: s.title,
+      questions: [],
+      campaign_tag: s.campaignTag,
+      created_by: usernameToUuid.get(s.createdByUsername),
+      created_at: new Date(s.createdAt).toISOString(),
+    })),
+  );
+  if (surveysErr) throw surveysErr;
+  console.log('surveys done');
 
   console.log('\nSeed complete. Demo logins (username / password):');
   for (const u of users) console.log(`  ${u.username} / ${u.password}`);

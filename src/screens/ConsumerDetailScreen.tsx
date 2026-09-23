@@ -171,6 +171,16 @@ export default function ConsumerDetailScreen() {
                     : 'Buka dari kunjungan toko yang aktif untuk mengubah tahap funnel.'}
                 </Muted>
               )}
+              {canAdvanceStage && currentStage === 'approached' && !isCreate && (
+                <View style={{ marginTop: 10 }}>
+                  <Btn
+                    small
+                    variant="outline"
+                    title="Mulai Nutrition Quiz"
+                    onPress={() => navigation.navigate('NutritionQuiz', { consumerId: existing!.id, visitId })}
+                  />
+                </View>
+              )}
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginTop: 10 }}>
                 {NTG_GWP_STAGES.map((s, i) => (
                   <Chip

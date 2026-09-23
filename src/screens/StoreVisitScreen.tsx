@@ -9,8 +9,10 @@ import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurClock } from '../utils/format';
 
 /** The 7 report modules per PRD §5, grouped by task category per the client
- * brief's own grouping. Stock Taking / Offtake / NTG & GWP are real screens as
- * of Phase 2 (PRD §16); the rest still route to ComingSoonScreen (Phase 3). */
+ * brief's own grouping. All 7 are real screens as of Phase 3 (PRD §16) — see
+ * MODULE_ROUTE. The Nutrition Quiz (§6) isn't listed separately here: it's
+ * reached from a consumer's NTG & GWP funnel (ConsumerDetailScreen), not from
+ * this generic report list. */
 const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence: string; phase: string }> = [
   { key: 'stock_taking', label: 'Stock Taking', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
   { key: 'offtake', label: 'Offtake', group: 'Sales & Stock', cadence: 'Harian', phase: 'Phase 2' },
@@ -18,13 +20,17 @@ const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence
   { key: 'share_of_shelf', label: 'Share of Shelf', group: 'Sales & Stock', cadence: 'Bi-weekly', phase: 'Phase 3' },
   { key: 'paid_visibility', label: 'Paid Visibility', group: 'Asset Tracking', cadence: 'Bi-weekly', phase: 'Phase 3' },
   { key: 'price_monitoring', label: 'Price Monitoring', group: 'Weekly/periodic Task', cadence: 'Bi-weekly', phase: 'Phase 3' },
-  { key: 'survey', label: 'Survey / Nutrition Quiz', group: 'Weekly/periodic Task', cadence: 'Ad hoc', phase: 'Phase 3' },
+  { key: 'survey', label: 'Survey', group: 'Weekly/periodic Task', cadence: 'Ad hoc', phase: 'Phase 3' },
 ];
 
 const MODULE_ROUTE: Record<string, string> = {
   stock_taking: 'StockTaking',
   offtake: 'Offtake',
   ntg_gwp: 'Consumers',
+  share_of_shelf: 'ShareOfShelf',
+  paid_visibility: 'PaidVisibility',
+  price_monitoring: 'PriceMonitoring',
+  survey: 'SurveyList',
 };
 
 export default function StoreVisitScreen() {

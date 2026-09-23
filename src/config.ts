@@ -66,3 +66,51 @@ export const NTG_GWP_STAGE_LABEL: Record<NtgGwpStage, string> = {
   gwp_given: 'GWP Diberikan',
   wa_followup_scheduled: 'Follow-up WA Terjadwal',
 };
+
+// --- Phase 3 (PRD §16): Share of Shelf / Paid Visibility / Price Monitoring / Survey ---
+
+/** Visibility placement types for Paid Visibility (PRD §5.5 "from a config list") — not specified by the
+ * client brief; this is a reasonable default set of common in-store paid placements. */
+export const VISIBILITY_TYPES: Array<{ key: string; label: string }> = [
+  { key: 'shelf_talker', label: 'Shelf Talker' },
+  { key: 'endcap', label: 'Endcap Display' },
+  { key: 'banner', label: 'Banner / Standing Banner' },
+  { key: 'wobbler', label: 'Wobbler' },
+  { key: 'floor_display', label: 'Floor Display' },
+  { key: 'poster', label: 'Poster / Signage Toko' },
+];
+
+/** Compliance checklist items for Paid Visibility (PRD §5.5) — also not specified by the client brief;
+ * a reasonable default set. Stored as PaidVisibilityRow.complianceChecklist (key -> checked). */
+export const COMPLIANCE_CHECKLIST_ITEMS: Array<{ key: string; label: string }> = [
+  { key: 'terpasang_benar', label: 'Terpasang dengan benar' },
+  { key: 'kondisi_baik', label: 'Kondisi baik (tidak rusak/kotor)' },
+  { key: 'lokasi_sesuai', label: 'Lokasi sesuai kontrak/brief' },
+  { key: 'periode_berlaku', label: 'Berlaku dalam periode kampanye' },
+];
+
+/** Posisi yang boleh membuat/mengelola Survey (matches surveys RLS write policy, 0001 migration). */
+export const SURVEY_BUILDER_ROLES: Role[] = ['data_analyst', 'super_admin'];
+
+/** Fixed id/campaign tag for the seeded "Quick Nutrition Check" Survey row that backs the Nutrition
+ * Quiz (PRD §6). The quiz's question branching logic lives in NutritionQuizScreen (code, not this
+ * config) — this Survey row exists so responses have somewhere to attach via survey_responses.survey_id,
+ * and so the quiz shows up alongside other surveys in listings/exports later. Seeded once via
+ * scripts/seed-supabase.ts; NutritionQuizScreen shows a setup-pending message if it's missing. */
+export const NUTRITION_QUIZ_SURVEY_ID = 'sv_nutrition_quiz_v1';
+export const NUTRITION_QUIZ_CAMPAIGN_TAG = 'nutrition_quiz_v1';
+
+/** Child age brackets (PRD §6 — bracket only, never a DOB). `under1` drives the Nutrition Quiz's
+ * mandatory ASI/MPASI-only branch (no product recommendation, no NC follow-up trigger). */
+export interface ChildAgeBracketOption {
+  key: string;
+  label: string;
+  under1: boolean;
+}
+export const CHILD_AGE_BRACKETS: ChildAgeBracketOption[] = [
+  { key: '0-6bulan', label: '0-6 bulan', under1: true },
+  { key: '6-12bulan', label: '6-12 bulan', under1: true },
+  { key: '1-2tahun', label: '1-2 tahun', under1: false },
+  { key: '2-3tahun', label: '2-3 tahun', under1: false },
+  { key: '3tahun+', label: '3+ tahun', under1: false },
+];

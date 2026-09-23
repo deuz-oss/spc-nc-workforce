@@ -40,6 +40,13 @@ import StockTakingScreen from './src/screens/StockTakingScreen';
 import OfftakeScreen from './src/screens/OfftakeScreen';
 import ConsumersScreen from './src/screens/ConsumersScreen';
 import ConsumerDetailScreen from './src/screens/ConsumerDetailScreen';
+import ShareOfShelfScreen from './src/screens/ShareOfShelfScreen';
+import PaidVisibilityScreen from './src/screens/PaidVisibilityScreen';
+import PriceMonitoringScreen from './src/screens/PriceMonitoringScreen';
+import SurveyListScreen from './src/screens/SurveyListScreen';
+import SurveyRespondScreen from './src/screens/SurveyRespondScreen';
+import SurveyBuilderScreen from './src/screens/SurveyBuilderScreen';
+import NutritionQuizScreen from './src/screens/NutritionQuizScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
 
 const Stack = createNativeStackNavigator();
@@ -473,6 +480,13 @@ export default function App() {
               component={ConsumerDetailScreen}
               options={{ title: 'Detail Konsumen' }}
             />
+            <Stack.Screen name="NutritionQuiz" component={NutritionQuizScreen} options={{ title: 'Quick Nutrition Check' }} />
+            <Stack.Screen name="ShareOfShelf" component={ShareOfShelfScreen} options={{ title: 'Share of Shelf' }} />
+            <Stack.Screen name="PaidVisibility" component={PaidVisibilityScreen} options={{ title: 'Paid Visibility' }} />
+            <Stack.Screen name="PriceMonitoring" component={PriceMonitoringScreen} options={{ title: 'Price Monitoring' }} />
+            <Stack.Screen name="SurveyList" component={SurveyListScreen} options={{ title: 'Survey' }} />
+            <Stack.Screen name="SurveyRespond" component={SurveyRespondScreen} options={{ title: 'Isi Survey' }} />
+            <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
             <Stack.Screen
               name="ComingSoon"
               component={ComingSoonScreen}

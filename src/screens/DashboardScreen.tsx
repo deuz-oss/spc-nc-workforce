@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { ROLE_LABEL } from '../config';
+import { ROLE_LABEL, SURVEY_BUILDER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
@@ -173,6 +173,16 @@ export default function DashboardScreen() {
             Console validasi same-day dan peta live tim (PRD §8) belum dibangun di Phase 1 — lihat tab
             "Validasi".
           </Muted>
+        </Card>
+      )}
+
+      {SURVEY_BUILDER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Survey"
+            subtitle="Question set untuk NC (PRD §5.7)"
+            action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
+          />
         </Card>
       )}
 
