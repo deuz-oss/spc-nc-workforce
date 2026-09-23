@@ -114,3 +114,20 @@ export const CHILD_AGE_BRACKETS: ChildAgeBracketOption[] = [
   { key: '2-3tahun', label: '2-3 tahun', under1: false },
   { key: '3tahun+', label: '3+ tahun', under1: false },
 ];
+
+// --- Phase 4a (PRD §16): TL/ARCO validation console + PM/Reckitt dashboards ---
+
+/** Posisi yang boleh melakukan review/approve/flag laporan (matches report_reviews RLS write policy, 0005 migration). */
+export const REPORT_REVIEWER_ROLES: Role[] = ['tl', 'arco', 'super_admin'];
+
+export const REPORT_TYPE_LABEL: Record<string, string> = {
+  stock_taking: 'Stock Taking',
+  share_of_shelf: 'Share of Shelf',
+  offtake: 'Offtake',
+  paid_visibility: 'Paid Visibility',
+  price_monitoring: 'Price Monitoring',
+};
+
+/** Roles that see the PM/Reckitt-style management dashboard (PRD §10, §11) — same widgets,
+ * Reckitt gets its PII hidden structurally (see ManagementDashboard's hidePii prop). */
+export const MANAGEMENT_DASHBOARD_ROLES: Role[] = ['pm', 'reckitt_client', 'data_analyst'];

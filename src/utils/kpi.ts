@@ -99,17 +99,73 @@ export function todaysReportStatus(
   offtake: OfftakeRow[],
   ntgGwps: NtgGwp[],
 ): TodaysReportStatus {
-  const today = new Date().toDateString();
-  const todaysVisitIds = new Set(
-    visits.filter((v) => v.ncId === ncId && new Date(v.checkInAt).toDateString() === today).map((v) => v.id),
+  return reportStatusForDay(new Date(), ncId, visits, stockTaking, offtake, ntgGwps);
+}
+
+/** Generalizes todaysReportStatus to an arbitrary day — Phase 4a (PRD §16) needs
+ * this over the last few days for the TL/ARCO attrition-risk signal below. */
+export function reportStatusForDay(
+  day: Date,
+  ncId: string,
+  visits: Visit[],
+  stockTaking: StockTakingRow[],
+  offtake: OfftakeRow[],
+  ntgGwps: NtgGwp[],
+): TodaysReportStatus {
+  const key = day.toDateString();
+  const dayVisitIds = new Set(
+    visits.filter((v) => v.ncId === ncId && new Date(v.checkInAt).toDateString() === key).map((v) => v.id),
   );
   const activeVisit = visits.find((v) => v.ncId === ncId && !v.checkOutAt);
   return {
-    stockTaking: stockTaking.some((r) => todaysVisitIds.has(r.visitId)),
-    offtake: offtake.some((r) => todaysVisitIds.has(r.visitId)),
-    ntgGwp: ntgGwps.some((g) => todaysVisitIds.has(g.visitId)),
+    stockTaking: stockTaking.some((r) => dayVisitIds.has(r.visitId)),
+    offtake: offtake.some((r) => dayVisitIds.has(r.visitId)),
+    ntgGwp: ntgGwps.some((g) => dayVisitIds.has(g.visitId)),
     activeVisitId: activeVisit?.id ?? null,
   };
+}
+
+/**
+ * Attrition-risk signal for the TL/ARCO rollup (PRD §8/§9). Deliberately
+ * implements only the two concrete, PRD-stated signals that don't require a
+ * threshold judgment call PRD never made:
+ *  (a) attendance gaps — no clock-in at all on >=3 of the last 7 calendar days
+ *  (b) missing daily reports — none of Stock Taking/Offtake/NTG&GWP submitted
+ *      on >=3 of the last 7 calendar days
+ * The PRD's third stated signal ("two consecutive weeks of declining
+ * performance") needs a trend formula across weighted KPIs that was never
+ * specified (see PRD §9's review note and §15) — NOT implemented here rather
+ * than guessing one. Revisit once that definition exists.
+ */
+export interface AttritionSignal {
+  attendanceGap: boolean;
+  missingReports: boolean;
+  atRisk: boolean;
+}
+
+export function attritionSignal(
+  ncId: string,
+  attendances: Attendance[],
+  visits: Visit[],
+  stockTaking: StockTakingRow[],
+  offtake: OfftakeRow[],
+  ntgGwps: NtgGwp[],
+  today: Date = new Date(),
+): AttritionSignal {
+  let noAttendanceDays = 0;
+  let noReportDays = 0;
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toDateString();
+    const hasAttendance = attendances.some((a) => a.userId === ncId && new Date(a.clockInAt).toDateString() === key);
+    if (!hasAttendance) noAttendanceDays++;
+    const status = reportStatusForDay(d, ncId, visits, stockTaking, offtake, ntgGwps);
+    if (!status.stockTaking && !status.offtake && !status.ntgGwp) noReportDays++;
+  }
+  const attendanceGap = noAttendanceDays >= 3;
+  const missingReports = noReportDays >= 3;
+  return { attendanceGap, missingReports, atRisk: attendanceGap || missingReports };
 }
 
 /** Count of Offtake rows flagged by the server-side trigger (PRD §5.3) within a period — for a TL/ARCO glance later (Phase 4 console). */

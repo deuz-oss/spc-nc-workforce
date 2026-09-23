@@ -47,6 +47,9 @@ import SurveyListScreen from './src/screens/SurveyListScreen';
 import SurveyRespondScreen from './src/screens/SurveyRespondScreen';
 import SurveyBuilderScreen from './src/screens/SurveyBuilderScreen';
 import NutritionQuizScreen from './src/screens/NutritionQuizScreen';
+import ValidationQueueScreen from './src/screens/ValidationQueueScreen';
+import CoachingLogScreen from './src/screens/CoachingLogScreen';
+import NcTrackerScreen from './src/screens/NcTrackerScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
 
 const Stack = createNativeStackNavigator();
@@ -290,15 +293,10 @@ function tabsForRole(role: Role): string[] {
 }
 
 const COMING_SOON_PARAMS: Record<string, { title: string; phase: string; note: string }> = {
-  Validasi: {
-    title: 'Validasi Laporan (TL/ARCO)',
-    phase: 'Phase 4',
-    note: 'Console validasi same-day, peta live tim, dan coaching log (PRD §8) — dibangun setelah modul laporan Phase 2/3 selesai.',
-  },
   Chat: {
     title: 'Pesan NC ↔ TL / TL ↔ ARCO',
-    phase: 'Phase 4',
-    note: 'In-app messaging (PRD §17) butuh infrastruktur push notification baru — dijadwalkan bersama console TL/ARCO di Phase 4.',
+    phase: 'Phase 4b',
+    note: 'In-app messaging (PRD §17) butuh infrastruktur push notification baru — dijadwalkan setelah dashboard/validasi (Phase 4a) selesai.',
   },
 };
 
@@ -313,6 +311,7 @@ function screenFor(name: string) {
     case 'Pengguna':
       return UsersScreen;
     case 'Validasi':
+      return ValidationQueueScreen;
     case 'Chat':
       return ComingSoonScreen;
     default:
@@ -487,6 +486,8 @@ export default function App() {
             <Stack.Screen name="SurveyList" component={SurveyListScreen} options={{ title: 'Survey' }} />
             <Stack.Screen name="SurveyRespond" component={SurveyRespondScreen} options={{ title: 'Isi Survey' }} />
             <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
+            <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
+            <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
             <Stack.Screen
               name="ComingSoon"
               component={ComingSoonScreen}

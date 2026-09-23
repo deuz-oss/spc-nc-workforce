@@ -284,6 +284,34 @@ export interface Schedule {
   actualVisitId?: string; // filled once the planned visit happens
 }
 
+// --- Phase 4a: report review + coaching log (PRD §8) ---
+
+export type ReportType = 'stock_taking' | 'share_of_shelf' | 'offtake' | 'paid_visibility' | 'price_monitoring';
+export type ReportReviewStatus = 'pending' | 'approved' | 'flagged';
+
+/** One row per (reportType, reportId) — absence of a row means "pending",
+ * which the exception-based validation queue (PRD §8 review note) treats as
+ * auto-approved unless the underlying report itself is flagged some other
+ * way (e.g. Offtake's server-computed isOutlier). */
+export interface ReportReview {
+  id: string;
+  reportType: ReportType;
+  reportId: string;
+  status: ReportReviewStatus;
+  reviewedBy?: string;
+  reviewedAt?: number;
+  note?: string;
+}
+
+export interface CoachingLog {
+  id: string;
+  tlId: string;
+  ncId: string;
+  date: number;
+  note: string;
+  createdAt: number;
+}
+
 // --- In-app messaging (PRD §17) ---
 
 export type ConversationType = 'nc_tl' | 'tl_arco';

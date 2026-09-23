@@ -6,12 +6,16 @@ import { showDialog } from '../components/dialog';
 import { TRACK_MIN_STEP_M } from '../config';
 import {
   Attendance,
+  CoachingLog,
   Consumer,
   NtgGwp,
   OfftakeRow,
   PaidVisibilityRow,
   PriceMonitoringRow,
   Product,
+  ReportReview,
+  ReportReviewStatus,
+  ReportType,
   Role,
   RoutePoint,
   ShareOfShelfRow,
@@ -20,6 +24,7 @@ import {
   StoreCategory,
   Survey,
   SurveyResponse,
+  Target,
   Team,
   User,
   Visit,
@@ -76,6 +81,13 @@ interface StoreState {
   priceMonitoringRows: PriceMonitoringRow[];
   surveys: Survey[];
   surveyResponses: SurveyResponse[];
+  /** Phase 4a (PRD §16) — TL/ARCO exception-based validation queue + coaching log (PRD §8). */
+  reportReviews: ReportReview[];
+  coachingLogs: CoachingLog[];
+  /** Offtake/GWP targets set by Data Analyst (PRD §12) — schema existed since Phase 1 but was
+   * never wired into the store until Phase 4a needed "offtake vs. target" for the TL/ARCO and
+   * PM/Reckitt dashboards. */
+  targets: Target[];
   /** Clock-in/out, store check-in/out, and Stock Taking/Offtake submissions still waiting for connectivity to reach Supabase. */
   pendingOps: QueuedOp[];
 
@@ -173,6 +185,13 @@ interface StoreState {
   /** Survey (PRD §5.7) — generic question sets; also backs the Nutrition Quiz (§6) via NutritionQuizScreen. */
   upsertSurvey(s: Survey): Promise<string | null>;
   submitSurveyResponse(r: SurveyResponse): Promise<string | null>;
+
+  // --- Phase 4a: TL/ARCO validation console (PRD §8) ---
+  /** Approve or flag a report row (exception-based queue — PRD §8 review note). Plain online write, no offline queue (desk-review action, not field-critical). */
+  reviewReport(reportType: ReportType, reportId: string, status: ReportReviewStatus, note?: string): Promise<string | null>;
+  upsertCoachingLog(log: CoachingLog): Promise<string | null>;
+  /** Data Analyst/super_admin only (matches targets RLS write policy, 0001 migration). */
+  upsertTarget(t: Target): Promise<string | null>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -418,6 +437,41 @@ function mapSurveyResponse(r: any): SurveyResponse {
     consumerId: r.consumer_id ?? null,
     answers: r.answers ?? {},
     createdAt: new Date(r.created_at).getTime(),
+  };
+}
+
+function mapTarget(t: any): Target {
+  return {
+    id: t.id,
+    storeId: t.store_id ?? null,
+    ncId: t.nc_id ?? null,
+    periodKey: t.period_key,
+    offtakeTarget: t.offtake_target ?? undefined,
+    gwpAllocation: t.gwp_allocation ?? undefined,
+    setBy: t.set_by,
+  };
+}
+
+function mapReportReview(r: any): ReportReview {
+  return {
+    id: r.id,
+    reportType: r.report_type,
+    reportId: r.report_id,
+    status: r.status,
+    reviewedBy: r.reviewed_by ?? undefined,
+    reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).getTime() : undefined,
+    note: r.note ?? undefined,
+  };
+}
+
+function mapCoachingLog(l: any): CoachingLog {
+  return {
+    id: l.id,
+    tlId: l.tl_id,
+    ncId: l.nc_id,
+    date: new Date(l.date).getTime(),
+    note: l.note,
+    createdAt: new Date(l.created_at).getTime(),
   };
 }
 
@@ -694,6 +748,27 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
         set({ surveyResponses: upsertById(get().surveyResponses, mapSurveyResponse(payload.new)) });
       }
     })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'report_reviews' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ reportReviews: get().reportReviews.filter((r) => r.id !== (payload.old as any).id) });
+      } else {
+        set({ reportReviews: upsertById(get().reportReviews, mapReportReview(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'coaching_logs' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ coachingLogs: get().coachingLogs.filter((l) => l.id !== (payload.old as any).id) });
+      } else {
+        set({ coachingLogs: upsertById(get().coachingLogs, mapCoachingLog(payload.new)) });
+      }
+    })
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'targets' }, (payload) => {
+      if (payload.eventType === 'DELETE') {
+        set({ targets: get().targets.filter((t) => t.id !== (payload.old as any).id) });
+      } else {
+        set({ targets: upsertById(get().targets, mapTarget(payload.new)) });
+      }
+    })
     .subscribe();
 }
 
@@ -722,6 +797,9 @@ async function hydrateAll(
     priceMonitoringRes,
     surveysRes,
     surveyResponsesRes,
+    reportReviewsRes,
+    coachingLogsRes,
+    targetsRes,
   ] = await Promise.all([
     supabase.from('profiles').select('*'),
     supabase.from('teams').select('*'),
@@ -738,6 +816,9 @@ async function hydrateAll(
     supabase.from('price_monitoring').select('*'),
     supabase.from('surveys').select('*'),
     supabase.from('survey_responses').select('*'),
+    supabase.from('report_reviews').select('*'),
+    supabase.from('coaching_logs').select('*'),
+    supabase.from('targets').select('*'),
   ]);
 
   const attendanceRows = attendancesRes.data ?? [];
@@ -775,6 +856,9 @@ async function hydrateAll(
     priceMonitoringRows: (priceMonitoringRes.data ?? []).map(mapPriceMonitoring),
     surveys: (surveysRes.data ?? []).map(mapSurvey),
     surveyResponses: (surveyResponsesRes.data ?? []).map(mapSurveyResponse),
+    reportReviews: (reportReviewsRes.data ?? []).map(mapReportReview),
+    coachingLogs: (coachingLogsRes.data ?? []).map(mapCoachingLog),
+    targets: (targetsRes.data ?? []).map(mapTarget),
   });
 
   subscribeRealtime(set, get);
@@ -806,6 +890,9 @@ export const useStore = create<StoreState>()((set, get) => ({
   priceMonitoringRows: [],
   surveys: [],
   surveyResponses: [],
+  reportReviews: [],
+  coachingLogs: [],
+  targets: [],
   pendingOps: [],
 
   init: async () => {
@@ -848,6 +935,9 @@ export const useStore = create<StoreState>()((set, get) => ({
             priceMonitoringRows: [],
             surveys: [],
             surveyResponses: [],
+            reportReviews: [],
+            coachingLogs: [],
+            targets: [],
           });
         }
       });
@@ -907,6 +997,9 @@ export const useStore = create<StoreState>()((set, get) => ({
             priceMonitoringRows: [],
             surveys: [],
             surveyResponses: [],
+            reportReviews: [],
+            coachingLogs: [],
+            targets: [],
           });
   },
 
@@ -1539,6 +1632,84 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ surveyResponses: get().surveyResponses.filter((x) => x.id !== r.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan jawaban survey ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  // --- Phase 4a: TL/ARCO validation console (PRD §8) ----------------------
+  // Plain online writes, optimistic + rollback like upsertStore — these are
+  // TL/ARCO desk-review actions, not field-critical writes, so no offline queue.
+
+  reviewReport: async (reportType, reportId, status, note) => {
+    const me = get().users.find((u) => u.id === get().sessionUserId);
+    if (!me) return 'Sesi tidak ditemukan.';
+    const existing = get().reportReviews.find((r) => r.reportType === reportType && r.reportId === reportId);
+    const now = Date.now();
+    const row: ReportReview = {
+      id: existing?.id ?? uid('rr_'),
+      reportType,
+      reportId,
+      status,
+      reviewedBy: me.id,
+      reviewedAt: now,
+      note: note?.trim() || undefined,
+    };
+    const before = get().reportReviews;
+    set({ reportReviews: upsertById(before, row) });
+    const { error } = await supabase.from('report_reviews').upsert({
+      id: row.id,
+      report_type: row.reportType,
+      report_id: row.reportId,
+      status: row.status,
+      reviewed_by: row.reviewedBy,
+      reviewed_at: new Date(row.reviewedAt!).toISOString(),
+      note: row.note,
+    });
+    if (error) {
+      set({ reportReviews: before });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan status review. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  upsertCoachingLog: async (log) => {
+    const list = get().coachingLogs;
+    const exists = list.some((x) => x.id === log.id);
+    set({ coachingLogs: exists ? list.map((x) => (x.id === log.id ? log : x)) : [log, ...list] });
+    const { error } = await supabase.from('coaching_logs').upsert({
+      id: log.id,
+      tl_id: log.tlId,
+      nc_id: log.ncId,
+      date: new Date(log.date).toISOString(),
+      note: log.note,
+      created_at: new Date(log.createdAt).toISOString(),
+    });
+    if (error) {
+      set({ coachingLogs: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan catatan coaching ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  upsertTarget: async (t) => {
+    const list = get().targets;
+    const exists = list.some((x) => x.id === t.id);
+    set({ targets: exists ? list.map((x) => (x.id === t.id ? t : x)) : [t, ...list] });
+    const { error } = await supabase.from('targets').upsert({
+      id: t.id,
+      store_id: t.storeId,
+      nc_id: t.ncId,
+      period_key: t.periodKey,
+      offtake_target: t.offtakeTarget,
+      gwp_allocation: t.gwpAllocation,
+      set_by: t.setBy,
+    });
+    if (error) {
+      set({ targets: list });
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan target ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;

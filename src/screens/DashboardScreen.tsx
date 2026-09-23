@@ -4,7 +4,8 @@ import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { ROLE_LABEL, SURVEY_BUILDER_ROLES } from '../config';
+import ManagementDashboard from './ManagementDashboard';
+import { MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
@@ -139,6 +140,15 @@ export default function DashboardScreen() {
   const stores = useStore((s) => s.stores);
   const navigation = useNavigation<any>();
 
+  // pm/reckitt_client/data_analyst get the full PRD §10/§11 management
+  // dashboard (Phase 4a, PRD §16) as their entire screen — it's its own
+  // ScrollView, so it replaces this screen's body rather than nesting inside
+  // it. super_admin keeps the simple placeholder below (not a PRD §10 KPI
+  // consumer role).
+  if (MANAGEMENT_DASHBOARD_ROLES.includes(me.role)) {
+    return <ManagementDashboard />;
+  }
+
   return (
     <ScrollView
       tabIndex={0}
@@ -151,7 +161,7 @@ export default function DashboardScreen() {
       {me.role === 'nc' && <NcStatsCard />}
       {me.role === 'nc' && <TodaysReportCard />}
 
-      {(me.role === 'super_admin' || me.role === 'pm' || me.role === 'reckitt_client' || me.role === 'data_analyst') && (
+      {me.role === 'super_admin' && (
         <Card>
           <SectionHeader title="Ringkasan Program" subtitle="215 akun · 47 kota (target)" />
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
@@ -159,19 +169,17 @@ export default function DashboardScreen() {
             <StatCard title="Toko Terdaftar" value={String(stores.length)} />
             <StatCard title="Toko Belum Ter-assign" value={String(stores.filter((s) => !s.assignedNcId).length)} color={C.warn} />
           </View>
-          <Muted style={{ marginTop: 10 }}>
-            KPI offtake, NTG, SOS%, dan GWP absorption tampil di sini setelah modul laporan (Phase 2) dan mesin
-            skorkartu (Phase 4) dibangun — lihat README bagian "Status & Gaps".
-          </Muted>
         </Card>
       )}
 
       {(me.role === 'tl' || me.role === 'arco') && (
         <Card>
-          <SectionHeader title="Tim Saya" />
+          <SectionHeader
+            title="Tim Saya"
+            action={{ label: 'Buka Validasi', onPress: () => navigation.navigate('Validasi') }}
+          />
           <Muted style={{ marginTop: 4 }}>
-            Console validasi same-day dan peta live tim (PRD §8) belum dibangun di Phase 1 — lihat tab
-            "Validasi".
+            Console validasi same-day, peta live tim, dan coaching log (PRD §8) ada di tab "Validasi".
           </Muted>
         </Card>
       )}
