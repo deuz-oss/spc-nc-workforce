@@ -15,7 +15,10 @@
         "NSLocationAlwaysAndWhenInUseUsageDescription": "Aplikasi memerlukan lokasi untuk check-in toko, absensi, dan pelacakan rute.",
         "NSCameraUsageDescription": "Kamera digunakan untuk foto bukti laporan (stok, share of shelf, visibility, dll).",
         "NSPhotoLibraryUsageDescription": "Galeri digunakan untuk melampirkan foto bukti laporan.",
-        "UIBackgroundModes": ["location", "remote-notification"]
+        "UIBackgroundModes": [
+          "location",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -34,7 +37,8 @@
         "android.permission.FOREGROUND_SERVICE_LOCATION",
         "android.permission.RECEIVE_BOOT_COMPLETED",
         "android.permission.POST_NOTIFICATIONS",
-        "android.permission.CAMERA"
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
       ],
       "predictiveBackGestureEnabled": false
     },
@@ -67,11 +71,11 @@
         }
       ]
     ],
+    "owner": "deuz-oss",
     "extra": {
       "eas": {
-        "projectId": "REPLACE_WITH_EAS_PROJECT_ID"
+        "projectId": "e37dec0d-1342-4248-9b71-46f47c112884"
       }
-    },
-    "owner": "REPLACE_WITH_EAS_OWNER"
+    }
   }
 }

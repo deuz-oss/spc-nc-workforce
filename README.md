@@ -142,11 +142,10 @@ but replace them with real brand artwork before any App Store / Play Store submi
 ```
 npm i -g eas-cli        # or use `npx eas-cli` for every command below
 eas login               # your Expo/EAS account
-eas init                # creates a real project, fills extra.eas.projectId in app.json
+eas init                # creates a real project, writes owner + extra.eas.projectId into app.json
 ```
-Then replace `"owner": "REPLACE_WITH_EAS_OWNER"` in `app.json` with your actual EAS account/org slug.
-`registerPushToken()` in `src/store/useStore.ts` currently detects the placeholder project id and skips push
-registration on purpose — this is what turns it on.
+Commit the resulting `app.json` change. `registerPushToken()` in `src/store/useStore.ts` skips push registration
+while there's no project id — this is what turns it on.
 
 **2. Apple Developer Program:** required for *any* build that targets a **physical device or the App Store**
 (not required for a simulator-only build). Enroll at developer.apple.com if not already done ($99/year).

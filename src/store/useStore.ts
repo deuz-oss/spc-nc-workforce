@@ -1319,11 +1319,9 @@ async function callAdminUsers(body: Record<string, unknown>): Promise<{ data?: a
 
 /** Requests notification permission and syncs the Expo push token to the
  * caller's own profile (PRD §17) — best-effort, fire-and-forget, never blocks
- * login/init. No real EAS project is provisioned yet (app.json's
- * extra.eas.projectId is still the placeholder "REPLACE_WITH_EAS_PROJECT_ID"),
- * so getExpoPushTokenAsync() can't succeed until one exists; that's caught and
- * logged, not surfaced to the user — push is additive to in-app chat, never a
- * requirement to use it. */
+ * login/init. Needs app.json's extra.eas.projectId, which `eas init` writes;
+ * until then registration is skipped with a warning, not surfaced to the user —
+ * push is additive to in-app chat, never a requirement to use it. */
 async function registerPushToken(): Promise<void> {
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
@@ -1335,8 +1333,8 @@ async function registerPushToken(): Promise<void> {
     if (status !== 'granted') return;
 
     const projectId = (Constants.expoConfig?.extra as any)?.eas?.projectId;
-    if (!projectId || projectId === 'REPLACE_WITH_EAS_PROJECT_ID') {
-      console.warn('registerPushToken: no real EAS project id configured yet — skipping.');
+    if (!projectId) {
+      console.warn('registerPushToken: no EAS project id in app.json (run `eas init`) — skipping.');
       return;
     }
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
