@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
@@ -37,7 +38,8 @@ import {
 } from '../types';
 import { haversineM } from '../utils/geo';
 import { loadQueue, saveQueue, QueuedOp } from '../utils/offlineQueue';
-import { extFromUri, uploadReportMedia } from '../utils/storage';
+import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, uploadReportMedia } from '../utils/storage';
+import { fmtDate } from '../utils/format';
 import { uid } from '../utils/uuid';
 
 async function isOnline(): Promise<boolean> {
@@ -170,32 +172,33 @@ interface StoreState {
   upsertConsumer(c: Consumer): Promise<string | null>;
   upsertNtgGwp(n: NtgGwp): Promise<string | null>;
 
-  // --- Phase 3: bi-weekly/periodic modules (PRD §5.2, §5.5, §5.6, §5.7/§6) ---
-  // All online-required (no offline queue) — required-photo modules can't queue
-  // the photo (see offlineQueue.ts comment), and Price Monitoring/Survey are
-  // low-frequency enough not to justify extending the queue further.
+  // --- Phase 3/5: bi-weekly/periodic modules (PRD §5.2, §5.5, §5.6, §5.7/§6) ---
+  // Share of Shelf/Paid Visibility (required photo) and Price Monitoring
+  // (optional photo) are offline-queued on native as of Phase 5 — see
+  // offlineQueue.ts's QueuedOp comment. Web stays online-required for photo
+  // handling (deliberate scope boundary, see the same comment).
 
-  /** Share of Shelf (PRD §5.2) — required photo; fails outright if offline or the upload fails. */
+  /** Share of Shelf (PRD §5.2) — required photo. Native: queues locally when offline (upload deferred to replay). Web: fails outright if offline or the upload fails. */
   submitShareOfShelf(
     visitId: string,
     storeId: string,
     input: { channel: string; category: StoreCategory; ownFacingCount: number; totalFacingCount: number },
     photoUri: string,
-  ): Promise<void>;
-  /** Paid Visibility (PRD §5.5) — required photo, same online-or-fail contract as Share of Shelf. */
+  ): Promise<{ queued: boolean }>;
+  /** Paid Visibility (PRD §5.5) — required photo, same online/offline contract as Share of Shelf. */
   submitPaidVisibility(
     visitId: string,
     storeId: string,
     input: { visibilityType: string; complianceChecklist: Record<string, boolean> },
     photoUri: string,
-  ): Promise<void>;
-  /** Price Monitoring (PRD §5.6) — optional photo; a failed optional-photo upload is a soft-fail (row still saves). */
+  ): Promise<{ queued: boolean }>;
+  /** Price Monitoring (PRD §5.6) — optional photo; a failed optional-photo upload/persist is a soft-fail (row still saves). Offline-queued on native. */
   submitPriceMonitoring(
     visitId: string,
     storeId: string,
     rows: Array<{ sku: string; ownPrice: number; competitorPrices: number[] }>,
     photoUri?: string,
-  ): Promise<void>;
+  ): Promise<{ queued: boolean }>;
 
   /** Survey (PRD §5.7) — generic question sets; also backs the Nutrition Quiz (§6) via NutritionQuizScreen. */
   upsertSurvey(s: Survey): Promise<string | null>;
@@ -573,7 +576,13 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
     }
     case 'submitStockTaking': {
       const existing = get().stockTakingRows;
-      const fresh = op.rows.filter((r) => !existing.some((x) => x.id === r.id));
+      // Display the pending local photo (if any) even though it isn't baked into
+      // the queued op's rows (see replayOp — the row must not carry a local path
+      // as its DB-bound photoUrl). Purely cosmetic; replay patches this to the
+      // real remote URL once uploaded.
+      const fresh = op.rows
+        .filter((r) => !existing.some((x) => x.id === r.id))
+        .map((r) => (op.localPhotoUri ? { ...r, photoUrl: op.localPhotoUri } : r));
       if (fresh.length) set({ stockTakingRows: [...fresh, ...existing] });
       break;
     }
@@ -581,6 +590,28 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
       const existing = get().offtakeRows;
       const fresh = op.rows.filter((r) => !existing.some((x) => x.id === r.id));
       if (fresh.length) set({ offtakeRows: [...fresh, ...existing] });
+      break;
+    }
+    case 'submitPriceMonitoring': {
+      const existing = get().priceMonitoringRows;
+      const fresh = op.rows
+        .filter((r) => !existing.some((x) => x.id === r.id))
+        .map((r) => (op.localPhotoUri ? { ...r, photoUrl: op.localPhotoUri } : r));
+      if (fresh.length) set({ priceMonitoringRows: [...fresh, ...existing] });
+      break;
+    }
+    case 'submitShareOfShelf': {
+      const existing = get().shareOfShelfRows;
+      if (!existing.some((x) => x.id === op.row.id)) {
+        set({ shareOfShelfRows: [{ ...op.row, photoUrl: op.localPhotoUri }, ...existing] });
+      }
+      break;
+    }
+    case 'submitPaidVisibility': {
+      const existing = get().paidVisibilityRows;
+      if (!existing.some((x) => x.id === op.row.id)) {
+        set({ paidVisibilityRows: [{ ...op.row, photoUrl: op.localPhotoUri }, ...existing] });
+      }
       break;
     }
   }
@@ -622,8 +653,47 @@ function offtakeRow(r: OfftakeRow) {
   };
 }
 
+function shareOfShelfRow(r: ShareOfShelfRow) {
+  return {
+    id: r.id,
+    visit_id: r.visitId,
+    store_id: r.storeId,
+    channel: r.channel,
+    category: r.category,
+    own_facing_count: r.ownFacingCount,
+    total_facing_count: r.totalFacingCount,
+    photo_url: r.photoUrl,
+    created_at: new Date(r.createdAt).toISOString(),
+  };
+}
+
+function paidVisibilityRow(r: PaidVisibilityRow) {
+  return {
+    id: r.id,
+    visit_id: r.visitId,
+    store_id: r.storeId,
+    visibility_type: r.visibilityType,
+    compliance_checklist: r.complianceChecklist,
+    photo_url: r.photoUrl,
+    created_at: new Date(r.createdAt).toISOString(),
+  };
+}
+
+function priceMonitoringRow(r: PriceMonitoringRow) {
+  return {
+    id: r.id,
+    visit_id: r.visitId,
+    store_id: r.storeId,
+    sku: r.sku,
+    own_price: r.ownPrice,
+    competitor_prices: r.competitorPrices,
+    photo_url: r.photoUrl ?? null,
+    created_at: new Date(r.createdAt).toISOString(),
+  };
+}
+
 /** Replays one queued op against Supabase. Returns whether it can be dropped from the queue. */
-async function replayOp(get: () => StoreState, op: QueuedOp): Promise<boolean> {
+async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp): Promise<boolean> {
   if (op.type === 'clockIn') {
     const a = op.attendance;
     const { error } = await supabase.from('attendances').insert({
@@ -661,8 +731,7 @@ async function replayOp(get: () => StoreState, op: QueuedOp): Promise<boolean> {
     return !error;
   }
   if (op.type === 'submitStockTaking') {
-    const { error } = await supabase.from('stock_taking').insert(op.rows.map(stockTakingRow));
-    return !error;
+    return replayOptionalPhotoBatch(set, get, 'stockTakingRows', 'stock_taking', op.rows, stockTakingRow, op.localPhotoUri, 'Stock Taking');
   }
   if (op.type === 'submitOfftake') {
     // Replayed inserts don't read back is_outlier — the row's flag stays as last
@@ -671,9 +740,133 @@ async function replayOp(get: () => StoreState, op: QueuedOp): Promise<boolean> {
     const { error } = await supabase.from('offtake').insert(op.rows.map(offtakeRow));
     return !error;
   }
+  if (op.type === 'submitPriceMonitoring') {
+    return replayOptionalPhotoBatch(
+      set,
+      get,
+      'priceMonitoringRows',
+      'price_monitoring',
+      op.rows,
+      priceMonitoringRow,
+      op.localPhotoUri,
+      'Price Monitoring',
+    );
+  }
+  if (op.type === 'submitShareOfShelf') {
+    return replayRequiredPhotoRow(set, get, 'shareOfShelfRows', 'share_of_shelf', op.row, shareOfShelfRow, op.localPhotoUri, 'Share of Shelf');
+  }
+  if (op.type === 'submitPaidVisibility') {
+    return replayRequiredPhotoRow(
+      set,
+      get,
+      'paidVisibilityRows',
+      'paid_visibility',
+      op.row,
+      paidVisibilityRow,
+      op.localPhotoUri,
+      'Paid Visibility',
+    );
+  }
   // finishVisit
   const { error } = await supabase.rpc('finish_visit', { p_visit_id: op.visitId });
   return !error;
+}
+
+/** Shared replay logic for optional-photo batch reports (Stock Taking, Price
+ * Monitoring): uploads the deferred local photo if present, inserts the
+ * batch's rows, and patches local state's photoUrl from the local file path to
+ * the real remote URL (or clears it if the local file is gone by the time the
+ * device reconnects — the report itself still saves, per the PRD review's
+ * missing-local-file handling). */
+async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMonitoringRows', R extends { id: string; visitId: string; photoUrl?: string }>(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  stateKey: K,
+  table: string,
+  rows: R[],
+  toDbRow: (r: R) => Record<string, unknown>,
+  localPhotoUri: string | undefined,
+  label: string,
+): Promise<boolean> {
+  let photoUrl: string | undefined;
+  let photoLost = false;
+  if (localPhotoUri) {
+    if (await localPhotoExists(localPhotoUri)) {
+      try {
+        photoUrl = await uploadReportMedia(rows[0]?.visitId ?? uid(), localPhotoUri, extFromUri(localPhotoUri));
+      } catch {
+        return false; // transient upload failure — keep retrying, don't drop the row
+      }
+    } else {
+      photoLost = true;
+    }
+  }
+
+  const rowsWithPhoto = rows.map((r) => ({ ...r, photoUrl }));
+  const { error } = await supabase.from(table).insert(rowsWithPhoto.map(toDbRow));
+  if (error) return false;
+
+  if (photoUrl) {
+    await discardLocalPhoto(localPhotoUri!);
+  }
+  // Patch local state's photoUrl from the (possibly-dead) local path to the
+  // real remote URL, or clear it if the photo never made it — never leave a
+  // row pointing at a local file that may no longer exist.
+  set({
+    [stateKey]: (get()[stateKey] as unknown as R[]).map((r) => (rows.some((n) => n.id === r.id) ? { ...r, photoUrl } : r)),
+  } as unknown as Partial<StoreState>);
+
+  if (photoLost) {
+    showDialog(
+      'Foto Hilang',
+      `Foto ${label} yang tersimpan offline sudah tidak ada di perangkat (mungkin cache terhapus). Laporan tetap disimpan tanpa foto.`,
+    );
+  }
+  return true;
+}
+
+/** Shared replay logic for required-photo single-row reports (Share of Shelf,
+ * Paid Visibility): the row can never be inserted without its photo (DB `not
+ * null` constraint), so if the deferred local file is gone by replay time, the
+ * op is dropped and the NC is told to resubmit — it can never succeed. */
+async function replayRequiredPhotoRow<K extends 'shareOfShelfRows' | 'paidVisibilityRows', R extends { id: string; visitId: string; storeId: string; createdAt: number }>(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  stateKey: K,
+  table: string,
+  row: Omit<R, 'photoUrl'>,
+  toDbRow: (r: R) => Record<string, unknown>,
+  localPhotoUri: string,
+  label: string,
+): Promise<boolean> {
+  if (!(await localPhotoExists(localPhotoUri))) {
+    // Unrecoverable — drop from the queue rather than retry forever, and
+    // remove the optimistic local row since it will never reach the server.
+    set({ [stateKey]: (get()[stateKey] as unknown as R[]).filter((r) => r.id !== row.id) } as unknown as Partial<StoreState>);
+    const storeName = get().stores.find((s) => s.id === row.storeId)?.name ?? row.storeId;
+    showDialog(
+      'Laporan Tidak Tersinkron',
+      `Foto ${label} untuk toko "${storeName}" (${fmtDate(row.createdAt)}) hilang dari perangkat sebelum sempat disinkron. Laporan ini tidak tersimpan — silakan isi ulang.`,
+    );
+    return true; // drop the op — it can never succeed
+  }
+
+  let photoUrl: string;
+  try {
+    photoUrl = await uploadReportMedia(row.visitId, localPhotoUri, extFromUri(localPhotoUri));
+  } catch {
+    return false; // transient upload failure — keep retrying
+  }
+
+  const fullRow = { ...row, photoUrl } as unknown as R;
+  const { error } = await supabase.from(table).insert(toDbRow(fullRow));
+  if (error) return false;
+
+  await discardLocalPhoto(localPhotoUri);
+  set({
+    [stateKey]: (get()[stateKey] as unknown as R[]).map((r) => (r.id === row.id ? { ...r, photoUrl } : r)),
+  } as unknown as Partial<StoreState>);
+  return true;
 }
 
 async function enqueueOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp) {
@@ -1084,7 +1277,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (!queue.length) return;
     const remaining: QueuedOp[] = [];
     for (const op of queue) {
-      const done = await replayOp(get, op);
+      const done = await replayOp(set, get, op);
       if (!done) remaining.push(op);
     }
     set({ pendingOps: remaining });
@@ -1443,41 +1636,52 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan jumlah valid (>= 0).');
 
     const online = await isOnline();
-    let photoUrl: string | undefined;
-    if (photoUri) {
-      if (online) {
-        try {
-          photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-        } catch {
-          showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
-        }
-      } else {
-        showDialog(
-          'Offline',
-          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
-        );
-      }
-    }
-
     const now = Date.now();
-    const newRows: StockTakingRow[] = clean.map((r) => ({
+    const baseRows: StockTakingRow[] = clean.map((r) => ({
       id: uid('stk_'),
       visitId,
       storeId,
       sku: r.sku,
       qtyOnHand: r.qtyOnHand,
       outOfStock: r.outOfStock,
-      photoUrl,
+      photoUrl: undefined,
       createdAt: now,
     }));
 
-    set({ stockTakingRows: [...newRows, ...get().stockTakingRows] });
-
     if (!online) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitStockTaking', rows: newRows });
+      // Phase 5: native persists the photo locally and defers its upload to
+      // replay time; web keeps the pre-Phase-5 "photo dropped" behavior (see
+      // offlineQueue.ts's QueuedOp comment on the web scope boundary).
+      let localPhotoUri: string | undefined;
+      if (photoUri && Platform.OS !== 'web') {
+        try {
+          localPhotoUri = await persistPhotoLocally(photoUri);
+        } catch {
+          showDialog('Foto Gagal Disimpan', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
+        }
+      } else if (photoUri) {
+        showDialog(
+          'Offline',
+          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
+        );
+      }
+      const displayRows = localPhotoUri ? baseRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : baseRows;
+      set({ stockTakingRows: [...displayRows, ...get().stockTakingRows] });
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitStockTaking', rows: baseRows, localPhotoUri });
       showDialog('Tersimpan Offline', 'Stock Taking tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
       return { queued: true };
     }
+
+    let photoUrl: string | undefined;
+    if (photoUri) {
+      try {
+        photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+      } catch {
+        showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
+      }
+    }
+    const newRows = baseRows.map((r) => ({ ...r, photoUrl }));
+    set({ stockTakingRows: [...newRows, ...get().stockTakingRows] });
 
     const { error } = await supabase.from('stock_taking').insert(newRows.map(stockTakingRow));
     if (error) {
@@ -1593,18 +1797,8 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (input.ownFacingCount > input.totalFacingCount) {
       throw new Error('Own facing tidak boleh melebihi total facing.');
     }
-    if (!(await isOnline())) {
-      showDialog('Offline', 'Share of Shelf butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-      throw new Error('Tidak ada koneksi internet.');
-    }
-    let photoUrl: string;
-    try {
-      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-    } catch {
-      showDialog('Gagal Upload Foto', 'Foto wajib untuk Share of Shelf tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
-      throw new Error('Upload foto gagal.');
-    }
-    const row: ShareOfShelfRow = {
+
+    const baseRow: Omit<ShareOfShelfRow, 'photoUrl'> = {
       id: uid('sos_'),
       visitId,
       storeId,
@@ -1612,34 +1806,80 @@ export const useStore = create<StoreState>()((set, get) => ({
       category: input.category,
       ownFacingCount: input.ownFacingCount,
       totalFacingCount: input.totalFacingCount,
-      photoUrl,
       createdAt: Date.now(),
     };
+
+    if (!(await isOnline())) {
+      // Phase 5: native persists the required photo locally and defers upload
+      // to replay — the row can never be inserted without it (DB not-null
+      // constraint), so replay itself withholds the insert until the upload
+      // succeeds (see replayRequiredPhotoRow). Web keeps the pre-Phase-5
+      // online-required behavior (see offlineQueue.ts's QueuedOp comment).
+      if (Platform.OS === 'web') {
+        showDialog('Offline', 'Share of Shelf butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
+        throw new Error('Tidak ada koneksi internet.');
+      }
+      let localPhotoUri: string;
+      try {
+        localPhotoUri = await persistPhotoLocally(photoUri);
+      } catch {
+        showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
+        throw new Error('Gagal menyimpan foto secara lokal.');
+      }
+      set({ shareOfShelfRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().shareOfShelfRows] });
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitShareOfShelf', row: baseRow, localPhotoUri });
+      showDialog('Tersimpan Offline', 'Share of Shelf tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
+      return { queued: true };
+    }
+
+    let photoUrl: string;
+    try {
+      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
+    } catch {
+      showDialog('Gagal Upload Foto', 'Foto wajib untuk Share of Shelf tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
+      throw new Error('Upload foto gagal.');
+    }
+    const row: ShareOfShelfRow = { ...baseRow, photoUrl };
     set({ shareOfShelfRows: [row, ...get().shareOfShelfRows] });
-    const { error } = await supabase.from('share_of_shelf').insert({
-      id: row.id,
-      visit_id: row.visitId,
-      store_id: row.storeId,
-      channel: row.channel,
-      category: row.category,
-      own_facing_count: row.ownFacingCount,
-      total_facing_count: row.totalFacingCount,
-      photo_url: row.photoUrl,
-      created_at: new Date(row.createdAt).toISOString(),
-    });
+    const { error } = await supabase.from('share_of_shelf').insert(shareOfShelfRow(row));
     if (error) {
       set({ shareOfShelfRows: get().shareOfShelfRows.filter((x) => x.id !== row.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Share of Shelf ke server. Periksa koneksi internet dan coba lagi.');
       throw new Error(error.message);
     }
+    return { queued: false };
   },
 
   submitPaidVisibility: async (visitId, storeId, input, photoUri) => {
     if (!input.visibilityType) throw new Error('Pilih jenis visibility.');
+
+    const baseRow: Omit<PaidVisibilityRow, 'photoUrl'> = {
+      id: uid('pv_'),
+      visitId,
+      storeId,
+      visibilityType: input.visibilityType,
+      complianceChecklist: input.complianceChecklist,
+      createdAt: Date.now(),
+    };
+
     if (!(await isOnline())) {
-      showDialog('Offline', 'Paid Visibility butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-      throw new Error('Tidak ada koneksi internet.');
+      if (Platform.OS === 'web') {
+        showDialog('Offline', 'Paid Visibility butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
+        throw new Error('Tidak ada koneksi internet.');
+      }
+      let localPhotoUri: string;
+      try {
+        localPhotoUri = await persistPhotoLocally(photoUri);
+      } catch {
+        showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
+        throw new Error('Gagal menyimpan foto secara lokal.');
+      }
+      set({ paidVisibilityRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().paidVisibilityRows] });
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitPaidVisibility', row: baseRow, localPhotoUri });
+      showDialog('Tersimpan Offline', 'Paid Visibility tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
+      return { queued: true };
     }
+
     let photoUrl: string;
     try {
       photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
@@ -1647,30 +1887,15 @@ export const useStore = create<StoreState>()((set, get) => ({
       showDialog('Gagal Upload Foto', 'Foto wajib untuk Paid Visibility tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
       throw new Error('Upload foto gagal.');
     }
-    const row: PaidVisibilityRow = {
-      id: uid('pv_'),
-      visitId,
-      storeId,
-      visibilityType: input.visibilityType,
-      complianceChecklist: input.complianceChecklist,
-      photoUrl,
-      createdAt: Date.now(),
-    };
+    const row: PaidVisibilityRow = { ...baseRow, photoUrl };
     set({ paidVisibilityRows: [row, ...get().paidVisibilityRows] });
-    const { error } = await supabase.from('paid_visibility').insert({
-      id: row.id,
-      visit_id: row.visitId,
-      store_id: row.storeId,
-      visibility_type: row.visibilityType,
-      compliance_checklist: row.complianceChecklist,
-      photo_url: row.photoUrl,
-      created_at: new Date(row.createdAt).toISOString(),
-    });
+    const { error } = await supabase.from('paid_visibility').insert(paidVisibilityRow(row));
     if (error) {
       set({ paidVisibilityRows: get().paidVisibilityRows.filter((x) => x.id !== row.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Paid Visibility ke server. Periksa koneksi internet dan coba lagi.');
       throw new Error(error.message);
     }
+    return { queued: false };
   },
 
   // --- Phase 3: Price Monitoring (PRD §5.6) — optional photo -------------
@@ -1684,9 +1909,39 @@ export const useStore = create<StoreState>()((set, get) => ({
       }))
       .filter((r) => r.sku && r.ownPrice >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan harga sendiri yang valid (>= 0).');
-    if (!(await isOnline())) {
-      showDialog('Offline', 'Price Monitoring butuh koneksi internet untuk disimpan (tidak masuk antrian offline). Coba lagi saat online.');
-      throw new Error('Tidak ada koneksi internet.');
+
+    const online = await isOnline();
+    const now = Date.now();
+    const baseRows: PriceMonitoringRow[] = clean.map((r) => ({
+      id: uid('pm_'),
+      visitId,
+      storeId,
+      sku: r.sku,
+      ownPrice: r.ownPrice,
+      competitorPrices: r.competitorPrices,
+      photoUrl: undefined,
+      createdAt: now,
+    }));
+
+    if (!online) {
+      let localPhotoUri: string | undefined;
+      if (photoUri && Platform.OS !== 'web') {
+        try {
+          localPhotoUri = await persistPhotoLocally(photoUri);
+        } catch {
+          showDialog('Foto Gagal Disimpan', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
+        }
+      } else if (photoUri) {
+        showDialog(
+          'Offline',
+          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
+        );
+      }
+      const displayRows = localPhotoUri ? baseRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : baseRows;
+      set({ priceMonitoringRows: [...displayRows, ...get().priceMonitoringRows] });
+      await enqueueOp(set, get, { id: uid('op_'), type: 'submitPriceMonitoring', rows: baseRows, localPhotoUri });
+      showDialog('Tersimpan Offline', 'Price Monitoring tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
+      return { queued: true };
     }
 
     let photoUrl: string | undefined;
@@ -1697,36 +1952,15 @@ export const useStore = create<StoreState>()((set, get) => ({
         showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
       }
     }
-
-    const now = Date.now();
-    const newRows: PriceMonitoringRow[] = clean.map((r) => ({
-      id: uid('pm_'),
-      visitId,
-      storeId,
-      sku: r.sku,
-      ownPrice: r.ownPrice,
-      competitorPrices: r.competitorPrices,
-      photoUrl,
-      createdAt: now,
-    }));
+    const newRows = baseRows.map((r) => ({ ...r, photoUrl }));
     set({ priceMonitoringRows: [...newRows, ...get().priceMonitoringRows] });
-    const { error } = await supabase.from('price_monitoring').insert(
-      newRows.map((r) => ({
-        id: r.id,
-        visit_id: r.visitId,
-        store_id: r.storeId,
-        sku: r.sku,
-        own_price: r.ownPrice,
-        competitor_prices: r.competitorPrices,
-        photo_url: r.photoUrl ?? null,
-        created_at: new Date(r.createdAt).toISOString(),
-      })),
-    );
+    const { error } = await supabase.from('price_monitoring').insert(newRows.map(priceMonitoringRow));
     if (error) {
       set({ priceMonitoringRows: get().priceMonitoringRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Price Monitoring ke server. Periksa koneksi internet dan coba lagi.');
       throw new Error(error.message);
     }
+    return { queued: false };
   },
 
   // --- Phase 3: Survey (PRD §5.7) + Nutrition Quiz (PRD §6, via NutritionQuizScreen) ---

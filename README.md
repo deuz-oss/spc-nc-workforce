@@ -68,32 +68,47 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
 Login uses a plain username in the UI, mapped under the hood to a synthetic email `{username}@internal.spc`
 through Supabase Auth (`src/store/useStore.ts`).
 
-## Status & Gaps (Phase 1 — Foundation, per PRD §16)
+## Status & Gaps (Phase 5 — Hardening, per PRD §16)
 
-**Built and real** (not stubs):
-- Auth (username → Supabase Auth), 10-role RBAC, role-scoped data access (`scopeUsers`/`storeScope` in
-  `src/store/useStore.ts`, mirrored by Postgres RLS in `0001_init.sql`)
-- Attendance: clock in/out, live GPS route recording (foreground + Android background, native task — the exact
-  code path already validated on physical devices in `spc-field-force`)
-- Store check-in/out with **geofence-blocked entry** (default 300 m radius, `StoreDetailScreen.tsx`)
-- Offline queue for the four critical actions (clock in/out, check-in/out) — same scope as `spc-field-force`;
-  extending it to the 7 report-module submissions is **not yet sized**, see PRD §13
-- CSV bulk import: store master data, and **bulk account provisioning** (new — PRD §13's 215-account scale gap;
-  `addUsersBulk` in `useStore.ts` + the "Akun Pengguna" mode in `ImportScreen.tsx`)
-- Full Postgres schema for the entire PRD §12 data model (all 7 report tables, consumers/NTG-GWP, surveys,
-  scorecards, targets, certifications, schedules, messaging) with RLS — even though no screen reads/writes most
-  of it yet. Schema-first so Phase 2+ doesn't need a redesign.
-- Design tokens re-themed to navy/gold (`src/theme.ts`) per PRD §3
+All 5 phases from the PRD's phasing plan (§16) are implemented:
 
-**Explicitly stubbed** (placeholder screens wired into navigation, no business logic — PRD §16 Phase 2/3/4):
-- All 7 report modules (Stock Taking, Share of Shelf, Offtake, NTG & GWP, Paid Visibility, Price Monitoring, Survey)
-- Nutrition Quiz consumer flow (PRD §6)
-- In-app messaging, NC↔TL / TL↔ARCO (PRD §17) — needs new push-notification infrastructure, not yet built
-- TL/ARCO same-day validation console, live team map, coaching log (PRD §8)
-- Scorecard engine — all 7 roles' weighted KPIs (PRD §9); `src/utils/kpi.ts` only has the Phase 1 attendance/visit
-  discipline metrics (Working Hours, CFT, geofence %, valid-visit %), not the full weighted formulas
-- Management dashboard KPI cards/trend charts/channel breakdown (PRD §10)
-- Reckitt client dashboard content (role and read-only scoping exist; the views themselves don't yet)
+- **Phase 1 (Foundation):** auth, 10-role RBAC, role-scoped access (`scopeUsers`/`storeScope` in
+  `src/store/useStore.ts`, mirrored by Postgres RLS), attendance + geofenced check-in, product master, bulk
+  account provisioning (`addUsersBulk` + `ImportScreen`'s "Akun Pengguna" mode), full Postgres schema for the
+  entire PRD §12 data model, navy/gold design tokens.
+- **Phase 2 (Core daily loop):** Stock Taking, Offtake (server-side outlier trigger), NTG & GWP consumer funnel.
+- **Phase 3 (Bi-weekly modules):** Share of Shelf, Paid Visibility, Price Monitoring, Survey builder/response
+  flow, and the Nutrition Quiz (consent-gated, age-branched — the under-1-year branch never advances the funnel).
+- **Phase 4 (Dashboards and scorecards):** TL/ARCO exception-based validation queue + live team map + coaching
+  log, PM/Reckitt/Data Analyst management dashboard (Reckitt's view is structurally PII-free, not just
+  role-gated), a server-computed scorecard engine (`compute_scorecards` RPC, config-driven weights, honest about
+  which KPIs have no supporting data model yet — see `0006_phase4_scorecards.sql`), and in-app messaging
+  (NC↔TL, TL↔ARCO) with push-notification infrastructure that is wired but unverified end-to-end (no real EAS
+  project or physical device to test against).
+
+**Phase 5 (Hardening) — status:**
+- ✅ **Live database validated.** All 7 migrations (`0001`–`0007`) apply cleanly to a real Supabase project;
+  seed script, RLS role-scoping, and the `compute_scorecards` RPC have all been smoke-tested against it
+  successfully — this was the first time any of the above SQL had touched a live Postgres instance.
+- ✅ **Offline queue extended to every photo-based report module.** Stock Taking's optional photo, Share of
+  Shelf/Paid Visibility's required photo, and Price Monitoring's optional photo now all queue on native when
+  offline (`persistPhotoLocally`/`discardLocalPhoto`/`localPhotoExists` in `src/utils/storage.ts`). The photo
+  upload itself is deferred to replay time and never baked into a row before it's confirmed uploaded — a
+  required-photo row can structurally never reach Supabase without its photo (replay withholds the insert until
+  the upload succeeds), and if the local file is gone by the time the device reconnects (app reinstalled, cache
+  cleared), the op is dropped with a clear "please resubmit" dialog rather than retried forever. **Web is
+  deliberately excluded**: browser-picked file/blob URIs don't reliably survive a page reload the way a native
+  file copy does, so web keeps the original online-required behavior for these four modules' photo handling.
+- ⬜ **iOS background location + build validation** — still open. Config in `app.json` looks complete but is
+  **unvalidated on a physical device**; needs a Mac, real iOS hardware, and an Apple Developer account, none of
+  which exist in this environment.
+- ⬜ EAS `preview`/`production` build profiles exist in `eas.json` but have never been run; both need Supabase
+  env vars configured via EAS (`eas env:create`), and `production` has no `eas submit` (signing/Play Store
+  service account) configured yet.
+- ⬜ Real 47-city store master data and the real 215-person account roster (seed script is demo data only).
+- ⬜ `assets/` (icon.png, android-icon-*.png, favicon.png, notification-icon.png) referenced by `app.json` are
+  still **not present in this repo** — no image-generation tool was available while scaffolding. TypeScript
+  compiles fine without them, but Expo will fail to resolve the icons at runtime/build time.
 
 **Known open dependencies** (from the PRD's own open-questions list, §15 — not something this codebase can
 resolve on its own):
@@ -102,18 +117,7 @@ resolve on its own):
   Hours until decided
 - Payroll export process/format
 - Whether Reckitt requires LIS integration (would change §11 from a role addition to a data-sync requirement)
-
-**Not yet done, called out in PRD §13/§16 as pre-go-live work:**
-- iOS background location: config is present (`app.json`) but **unvalidated on a physical device** — needs a Mac
-  and real iOS hardware
-- EAS `preview`/`production` build profiles exist in `eas.json` but have never been run; both need Supabase env
-  vars configured via EAS (`eas env:create`), and `production` has no `eas submit` (signing/Play Store service
-  account) configured yet
-- Real 47-city store master data and the real 215-person account roster (seed script is demo data only)
-- `assets/` (icon.png, android-icon-*.png, favicon.png, notification-icon.png) referenced by `app.json` are
-  **not present in this repo** — no image-generation tool was available while scaffolding. Add real brand
-  assets before running `expo start` on a device or an EAS build; TypeScript compiles fine without them, but
-  Expo will fail to resolve the icons at runtime/build time.
+- No certifications data-entry UI exists yet, so 2 of Lead Trainer's scorecard KPIs can never compute in practice
 
 ## Reused vs New (PRD §3)
 
@@ -121,7 +125,7 @@ resolve on its own):
 |---|---|
 | Auth, RBAC, role-scoped access | Reused (pattern), re-modeled for 10 NC-program roles |
 | Attendance / geofencing / background location | Reused near-verbatim |
-| Offline queue (4 critical actions) | Reused near-verbatim |
+| Offline queue (4 critical actions) | Reused near-verbatim; extended (Phase 5, new) to defer photo uploads for Stock Taking/Share of Shelf/Paid Visibility/Price Monitoring |
 | CSV import + bulk assignment | Reused (pattern), extended with bulk account provisioning |
 | Design system (tokens, components, Plus Jakarta Sans) | Reused, re-themed navy/gold |
 | Backend shape (Supabase: Postgres+Auth+Realtime+Storage) | Reused, single project (not multi-tenant) |
