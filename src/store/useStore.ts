@@ -9,6 +9,7 @@ import { showDialog } from '../components/dialog';
 import { HISTORY_DAYS, TRACK_MIN_STEP_M } from '../config';
 import {
   Attendance,
+  Certification,
   CoachingLog,
   Consumer,
   Conversation,
@@ -111,6 +112,11 @@ interface StoreState {
    * single compute run can upsert 200+ rows at once, which would flood realtime
    * events for no benefit; computeScorecards() refetches explicitly instead. */
   scorecards: Scorecard[];
+  /** Training certification results (PRD §9 Lead Trainer KPIs). RLS: monitor
+   * roles see all, everyone sees their own. Small table, loaded in full. Not in
+   * the realtime publication — writers update local state directly, other
+   * viewers pick changes up on next login. */
+  certifications: Certification[];
   /** Phase 4b (PRD §16) — in-app messaging (PRD §17). */
   conversations: Conversation[];
   messages: Message[];
@@ -233,6 +239,9 @@ interface StoreState {
   upsertCoachingLog(log: CoachingLog): Promise<string | null>;
   /** Data Analyst/super_admin only (matches targets RLS write policy, 0001 migration). */
   upsertTarget(t: Target): Promise<string | null>;
+  /** Batch insert of one training session's results (lead_trainer/trainer/super_admin). */
+  addCertifications(rows: Certification[]): Promise<string | null>;
+  deleteCertification(id: string): Promise<string | null>;
   /** TargetsScreen's batch save: upserts `rows` and deletes `deleteIds` (a
    * target cleared back to empty). All-or-nothing locally — rolls back on error. */
   saveTargets(rows: Target[], deleteIds: string[]): Promise<string | null>;
@@ -547,6 +556,16 @@ function mapScorecard(s: any): Scorecard {
     status: s.status,
     breakdown: s.breakdown ?? {},
     computedAt: new Date(s.computed_at).getTime(),
+  };
+}
+
+function mapCertification(c: any): Certification {
+  return {
+    id: c.id,
+    userId: c.user_id,
+    certType: c.cert_type,
+    date: new Date(c.date).getTime(),
+    passed: c.passed,
   };
 }
 
@@ -1266,6 +1285,7 @@ async function hydrateAll(
     scorecardsRes,
     conversationsRes,
     messagesRes,
+    certificationsRes,
   ] = await Promise.all(
     [
       'profiles',
@@ -1289,6 +1309,7 @@ async function hydrateAll(
       'scorecards',
       'conversations',
       'messages',
+      'certifications',
     ].map((table) => fetchAll(table, windowFilter(table, since))),
   );
 
@@ -1327,6 +1348,7 @@ async function hydrateAll(
     scorecards: (scorecardsRes.data ?? []).map(mapScorecard),
     conversations: (conversationsRes.data ?? []).map(mapConversation),
     messages: (messagesRes.data ?? []).map(mapMessage),
+    certifications: (certificationsRes.data ?? []).map(mapCertification),
   });
 
   subscribeRealtime(set, get, userId);
@@ -1392,6 +1414,7 @@ const SIGNED_OUT_STATE: Partial<StoreState> = {
   scorecards: [],
   conversations: [],
   messages: [],
+  certifications: [],
   pendingOps: [],
   historyFrom: null,
 };
@@ -1420,6 +1443,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   scorecards: [],
   conversations: [],
   messages: [],
+  certifications: [],
   pendingOps: [],
   historyFrom: null,
 
@@ -2336,6 +2360,36 @@ export const useStore = create<StoreState>()((set, get) => ({
       );
       return error.message;
     }
+    return null;
+  },
+
+  addCertifications: async (rows) => {
+    if (!rows.length) return null;
+    const { error } = await supabase.from('certifications').insert(
+      rows.map((c) => ({
+        id: c.id,
+        user_id: c.userId,
+        cert_type: c.certType,
+        date: new Date(c.date).toISOString(),
+        passed: c.passed,
+      })),
+    );
+    if (error) {
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan hasil sertifikasi. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    set({ certifications: [...rows, ...get().certifications] });
+    return null;
+  },
+
+  deleteCertification: async (id) => {
+    // .select() so an RLS-refused delete (no error, 0 rows) isn't mistaken for success.
+    const { data, error } = await supabase.from('certifications').delete().eq('id', id).select('id');
+    if (error || !data?.length) {
+      showDialog('Gagal Menghapus', 'Tidak dapat menghapus hasil sertifikasi. Periksa koneksi internet dan coba lagi.');
+      return error?.message ?? 'not permitted';
+    }
+    set({ certifications: get().certifications.filter((c) => c.id !== id) });
     return null;
   },
 

@@ -5,7 +5,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import ManagementDashboard from './ManagementDashboard';
-import { MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES, TARGET_MANAGER_ROLES } from '../config';
+import { CERT_MANAGER_ROLES, MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
@@ -181,6 +181,16 @@ export default function DashboardScreen() {
           <Muted style={{ marginTop: 4 }}>
             Console validasi same-day, peta live tim, dan coaching log (PRD §8) ada di tab "Validasi".
           </Muted>
+        </Card>
+      )}
+
+      {CERT_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Sertifikasi"
+            subtitle="Catat hasil sesi sertifikasi NC & TL-Coach (PRD §9)"
+            action={{ label: 'Buka', onPress: () => navigation.navigate('Certifications') }}
+          />
         </Card>
       )}
 

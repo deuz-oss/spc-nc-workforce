@@ -98,6 +98,20 @@ export const COMPLIANCE_CHECKLIST_ITEMS: Array<{ key: string; label: string }> =
 /** Posisi yang boleh mengatur target offtake/alokasi GWP per NC (matches targets RLS write policy, 0001 migration). */
 export const TARGET_MANAGER_ROLES: Role[] = ['data_analyst', 'super_admin'];
 
+/** Posisi yang boleh mencatat hasil sertifikasi (matches certifications RLS write policy, 0001 migration). */
+export const CERT_MANAGER_ROLES: Role[] = ['lead_trainer', 'trainer', 'super_admin'];
+
+/** Jenis sertifikasi yang dapat dicatat. Keys are stored as certifications.cert_type.
+ * `tl_coach` MUST stay exactly that string: compute_scorecards() (0006) computes the
+ * Lead Trainer's "tl_coach_certification" KPI from cert_type = 'tl_coach'; every type
+ * counts toward "certification_pass_rate". The NC type list is a reasonable default
+ * pending the client's training curriculum (not specified in the PRD). */
+export const CERT_TYPES: Array<{ key: string; label: string; subjectRole: Role }> = [
+  { key: 'nc_onboarding', label: 'Onboarding NC', subjectRole: 'nc' },
+  { key: 'nc_refresher', label: 'Refresher / Re-sertifikasi NC', subjectRole: 'nc' },
+  { key: 'tl_coach', label: 'TL-Coach', subjectRole: 'tl' },
+];
+
 /** Posisi yang boleh membuat/mengelola Survey (matches surveys RLS write policy, 0001 migration). */
 export const SURVEY_BUILDER_ROLES: Role[] = ['data_analyst', 'super_admin'];
 

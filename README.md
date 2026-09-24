@@ -135,7 +135,6 @@ resolve on its own):
   Hours until decided
 - Payroll export process/format
 - Whether Reckitt requires LIS integration (would change §11 from a role addition to a data-sync requirement)
-- No certifications data-entry UI exists yet, so 2 of Lead Trainer's scorecard KPIs can never compute in practice
 
 ## iOS Validation Checklist (manual — needs a Mac + physical device + Apple Developer account)
 
@@ -202,7 +201,7 @@ add one once you're ready to actually ship, not before internal validation above
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 23 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 24 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)

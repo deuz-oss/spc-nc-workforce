@@ -86,6 +86,7 @@ const created = {
   consumers: [] as string[],
   conversations: [] as string[],
   targets: [] as string[],
+  certifications: [] as string[],
 };
 
 async function cleanup() {
@@ -100,6 +101,7 @@ async function cleanup() {
   await del('attendances', created.attendances); // route_points cascade
   await del('consumers', created.consumers);
   await del('targets', created.targets);
+  await del('certifications', created.certifications);
   {
     const { error } = await admin.from('scorecards').delete().eq('period_key', TEST_PERIOD);
     if (error) console.warn(`  cleanup scorecards: ${error.message}`);
@@ -141,6 +143,7 @@ async function main() {
   const reckitt = await signIn('reckitt', pw('reckitt'));
   const tl = await signIn('tl.jaksel', pw('tl.jaksel'));
   const nc = await signIn('nc.budi', pw('nc.budi'));
+  const trainer = await signIn('trainer', pw('trainer'));
 
   const { data: team } = await admin.from('teams').select('id, tl_id, arco_id').eq('id', 't_jaksel').single();
   const { data: stores } = await admin.from('stores').select('id').in('id', ['st_demo1', 'st_demo2']);
@@ -375,6 +378,23 @@ async function main() {
     const res = await nc.client.from('targets').insert({ id, nc_id: nc.id, period_key: TEST_PERIOD, offtake_target: 1, set_by: nc.id });
     if (!res.error) created.targets.push(id);
     expect(res.error, 'NC wrote a target');
+  });
+
+  await check('Trainer can record a certification result; NC cannot', async () => {
+    const id = `${RUN}_cert`;
+    const ok = await trainer.client
+      .from('certifications')
+      .insert({ id, user_id: nc.id, cert_type: 'nc_onboarding', date: new Date(2000, 0, 15).toISOString(), passed: true });
+    expectOk(ok, 'trainer certification insert');
+    created.certifications.push(id);
+    const idNc = `${RUN}_cert_nc`;
+    const bad = await nc.client
+      .from('certifications')
+      .insert({ id: idNc, user_id: nc.id, cert_type: 'nc_onboarding', date: new Date(2000, 0, 15).toISOString(), passed: true });
+    if (!bad.error) created.certifications.push(idNc);
+    expect(bad.error, 'NC recorded their own certification');
+    const { data } = await nc.client.from('certifications').select('id').eq('id', id);
+    expect(data?.length === 1, 'NC cannot see their own certification result');
   });
 
   await check('compute_scorecards cannot be run anonymously or via the internal core', async () => {
