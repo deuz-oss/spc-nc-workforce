@@ -196,7 +196,10 @@ add one once you're ready to actually ship, not before internal validation above
 
 ## Checks
 
-- **CI** (`.github/workflows/ci.yml`, runs on push/PR once the repo is on GitHub): `tsc`, `expo-doctor`
+- **Unit tests:** `npm test` (Node's built-in runner via `tsx`, no extra dependencies) — `src/**/*.test.ts` covering
+  the offline-queue replay rules (`src/store/replay.ts`), periods/month keys/history window, KPI + attrition
+  helpers, geo, and CSV. Keep React Native/Supabase-free logic in plain modules so it stays testable.
+- **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
   `npm run smoke -- --project <project-ref>` — 23 RLS/RPC/edge-function checks as each demo role; see

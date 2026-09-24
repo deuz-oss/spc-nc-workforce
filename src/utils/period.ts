@@ -57,6 +57,20 @@ export function monthKey(d: Date = new Date()): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
 }
 
+/** Shifts a 'YYYY-MM' key by `delta` months (handles year boundaries). */
+export function shiftMonth(key: string, delta: number): string {
+  const [y, m] = key.split('-').map(Number);
+  return monthKey(new Date(y, m - 1 + delta, 1));
+}
+
+/** Start of the login history window: local midnight `days` days before `now`. */
+export function historyWindowStart(now: Date, days: number): number {
+  const d = new Date(now);
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - days);
+  return d.getTime();
+}
+
 export function inRange(ts: number, r: TimeRange): boolean {
   return ts >= r.from && ts < r.to;
 }

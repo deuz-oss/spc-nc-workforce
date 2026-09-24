@@ -10,7 +10,7 @@ import { Target, User } from '../types';
 import { parseCsv, toCsv } from '../utils/csv';
 import { exportCsv } from '../utils/export';
 import { fmtNum, MONTHS_ID } from '../utils/format';
-import { monthKey } from '../utils/period';
+import { monthKey, shiftMonth } from '../utils/period';
 import { uid } from '../utils/uuid';
 
 /**
@@ -31,11 +31,6 @@ interface Draft {
 }
 
 const EMPTY: Draft = { offtake: '', gwp: '' };
-
-function shiftMonth(key: string, delta: number): string {
-  const [y, m] = key.split('-').map(Number);
-  return monthKey(new Date(y, m - 1 + delta, 1));
-}
 
 function monthLabel(key: string): string {
   const [y, m] = key.split('-').map(Number);

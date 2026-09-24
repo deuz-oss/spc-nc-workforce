@@ -40,7 +40,9 @@ import { haversineM } from '../utils/geo';
 import { loadQueue, saveQueue, QueuedOp } from '../utils/offlineQueue';
 import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, uploadReportMedia } from '../utils/storage';
 import { fmtDate } from '../utils/format';
+import { historyWindowStart } from '../utils/period';
 import { uid } from '../utils/uuid';
+import { drainQueue, OP_LABEL, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
  * showDialog — screens must not show a second dialog for it. */
@@ -745,38 +747,6 @@ function priceMonitoringRow(r: PriceMonitoringRow) {
   };
 }
 
-/**
- * Outcome of replaying one queued op:
- * - `done`: landed server-side (or already had — a duplicate-key insert means a
- *   previous attempt succeeded but its response was lost), drop it.
- * - `retry`: transient (network/5xx/upload) failure, keep it and stop replaying
- *   later ops so their order is preserved (clock-out never lands before clock-in).
- * - `failed`: the server rejected it deterministically (constraint, RLS, missing
- *   parent row) — retrying would fail forever and block every op behind it, so
- *   it's dropped and reported to the user.
- * - `dropped`: unrecoverable and already explained to the user by the handler.
- */
-type ReplayResult = 'done' | 'retry' | 'failed' | 'dropped';
-
-/** Postgres error classes that fail identically on every retry: 22 data
- * exception, 23 integrity constraint, 42 syntax/privilege (incl. 42501 RLS),
- * P0 raised by a function (e.g. finish_visit's "not found"). */
-function settle(error: { code?: string } | null): ReplayResult {
-  if (!error || error.code === '23505') return 'done';
-  return error.code && /^(22|23|42|P0)/.test(error.code) ? 'failed' : 'retry';
-}
-
-const OP_LABEL: Record<QueuedOp['type'], string> = {
-  clockIn: 'Clock-in',
-  clockOut: 'Clock-out',
-  startVisit: 'Check-in toko',
-  finishVisit: 'Check-out toko',
-  submitStockTaking: 'Stock Taking',
-  submitOfftake: 'Offtake',
-  submitPriceMonitoring: 'Price Monitoring',
-  submitShareOfShelf: 'Share of Shelf',
-  submitPaidVisibility: 'Paid Visibility',
-};
 
 /** Replays one queued op against Supabase. */
 async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp): Promise<ReplayResult> {
@@ -1258,13 +1228,6 @@ const WINDOWED_TABLES: Array<{ table: string; key: keyof StoreState; col: string
   { table: 'messages', key: 'messages', col: 'created_at', map: mapMessage },
 ];
 
-/** Start of the login history window: local midnight HISTORY_DAYS ago. */
-function historyWindowStart(): number {
-  const d = new Date();
-  d.setHours(0, 0, 0, 0);
-  d.setDate(d.getDate() - HISTORY_DAYS);
-  return d.getTime();
-}
 
 function windowFilter(table: string, since: number): TimeFilter | undefined {
   const w = WINDOWED_TABLES.find((t) => t.table === table);
@@ -1280,7 +1243,7 @@ async function hydrateAll(
   const { data: me, error: meErr } = await supabase.from('profiles').select('*').eq('id', userId).single();
   if (meErr || !me || !me.active) return false;
 
-  const since = historyWindowStart();
+  const since = historyWindowStart(new Date(), HISTORY_DAYS);
   const [
     profilesRes,
     teamsRes,
@@ -1500,25 +1463,23 @@ export const useStore = create<StoreState>()((set, get) => ({
     const userId = get().sessionUserId;
     if (replayingQueue || !userId || !get().pendingOps.length) return;
     replayingQueue = true;
-    const failed: string[] = [];
     let synced = 0;
+    let failedOps: QueuedOp[] = [];
     try {
-      // Head-first, one op at a time, re-reading pendingOps each iteration so
-      // ops enqueued mid-replay are neither lost nor replayed out of order.
-      for (;;) {
-        const op = get().pendingOps[0];
-        if (!op || get().sessionUserId !== userId) break;
-        const result = await replayOp(set, get, op);
-        if (result === 'retry') break; // keep this op and everything after it
-        if (result === 'failed') failed.push(OP_LABEL[op.type]);
-        if (result === 'done') synced++;
-        const next = get().pendingOps.filter((o) => o.id !== op.id);
-        set({ pendingOps: next });
-        await saveQueue(userId, next);
-      }
+      ({ synced, failed: failedOps } = await drainQueue({
+        head: () => get().pendingOps[0],
+        replay: (op) => replayOp(set, get, op),
+        remove: async (op) => {
+          const next = get().pendingOps.filter((o) => o.id !== op.id);
+          set({ pendingOps: next });
+          await saveQueue(userId, next);
+        },
+        stillValid: () => get().sessionUserId === userId,
+      }));
     } finally {
       replayingQueue = false;
     }
+    const failed = failedOps.map((op) => OP_LABEL[op.type]);
     if (failed.length) {
       showDialog(
         'Sebagian Data Offline Ditolak Server',

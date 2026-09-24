@@ -25,6 +25,12 @@ jobs:
       - name: Type check
         run: npx tsc --noEmit
 
+      # Pure-logic unit tests (offline-queue replay rules, periods/month keys,
+      # KPI + attrition helpers, CSV). Run in UTC here and in WIB locally —
+      # they're written to be timezone-independent.
+      - name: Unit tests
+        run: npm test
+
       # Catches SDK version drift, missing app.json assets, and config errors
       # that otherwise only surface as a failed EAS build.
       - name: Expo doctor
