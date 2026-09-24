@@ -121,6 +121,12 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   ~66%, `android-icon-background.png` 1024², `android-icon-monochrome.png` 1024² single-colour silhouette,
   `notification-icon.png` 96² white-on-transparent, `favicon.png` 48².
 
+- ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
+  coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
+  daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
+  back (dashboard "Semua", store/NC visit history) offer **Muat Riwayat Lengkap** (`loadFullHistory`). Reference
+  data and the NTG & GWP funnel (whose latest row is the consumer's current stage) always load in full.
+
 **Known open dependencies** (from the PRD's own open-questions list, §15 — not something this codebase can
 resolve on its own):
 - NTG definition, and DMS/LMT/MTI channel definitions — `stores.channel` is free text pending this

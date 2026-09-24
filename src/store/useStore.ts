@@ -6,7 +6,7 @@ import Constants from 'expo-constants';
 import type { RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
-import { TRACK_MIN_STEP_M } from '../config';
+import { HISTORY_DAYS, TRACK_MIN_STEP_M } from '../config';
 import {
   Attendance,
   CoachingLog,
@@ -114,11 +114,19 @@ interface StoreState {
   messages: Message[];
   /** Clock-in/out, store check-in/out, and Stock Taking/Offtake submissions still waiting for connectivity to reach Supabase. */
   pendingOps: QueuedOp[];
+  /** Earliest timestamp of field-activity data loaded (visits, attendance,
+   * reports, reviews, coaching logs, messages) — see WINDOWED_TABLES. `null`
+   * once loadFullHistory() has pulled everything. Screens showing periods
+   * that reach further back use this to offer "load older history". */
+  historyFrom: number | null;
 
   /** Restores an existing Supabase session (if any) on cold app start. Call once from App.tsx. */
   init(): Promise<void>;
   /** Retries every queued offline write; called on reconnect and on app start. */
   processPendingOps(): Promise<void>;
+  /** Loads the field-activity history older than `historyFrom` (on demand —
+   * e.g. the management dashboard's "Semua" period). Returns an error message or null. */
+  loadFullHistory(): Promise<string | null>;
   login(username: string, password: string): Promise<string | null>;
   logout(): Promise<void>;
 
@@ -1167,14 +1175,28 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
  * days of data. Pages through with a stable order (every table's `id` is its PK). */
 const PAGE_SIZE = 1000;
 
-async function fetchAll(table: string): Promise<{ data: any[]; error: { message: string } | null }> {
+/** Time filter for a windowed table: `since` = rows on/after, `before` = rows
+ * strictly before. `keepNull` also returns rows where that column is null —
+ * used so an open attendance/visit (no clock-out/check-out yet) always loads
+ * no matter how old, since the UI must know the user is still clocked in. */
+interface TimeFilter {
+  col: string;
+  since?: string;
+  before?: string;
+  keepNull?: string;
+}
+
+async function fetchAll(table: string, filter?: TimeFilter): Promise<{ data: any[]; error: { message: string } | null }> {
   const out: any[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase
-      .from(table)
-      .select('*')
-      .order('id', { ascending: true })
-      .range(from, from + PAGE_SIZE - 1);
+    let q = supabase.from(table).select('*');
+    if (filter?.since) {
+      q = filter.keepNull
+        ? q.or(`${filter.col}.gte."${filter.since}",${filter.keepNull}.is.null`)
+        : q.gte(filter.col, filter.since);
+    }
+    if (filter?.before) q = q.lt(filter.col, filter.before);
+    const { data, error } = await q.order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1);
     if (error) return { data: out, error };
     out.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) return { data: out, error: null };
@@ -1213,6 +1235,42 @@ async function fetchOwnRoutePoints(userId: string, attendanceRows: any[]): Promi
   return out;
 }
 
+/**
+ * Field-activity tables that grow every day (~195 NCs x visits/reports/pings)
+ * and are only loaded for the last HISTORY_DAYS at login — see config.ts.
+ * Everything else (profiles, teams, stores, products, consumers, ntg_gwp,
+ * surveys, targets, scorecards, conversations) is small or needs full history
+ * and always loads completely. ntg_gwp in particular MUST stay complete: a
+ * consumer's current funnel stage is its latest row, however old, and a gap
+ * would let an NC re-record an earlier stage.
+ */
+const WINDOWED_TABLES: Array<{ table: string; key: keyof StoreState; col: string; keepNull?: string; map: (r: any) => any }> = [
+  { table: 'visits', key: 'visits', col: 'check_in_at', keepNull: 'check_out_at', map: mapVisit },
+  { table: 'attendances', key: 'attendances', col: 'clock_in_at', keepNull: 'clock_out_at', map: (a) => mapAttendance(a, []) },
+  { table: 'stock_taking', key: 'stockTakingRows', col: 'created_at', map: mapStockTaking },
+  { table: 'offtake', key: 'offtakeRows', col: 'created_at', map: mapOfftake },
+  { table: 'share_of_shelf', key: 'shareOfShelfRows', col: 'created_at', map: mapShareOfShelf },
+  { table: 'paid_visibility', key: 'paidVisibilityRows', col: 'created_at', map: mapPaidVisibility },
+  { table: 'price_monitoring', key: 'priceMonitoringRows', col: 'created_at', map: mapPriceMonitoring },
+  { table: 'survey_responses', key: 'surveyResponses', col: 'created_at', map: mapSurveyResponse },
+  { table: 'report_reviews', key: 'reportReviews', col: 'reviewed_at', keepNull: 'reviewed_at', map: mapReportReview },
+  { table: 'coaching_logs', key: 'coachingLogs', col: 'date', map: mapCoachingLog },
+  { table: 'messages', key: 'messages', col: 'created_at', map: mapMessage },
+];
+
+/** Start of the login history window: local midnight HISTORY_DAYS ago. */
+function historyWindowStart(): number {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() - HISTORY_DAYS);
+  return d.getTime();
+}
+
+function windowFilter(table: string, since: number): TimeFilter | undefined {
+  const w = WINDOWED_TABLES.find((t) => t.table === table);
+  return w && { col: w.col, since: new Date(since).toISOString(), keepNull: w.keepNull };
+}
+
 /** Fetches the caller's profile + every scoped row (RLS-filtered) and hydrates the store. */
 async function hydrateAll(
   set: (partial: Partial<StoreState>) => void,
@@ -1222,6 +1280,7 @@ async function hydrateAll(
   const { data: me, error: meErr } = await supabase.from('profiles').select('*').eq('id', userId).single();
   if (meErr || !me || !me.active) return false;
 
+  const since = historyWindowStart();
   const [
     profilesRes,
     teamsRes,
@@ -1267,7 +1326,7 @@ async function hydrateAll(
       'scorecards',
       'conversations',
       'messages',
-    ].map(fetchAll),
+    ].map((table) => fetchAll(table, windowFilter(table, since))),
   );
 
   const attendanceRows = attendancesRes.data;
@@ -1283,6 +1342,7 @@ async function hydrateAll(
 
   set({
     sessionUserId: userId,
+    historyFrom: since,
     users: (profilesRes.data ?? []).map(mapProfile),
     teams: (teamsRes.data ?? []).map(mapTeam),
     stores: (storesRes.data ?? []).map(mapStore),
@@ -1370,6 +1430,7 @@ const SIGNED_OUT_STATE: Partial<StoreState> = {
   conversations: [],
   messages: [],
   pendingOps: [],
+  historyFrom: null,
 };
 
 export const useStore = create<StoreState>()((set, get) => ({
@@ -1397,6 +1458,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   conversations: [],
   messages: [],
   pendingOps: [],
+  historyFrom: null,
 
   init: async () => {
     const {
@@ -1465,6 +1527,25 @@ export const useStore = create<StoreState>()((set, get) => ({
     } else if (synced && !get().pendingOps.length) {
       showDialog('Tersinkron', 'Data yang tersimpan offline berhasil dikirim ke server.');
     }
+  },
+
+  loadFullHistory: async () => {
+    const before = get().historyFrom;
+    if (before == null) return null;
+    const results = await Promise.all(
+      WINDOWED_TABLES.map((w) => fetchAll(w.table, { col: w.col, before: new Date(before).toISOString() })),
+    );
+    const failed = results.find((r) => r.error);
+    if (failed) return failed.error!.message;
+    const patch: Partial<StoreState> = { historyFrom: null };
+    WINDOWED_TABLES.forEach((w, i) => {
+      const current = get()[w.key] as unknown as Array<{ id: string }>;
+      const seen = new Set(current.map((r) => r.id));
+      const older = results[i].data.map(w.map).filter((r: { id: string }) => !seen.has(r.id));
+      (patch as any)[w.key] = [...current, ...older];
+    });
+    set(patch);
+    return null;
   },
 
   login: async (username, password) => {

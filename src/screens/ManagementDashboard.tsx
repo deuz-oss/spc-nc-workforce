@@ -3,6 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { HistoryNotice } from '../components/HistoryNotice';
 import { CATEGORY_LABEL, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -242,6 +243,7 @@ export default function ManagementDashboard() {
               <Chip key={p.key} label={p.label} active={periodKey === p.key} onPress={() => setPeriodKey(p.key)} />
             ))}
           </View>
+          <HistoryNotice needsFrom={range.from} />
         </Field>
         <Field label="Kota">
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>

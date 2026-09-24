@@ -5,6 +5,12 @@ export const APP_NAME = 'SPC NC Workforce';
 /** Jarak maksimum titik check-in ke pin toko agar kunjungan dianggap valid — PRD §5 (default 300 m, configurable). */
 export const VISIT_VALID_RADIUS_M = 300;
 
+/** Riwayat data lapangan (kunjungan, absensi, laporan, pesan) yang dimuat saat login.
+ * 62 hari = bulan berjalan + bulan sebelumnya pada tanggal berapa pun — cukup untuk
+ * semua dashboard/KPI periode harian/mingguan/bulanan. Riwayat lebih lama dimuat
+ * sesuai permintaan (useStore.loadFullHistory). */
+export const HISTORY_DAYS = 62;
+
 /** Abaikan titik rute jika bergerak kurang dari jarak ini (m) untuk hemat storage */
 export const TRACK_MIN_STEP_M = 8;
 

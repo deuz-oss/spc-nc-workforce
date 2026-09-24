@@ -2,6 +2,7 @@ import React, { useMemo } from 'react';
 import { Linking, ScrollView, View } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { Btn, Card, Empty, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
+import { HistoryNotice } from '../components/HistoryNotice';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
 
@@ -85,6 +86,7 @@ export default function NcTrackerScreen() {
 
       <Card>
         <SectionHeader title="Log Kunjungan" />
+        <HistoryNotice />
         {ncVisits.length === 0 ? (
           <Empty text="Belum ada kunjungan." />
         ) : (

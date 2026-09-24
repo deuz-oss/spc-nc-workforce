@@ -4,6 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Badge, Btn, Card, Chip, Empty, GeoValidBadge, H, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { CATEGORY_LABEL, STORE_MANAGER_ROLES, VISIT_VALID_RADIUS_M } from '../config';
 import { showDialog } from '../components/dialog';
+import { HistoryNotice } from '../components/HistoryNotice';
 import { C } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
@@ -162,6 +163,7 @@ export default function StoreDetailScreen() {
 
         <Card>
           <SectionHeader title={`Riwayat Kunjungan (${storeVisits.length})`} />
+          <HistoryNotice />
           {storeVisits.length === 0 ? (
             <Empty text="Belum ada kunjungan." />
           ) : (
