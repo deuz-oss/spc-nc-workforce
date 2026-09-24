@@ -9,6 +9,7 @@ import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
 import { toCsv } from '../utils/csv';
+import { fmtDateTime } from '../utils/format';
 import { exportCsv } from '../utils/export';
 
 /** Short "d/M" label for trend bar axes — fmtDate's "23 Sep 2026" is too wide for a 26px bar column. */
@@ -194,6 +195,7 @@ export default function ManagementDashboard() {
     const thisPeriod = scorecards.filter((sc) => sc.periodKey === monthlyKey);
     return {
       total: thisPeriod.length,
+      lastComputedAt: thisPeriod.reduce<number | null>((max, sc) => (max == null || sc.computedAt > max ? sc.computedAt : max), null),
       onTrack: thisPeriod.filter((sc) => sc.status === 'on_track').length,
       needsAttention: thisPeriod.filter((sc) => sc.status === 'needs_attention').length,
       belowTarget: thisPeriod.filter((sc) => sc.status === 'below_target').length,
@@ -331,7 +333,11 @@ export default function ManagementDashboard() {
             />
           </View>
           <Muted style={{ marginTop: 6 }}>
-            Belum ada penjadwal otomatis (pg_cron/scheduled function) — hitung ulang manual tiap periode untuk sekarang.
+            {scorecardCounts.lastComputedAt
+              ? `Terakhir dihitung ${fmtDateTime(scorecardCounts.lastComputedAt)}. `
+              : ''}
+            Dihitung ulang otomatis setiap malam pukul 01:00 WIB; tekan tombol di atas bila perlu skor terbaru sekarang
+            (mis. setelah mengubah target).
           </Muted>
         </Card>
       )}

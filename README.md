@@ -56,8 +56,9 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0009`). Existing projects: run only the ones not yet applied —
-   `0008_audit_hardening.sql` (security fixes) and `0009_targets_uniqueness.sql` (Targets screen) are required.
+   the SQL Editor, in filename order (`0001` … `0010`). Existing projects: run only the ones not yet applied —
+   `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
+   `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) are required.
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
    ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and
@@ -198,7 +199,7 @@ add one once you're ready to actually ship, not before internal validation above
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR once the repo is on GitHub): `tsc`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 22 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 23 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)

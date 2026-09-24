@@ -3,7 +3,8 @@
  *
  * Signs in as the seeded demo accounts (scripts/seed-supabase.ts) and checks
  * that each role can do what it should and — more importantly — cannot do
- * what 0008_audit_hardening.sql / 0009_targets_uniqueness.sql forbid. Every
+ * what 0008_audit_hardening.sql, 0009_targets_uniqueness.sql and
+ * 0010_scheduled_scorecards.sql forbid. Every
  * row it creates is tagged `smoke_<run>` and deleted in a finally block with
  * the service-role key, including when a check fails.
  *
@@ -374,6 +375,20 @@ async function main() {
     const res = await nc.client.from('targets').insert({ id, nc_id: nc.id, period_key: TEST_PERIOD, offtake_target: 1, set_by: nc.id });
     if (!res.error) created.targets.push(id);
     expect(res.error, 'NC wrote a target');
+  });
+
+  await check('compute_scorecards cannot be run anonymously or via the internal core', async () => {
+    const anon = createClient(url!, anonKey!, noSession);
+    expect((await anon.rpc('compute_scorecards', { p_period_key: TEST_PERIOD })).error, 'anon key alone ran compute_scorecards');
+    expect(
+      (await analyst.client.rpc('compute_scorecards_core', { p_period_key: TEST_PERIOD })).error,
+      'compute_scorecards_core is callable from the API (should be internal-only)',
+    );
+    expect(
+      (await analyst.client.rpc('run_scheduled_scorecards')).error,
+      'run_scheduled_scorecards is callable from the API (should be cron-only)',
+    );
+    expect((await analyst.client.rpc('compute_scorecards', { p_period_key: '2000-13' })).error, 'invalid period accepted');
   });
 
   await check('compute_scorecards: forbidden for NC, allowed for Data Analyst', async () => {
