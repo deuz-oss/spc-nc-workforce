@@ -3,6 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { useDataRefresh } from '../components/useDataRefresh';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
@@ -80,6 +81,7 @@ function dayBuckets(range: { from: number; to: number }, maxBuckets = 31): Array
 
 export default function ManagementDashboard() {
   const me = useCurrentUser()!;
+  const refreshControl = useDataRefresh();
   const navigation = useNavigation<any>();
   const hidePii = me.role === 'reckitt_client'; // PRD §11 review note — structural, derived from session role
 
@@ -230,6 +232,7 @@ export default function ManagementDashboard() {
     <ScrollView
       tabIndex={0}
       role="main"
+      refreshControl={refreshControl}
       contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}
     >
       <SectionHeader

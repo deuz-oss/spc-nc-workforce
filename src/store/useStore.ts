@@ -271,6 +271,11 @@ interface StoreState {
    * them in — catches anything realtime missed while the app was backgrounded.
    * Called on app resume and when the chat screens open. Best-effort. */
   refreshChat(): Promise<void>;
+  /** Re-fetches every mirrored table (field activity for the login window) and
+   * merges it in — realtime events fired while the app was backgrounded are
+   * lost, not replayed. Runs on app resume (throttled) and on pull-to-refresh.
+   * Returns an error message or null. */
+  refreshData(): Promise<string | null>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -994,6 +999,9 @@ let netInfoListenerBound = false;
 /** Guards processPendingOps against overlapping runs (init + NetInfo + AppState
  * can all fire at once), which would replay the same op twice. */
 let replayingQueue = false;
+/** Last full data re-sync (refreshData) — throttles the resume trigger. */
+let lastRefreshAt = Date.now();
+const RESUME_REFRESH_MIN_INTERVAL_MS = 2 * 60 * 1000;
 
 function teardownRealtime() {
   if (channel) {
@@ -1261,6 +1269,45 @@ function windowFilter(table: string, since: number): TimeFilter | undefined {
   return w && { col: w.col, since: new Date(since).toISOString(), keepNull: w.keepNull };
 }
 
+/**
+ * Every table the app mirrors, with its state key and row mapper. Windowed
+ * tables (WINDOWED_TABLES) are fetched for the login history window only;
+ * the rest in full. Shared by hydrateAll (login) and refreshData (resume /
+ * pull-to-refresh) so the two can never drift apart.
+ */
+const SNAPSHOT_TABLES: Array<{ table: string; key: keyof StoreState; map: (r: any) => any }> = [
+  { table: 'profiles', key: 'users', map: mapProfile },
+  { table: 'teams', key: 'teams', map: mapTeam },
+  { table: 'stores', key: 'stores', map: mapStore },
+  { table: 'visits', key: 'visits', map: mapVisit },
+  { table: 'attendances', key: 'attendances', map: (a) => mapAttendance(a, []) },
+  { table: 'products', key: 'products', map: mapProduct },
+  { table: 'stock_taking', key: 'stockTakingRows', map: mapStockTaking },
+  { table: 'offtake', key: 'offtakeRows', map: mapOfftake },
+  { table: 'consumers', key: 'consumers', map: mapConsumer },
+  { table: 'ntg_gwp', key: 'ntgGwps', map: mapNtgGwp },
+  { table: 'share_of_shelf', key: 'shareOfShelfRows', map: mapShareOfShelf },
+  { table: 'paid_visibility', key: 'paidVisibilityRows', map: mapPaidVisibility },
+  { table: 'price_monitoring', key: 'priceMonitoringRows', map: mapPriceMonitoring },
+  { table: 'surveys', key: 'surveys', map: mapSurvey },
+  { table: 'survey_responses', key: 'surveyResponses', map: mapSurveyResponse },
+  { table: 'report_reviews', key: 'reportReviews', map: mapReportReview },
+  { table: 'coaching_logs', key: 'coachingLogs', map: mapCoachingLog },
+  { table: 'targets', key: 'targets', map: mapTarget },
+  { table: 'scorecards', key: 'scorecards', map: mapScorecard },
+  { table: 'conversations', key: 'conversations', map: mapConversation },
+  { table: 'messages', key: 'messages', map: mapMessage },
+  { table: 'certifications', key: 'certifications', map: mapCertification },
+];
+
+/** Fetches every SNAPSHOT_TABLES table (windowed ones from `since`). Raw rows, keyed by table. */
+async function fetchSnapshot(since: number): Promise<{ rows: Record<string, any[]>; error: { message: string } | null }> {
+  const results = await Promise.all(SNAPSHOT_TABLES.map((t) => fetchAll(t.table, windowFilter(t.table, since))));
+  const rows: Record<string, any[]> = {};
+  SNAPSHOT_TABLES.forEach((t, i) => (rows[t.table] = results[i].data));
+  return { rows, error: results.find((r) => r.error)?.error ?? null };
+}
+
 /** Fetches the caller's profile + every scoped row (RLS-filtered) and hydrates the store. */
 async function hydrateAll(
   set: (partial: Partial<StoreState>) => void,
@@ -1271,59 +1318,9 @@ async function hydrateAll(
   if (meErr || !me || !me.active) return false;
 
   const since = historyWindowStart(new Date(), HISTORY_DAYS);
-  const [
-    profilesRes,
-    teamsRes,
-    storesRes,
-    visitsRes,
-    attendancesRes,
-    productsRes,
-    stockTakingRes,
-    offtakeRes,
-    consumersRes,
-    ntgGwpRes,
-    shareOfShelfRes,
-    paidVisibilityRes,
-    priceMonitoringRes,
-    surveysRes,
-    surveyResponsesRes,
-    reportReviewsRes,
-    coachingLogsRes,
-    targetsRes,
-    scorecardsRes,
-    conversationsRes,
-    messagesRes,
-    certificationsRes,
-  ] = await Promise.all(
-    [
-      'profiles',
-      'teams',
-      'stores',
-      'visits',
-      'attendances',
-      'products',
-      'stock_taking',
-      'offtake',
-      'consumers',
-      'ntg_gwp',
-      'share_of_shelf',
-      'paid_visibility',
-      'price_monitoring',
-      'surveys',
-      'survey_responses',
-      'report_reviews',
-      'coaching_logs',
-      'targets',
-      'scorecards',
-      'conversations',
-      'messages',
-      'certifications',
-    ].map((table) => fetchAll(table, windowFilter(table, since))),
-  );
+  const { rows } = await fetchSnapshot(since);
 
-  const attendanceRows = attendancesRes.data;
-  const routePoints = await fetchOwnRoutePoints(userId, attendanceRows);
-
+  const routePoints = await fetchOwnRoutePoints(userId, rows.attendances);
   const routesByAttendance = new Map<string, RoutePoint[]>();
   for (const p of routePoints) {
     const arr = routesByAttendance.get(p.attendance_id) ?? [];
@@ -1332,32 +1329,11 @@ async function hydrateAll(
   }
   for (const arr of routesByAttendance.values()) arr.sort((a, b) => a.t - b.t);
 
-  set({
-    sessionUserId: userId,
-    historyFrom: since,
-    users: (profilesRes.data ?? []).map(mapProfile),
-    teams: (teamsRes.data ?? []).map(mapTeam),
-    stores: (storesRes.data ?? []).map(mapStore),
-    visits: (visitsRes.data ?? []).map(mapVisit),
-    attendances: attendanceRows.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? [])),
-    products: (productsRes.data ?? []).map(mapProduct),
-    stockTakingRows: (stockTakingRes.data ?? []).map(mapStockTaking),
-    offtakeRows: (offtakeRes.data ?? []).map(mapOfftake),
-    consumers: (consumersRes.data ?? []).map(mapConsumer),
-    ntgGwps: (ntgGwpRes.data ?? []).map(mapNtgGwp),
-    shareOfShelfRows: (shareOfShelfRes.data ?? []).map(mapShareOfShelf),
-    paidVisibilityRows: (paidVisibilityRes.data ?? []).map(mapPaidVisibility),
-    priceMonitoringRows: (priceMonitoringRes.data ?? []).map(mapPriceMonitoring),
-    surveys: (surveysRes.data ?? []).map(mapSurvey),
-    surveyResponses: (surveyResponsesRes.data ?? []).map(mapSurveyResponse),
-    reportReviews: (reportReviewsRes.data ?? []).map(mapReportReview),
-    coachingLogs: (coachingLogsRes.data ?? []).map(mapCoachingLog),
-    targets: (targetsRes.data ?? []).map(mapTarget),
-    scorecards: (scorecardsRes.data ?? []).map(mapScorecard),
-    conversations: (conversationsRes.data ?? []).map(mapConversation),
-    messages: (messagesRes.data ?? []).map(mapMessage),
-    certifications: (certificationsRes.data ?? []).map(mapCertification),
-  });
+  const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: since };
+  for (const t of SNAPSHOT_TABLES) (patch as any)[t.key] = rows[t.table].map(t.map);
+  patch.attendances = rows.attendances.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? []));
+  set(patch);
+  lastRefreshAt = Date.now();
 
   subscribeRealtime(set, get, userId);
   return true;
@@ -1520,8 +1496,12 @@ export const useStore = create<StoreState>()((set, get) => ({
         if (get().pendingOps.length) get().processPendingOps();
         // Realtime events that fired while the app was backgrounded (socket
         // asleep) are lost, not replayed — e.g. a chat message whose push
-        // notification arrived but whose row never reached the phone.
-        if (get().sessionUserId) void get().refreshChat();
+        // notification arrived but whose row never reached the phone. Chat is
+        // cheap and always re-synced; the full re-sync is throttled because for
+        // monitor roles it re-reads the whole 62-day window.
+        if (!get().sessionUserId) return;
+        void get().refreshChat();
+        if (Date.now() - lastRefreshAt >= RESUME_REFRESH_MIN_INTERVAL_MS) void get().refreshData();
       });
     }
   },
@@ -2581,6 +2561,35 @@ export const useStore = create<StoreState>()((set, get) => ({
           // Best-effort only — push delivery failing must never affect the chat itself.
         });
     }
+  },
+
+  refreshData: async () => {
+    if (!get().sessionUserId) return null;
+    const since = historyWindowStart(new Date(), HISTORY_DAYS);
+    const { rows, error } = await fetchSnapshot(since);
+    if (error) return error.message; // partial data would drop rows from the merge below — keep what we have
+    const windowed = new Set(WINDOWED_TABLES.map((w) => w.table));
+    const patch: Partial<StoreState> = {};
+    for (const t of SNAPSHOT_TABLES) {
+      const server = rows[t.table].map(t.map) as Array<{ id: string }>;
+      if (!windowed.has(t.table)) {
+        // Small, fully-loaded tables: server is the whole truth, so deletions
+        // and deactivations apply. Their writes are online-only, never queued.
+        (patch as any)[t.key] = server;
+        continue;
+      }
+      // Field activity: server rows win; local-only rows are kept — they are
+      // either older history (loadFullHistory) or offline ops still queued.
+      const local = get()[t.key] as unknown as Array<{ id: string }>;
+      const ids = new Set(server.map((r) => r.id));
+      (patch as any)[t.key] = [...server, ...local.filter((r) => !ids.has(r.id))];
+    }
+    // Keep the locally-held GPS route on each attendance (refreshData doesn't refetch route_points).
+    const routes = new Map(get().attendances.map((a) => [a.id, a.route]));
+    patch.attendances = (patch.attendances ?? []).map((a) => ({ ...a, route: routes.get(a.id) ?? a.route }));
+    set(patch);
+    lastRefreshAt = Date.now();
+    return null;
   },
 
   refreshChat: async () => {

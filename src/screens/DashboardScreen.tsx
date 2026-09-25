@@ -4,6 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { useDataRefresh } from '../components/useDataRefresh';
 import ManagementDashboard from './ManagementDashboard';
 import {
   CERT_MANAGER_ROLES,
@@ -143,6 +144,7 @@ function TodaysReportCard() {
 
 export default function DashboardScreen() {
   const me = useCurrentUser()!;
+  const refreshControl = useDataRefresh();
   const users = useStore((s) => s.users);
   const stores = useStore((s) => s.stores);
   const navigation = useNavigation<any>();
@@ -160,6 +162,7 @@ export default function DashboardScreen() {
     <ScrollView
       tabIndex={0}
       role="main"
+      refreshControl={refreshControl}
       contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}
     >
       <SectionHeader title={`Halo, ${me.name}`} subtitle={ROLE_LABEL[me.role]} />

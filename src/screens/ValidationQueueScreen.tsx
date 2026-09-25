@@ -14,6 +14,7 @@ import {
 } from '../components/ui';
 import { LiveTeamMap } from '../components/LiveTeamMap';
 import { showDialog } from '../components/dialog';
+import { useDataRefresh } from '../components/useDataRefresh';
 import { REPORT_TYPE_LABEL } from '../config';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
@@ -49,6 +50,7 @@ const remotePhoto = (ref?: string) => (photoStoragePath(ref) ? ref : undefined);
 export default function ValidationQueueScreen() {
   const navigation = useNavigation<any>();
   const me = useCurrentUser()!;
+  const refreshControl = useDataRefresh();
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
   const stores = useStore((s) => s.stores);
@@ -142,6 +144,7 @@ export default function ValidationQueueScreen() {
     <ScrollView
       tabIndex={0}
       role="main"
+      refreshControl={refreshControl}
       contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}
     >
       <SectionHeader

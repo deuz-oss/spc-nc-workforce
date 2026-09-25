@@ -208,6 +208,34 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 4. Rebuild (`npx eas-cli build -p android --profile preview`). Test: log in on the phone as an NC, allow
    notifications, background the app, send it a chat message from its TL.
 
+## Go-live checklist (production)
+
+The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
+this repo. Production gets its own Supabase project.
+
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0011`
+   in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
+   Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
+2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
+   dashboard (Authentication → Add user, email `<username>@internal.spc`), then in the SQL Editor:
+   `update profiles set role = 'super_admin', active = true where username = '<username>';`
+3. **Edge functions**: `npx supabase functions deploy admin-users --project-ref <prod-ref> --use-api` and the same
+   for `send-push`.
+4. **EAS production env**: `npx eas-cli env:create --environment production` for `EXPO_PUBLIC_SUPABASE_URL` and
+   `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the production values; plaintext visibility). `GOOGLE_SERVICES_JSON` is
+   already set for production; upload the FCM V1 key for the **production** profile too (`npx eas-cli credentials`).
+5. **Real data**, in this order, as the production Super Admin: teams (Pengguna → Kelola Tim) → accounts (Import →
+   Akun Pengguna CSV, then assign teams/TLs) → stores (Import → Toko CSV; set GPS pins via Store Detail → Ubah Data
+   Toko) → products (Import → Master Produk) → monthly targets (Target Bulanan, CSV). Rehearse the whole sequence
+   on staging first.
+6. **Brand assets**: replace the placeholder icons in `assets/` (see Status & Gaps for sizes).
+7. **Backups**: enable Point-in-Time Recovery (paid Supabase plan) or at least schedule daily logical backups
+   before real field data exists.
+8. **Smoke test** the new project: seed demo accounts on a *separate staging* project, not production — the smoke
+   test needs them. Keep staging as the place to run `npm run smoke` after every migration.
+9. **Build**: `npx eas-cli build -p android --profile production` (Play Store bundle) or `--profile preview` (APK
+   for internal distribution).
+
 ## Checks
 
 - **Unit tests:** `npm test` (Node's built-in runner via `tsx`, no extra dependencies) — `src/**/*.test.ts` covering
