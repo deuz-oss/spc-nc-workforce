@@ -194,6 +194,20 @@ interactive build setup — accept that unless your org has its own credentials 
 `eas.json`'s `production` profile has no `eas submit` configuration (signing/App Store Connect API key) yet —
 add one once you're ready to actually ship, not before internal validation above passes.
 
+## Push notifications (Android)
+
+Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per Firebase project:
+
+1. **Firebase project + Android app** — console.firebase.google.com → Add project → Add app → Android, package
+   `com.spc.ncworkforce` → download **google-services.json**. Don't commit it (gitignored; this repo is public).
+2. **Give it to EAS builds** as a file secret (read by `app.config.js`):
+   `npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment preview --environment production --visibility secret`
+3. **FCM V1 key for Expo's push service** — Firebase → Project settings → Service accounts → *Generate new private
+   key* (JSON), then `npx eas-cli credentials` → Android → the build profile → *Google Service Account* → *Manage your
+   Google Service Account Key for Push Notifications (FCM V1)* → upload it. Delete the local JSON afterwards.
+4. Rebuild (`npx eas-cli build -p android --profile preview`). Test: log in on the phone as an NC, allow
+   notifications, background the app, send it a chat message from its TL.
+
 ## Checks
 
 - **Unit tests:** `npm test` (Node's built-in runner via `tsx`, no extra dependencies) — `src/**/*.test.ts` covering

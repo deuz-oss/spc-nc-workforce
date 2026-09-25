@@ -47,3 +47,8 @@ supabase/.temp/
 /ios
 /android
 dist/
+
+# Firebase config for Android push — supplied via the GOOGLE_SERVICES_JSON EAS file secret, never committed (public repo)
+google-services.json
+# FCM V1 service-account key — upload with `eas credentials`, never commit
+*-firebase-adminsdk-*.json
