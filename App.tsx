@@ -46,6 +46,7 @@ import PriceMonitoringScreen from './src/screens/PriceMonitoringScreen';
 import SurveyListScreen from './src/screens/SurveyListScreen';
 import SurveyRespondScreen from './src/screens/SurveyRespondScreen';
 import SurveyBuilderScreen from './src/screens/SurveyBuilderScreen';
+import SurveyResultsScreen from './src/screens/SurveyResultsScreen';
 import NutritionQuizScreen from './src/screens/NutritionQuizScreen';
 import ValidationQueueScreen from './src/screens/ValidationQueueScreen';
 import CoachingLogScreen from './src/screens/CoachingLogScreen';
@@ -53,6 +54,7 @@ import NcTrackerScreen from './src/screens/NcTrackerScreen';
 import ScorecardScreen from './src/screens/ScorecardScreen';
 import TargetsScreen from './src/screens/TargetsScreen';
 import CertificationsScreen from './src/screens/CertificationsScreen';
+import ProductsScreen from './src/screens/ProductsScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatThreadScreen from './src/screens/ChatThreadScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
@@ -489,11 +491,13 @@ export default function App() {
             <Stack.Screen name="SurveyList" component={SurveyListScreen} options={{ title: 'Survey' }} />
             <Stack.Screen name="SurveyRespond" component={SurveyRespondScreen} options={{ title: 'Isi Survey' }} />
             <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
+            <Stack.Screen name="SurveyResults" component={SurveyResultsScreen} options={{ title: 'Hasil Survey' }} />
             <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
             <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
             <Stack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Skorkartu' }} />
             <Stack.Screen name="Targets" component={TargetsScreen} options={{ title: 'Target Bulanan' }} />
             <Stack.Screen name="Certifications" component={CertificationsScreen} options={{ title: 'Sertifikasi' }} />
+            <Stack.Screen name="Products" component={ProductsScreen} options={{ title: 'Master Produk' }} />
             <Stack.Screen
               name="ChatThread"
               component={ChatThreadScreen}

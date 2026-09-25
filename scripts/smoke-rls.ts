@@ -397,6 +397,51 @@ async function main() {
     expect(data?.length === 1, 'NC cannot see their own certification result');
   });
 
+  // ===== 6. Master-data editing (store pin, teams, products, own password) =====
+
+  await check('TL can set the GPS pin of their team’s store; NC cannot edit stores', async () => {
+    const { data: before } = await admin.from('stores').select('lat, lng').eq('id', 'st_demo1').single();
+    try {
+      const upd = await tl.client.from('stores').update({ lat: -6.2, lng: 106.8 }).eq('id', 'st_demo1').select('id');
+      expect(!upd.error && upd.data?.length === 1, `TL could not update own-team store pin: ${upd.error?.message ?? '0 rows'}`);
+      expectDenied(await nc.client.from('stores').update({ lat: 0, lng: 0 }).eq('id', 'st_demo1').select('id'), 'NC store edit');
+    } finally {
+      await admin.from('stores').update({ lat: before?.lat ?? null, lng: before?.lng ?? null }).eq('id', 'st_demo1');
+    }
+  });
+
+  await check('Super Admin can edit a team and move a TL’s profile; TL cannot edit teams', async () => {
+    const { data: t } = await admin.from('teams').select('name').eq('id', 't_jaksel').single();
+    const upd = await superadmin.client.from('teams').update({ name: t!.name }).eq('id', 't_jaksel').select('id');
+    expect(!upd.error && upd.data?.length === 1, `super_admin team update failed: ${upd.error?.message ?? '0 rows'}`);
+    const prof = await superadmin.client.from('profiles').update({ team_id: 't_jaksel' }).eq('id', tl.id).select('id');
+    expect(!prof.error && prof.data?.length === 1, `super_admin could not set TL team: ${prof.error?.message ?? '0 rows'}`);
+    expectDenied(await tl.client.from('teams').update({ name: 'hijacked' }).eq('id', 't_jaksel').select('id'), 'TL team edit');
+  });
+
+  await check('Data Analyst can add, edit and deactivate a product; NC cannot', async () => {
+    const id = `${RUN}_prod`;
+    try {
+      expectOk(await analyst.client.from('products').insert({ id, sku: `${RUN}-SKU`, name: 'Smoke', active: true }), 'product insert');
+      const upd = await analyst.client.from('products').update({ name: 'Smoke 2', active: false }).eq('id', id).select('id');
+      expect(!upd.error && upd.data?.length === 1, `product update failed: ${upd.error?.message ?? '0 rows'}`);
+      expectDenied(await nc.client.from('products').update({ active: true }).eq('id', id).select('id'), 'NC product edit');
+    } finally {
+      await admin.from('products').delete().eq('id', id);
+    }
+  });
+
+  await check('a user can change their own password (new password works, old one no longer does)', async () => {
+    if (!nc2) throw new Skip('second NC unavailable');
+    const newPw = 'Smoke-changed-456';
+    expectOk(await nc2.client.auth.updateUser({ password: newPw }), 'updateUser(password)');
+    const fresh = createClient(url!, anonKey!, noSession);
+    const withNew = await fresh.auth.signInWithPassword({ email: `${nc2Username}@internal.spc`, password: newPw });
+    expect(!withNew.error, `sign-in with new password failed: ${withNew.error?.message}`);
+    const withOld = await fresh.auth.signInWithPassword({ email: `${nc2Username}@internal.spc`, password: nc2Password });
+    expect(withOld.error, 'old password still works after change');
+  });
+
   await check('compute_scorecards cannot be run anonymously or via the internal core', async () => {
     const anon = createClient(url!, anonKey!, noSession);
     expect((await anon.rpc('compute_scorecards', { p_period_key: TEST_PERIOD })).error, 'anon key alone ran compute_scorecards');

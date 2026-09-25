@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { HistoryNotice } from '../components/HistoryNotice';
-import { CATEGORY_LABEL, TARGET_MANAGER_ROLES } from '../config';
+import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
@@ -290,6 +290,16 @@ export default function ManagementDashboard() {
             title="Survey"
             subtitle="Question set untuk NC (PRD §5.7)"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
+          />
+        </Card>
+      )}
+
+      {PRODUCT_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Master Produk"
+            subtitle="SKU untuk pilihan laporan NC — tambah, ubah, nonaktifkan"
+            action={{ label: 'Kelola', onPress: () => navigation.navigate('Products') }}
           />
         </Card>
       )}

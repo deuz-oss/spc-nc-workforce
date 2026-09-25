@@ -5,7 +5,14 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import ManagementDashboard from './ManagementDashboard';
-import { CERT_MANAGER_ROLES, MANAGEMENT_DASHBOARD_ROLES, ROLE_LABEL, SURVEY_BUILDER_ROLES, TARGET_MANAGER_ROLES } from '../config';
+import {
+  CERT_MANAGER_ROLES,
+  MANAGEMENT_DASHBOARD_ROLES,
+  PRODUCT_MANAGER_ROLES,
+  ROLE_LABEL,
+  SURVEY_BUILDER_ROLES,
+  TARGET_MANAGER_ROLES,
+} from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
@@ -190,6 +197,16 @@ export default function DashboardScreen() {
             title="Sertifikasi"
             subtitle="Catat hasil sesi sertifikasi NC & TL-Coach (PRD §9)"
             action={{ label: 'Buka', onPress: () => navigation.navigate('Certifications') }}
+          />
+        </Card>
+      )}
+
+      {PRODUCT_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Master Produk"
+            subtitle="SKU untuk pilihan laporan NC — tambah, ubah, nonaktifkan"
+            action={{ label: 'Kelola', onPress: () => navigation.navigate('Products') }}
           />
         </Card>
       )}

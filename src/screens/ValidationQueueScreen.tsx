@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, View } from 'react-native';
+import { Linking, ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   Btn,
@@ -36,7 +36,12 @@ interface ReportItem {
   storeId: string;
   createdAt: number;
   isOutlier?: boolean;
+  /** Evidence photo, when the module has one and it's been uploaded (a
+   * still-offline local file:// path isn't viewable from a reviewer's device). */
+  photoUrl?: string;
 }
+
+const remotePhoto = (url?: string) => (url && /^https?:\/\//.test(url) ? url : undefined);
 
 export default function ValidationQueueScreen() {
   const navigation = useNavigation<any>();
@@ -60,6 +65,8 @@ export default function ValidationQueueScreen() {
   const [flaggingKey, setFlaggingKey] = useState<string | null>(null);
   const [flagNote, setFlagNote] = useState('');
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  /** 'exceptions' = the PRD §8 exception queue; 'all' = every report in scope, for spot checks / manual flags. */
+  const [view, setView] = useState<'exceptions' | 'all'>('exceptions');
 
   const range = useMemo(() => getRange(periodKey, new Date().getMonth()), [periodKey]);
 
@@ -76,12 +83,12 @@ export default function ValidationQueueScreen() {
       return !!v && ncIds.has(v.ncId) && inRange(v.checkInAt, range);
     };
     const out: ReportItem[] = [];
-    for (const r of stockTakingRows) if (inScope(r.visitId)) out.push({ type: 'stock_taking', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt });
+    for (const r of stockTakingRows) if (inScope(r.visitId)) out.push({ type: 'stock_taking', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
     for (const r of offtakeRows) if (inScope(r.visitId)) out.push({ type: 'offtake', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, isOutlier: r.isOutlier });
-    for (const r of shareOfShelfRows) if (inScope(r.visitId)) out.push({ type: 'share_of_shelf', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt });
-    for (const r of paidVisibilityRows) if (inScope(r.visitId)) out.push({ type: 'paid_visibility', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt });
-    for (const r of priceMonitoringRows) if (inScope(r.visitId)) out.push({ type: 'price_monitoring', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt });
-    return out;
+    for (const r of shareOfShelfRows) if (inScope(r.visitId)) out.push({ type: 'share_of_shelf', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of paidVisibilityRows) if (inScope(r.visitId)) out.push({ type: 'paid_visibility', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of priceMonitoringRows) if (inScope(r.visitId)) out.push({ type: 'price_monitoring', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
+    return out.sort((a, b) => b.createdAt - a.createdAt);
   }, [stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, visitsById, ncIds, range]);
 
   const reviewByKey = useMemo(() => {
@@ -101,6 +108,7 @@ export default function ValidationQueueScreen() {
     [items, reviewByKey],
   );
   const normalCount = items.length - exceptions.length;
+  const shown = view === 'exceptions' ? exceptions : items;
 
   const act = async (item: ReportItem, status: 'approved' | 'flagged', note?: string) => {
     const key = `${item.type}:${item.id}`;
@@ -150,27 +158,47 @@ export default function ValidationQueueScreen() {
       </Card>
 
       <Card>
-        <SectionHeader title="Antrian Pengecualian" subtitle="Hanya laporan anomali/flag yang butuh tindakan manual" />
-        {exceptions.length === 0 ? (
-          <Empty text="Tidak ada laporan yang perlu ditinjau." />
+        <SectionHeader
+          title={view === 'exceptions' ? 'Antrian Pengecualian' : 'Semua Laporan'}
+          subtitle={
+            view === 'exceptions'
+              ? 'Hanya laporan anomali/flag yang butuh tindakan manual'
+              : 'Semua laporan periode ini — untuk cek acak & flag manual'
+          }
+        />
+        <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+          <Chip label={`Pengecualian (${exceptions.length})`} active={view === 'exceptions'} onPress={() => setView('exceptions')} />
+          <Chip label={`Semua (${items.length})`} active={view === 'all'} onPress={() => setView('all')} />
+        </View>
+        {shown.length === 0 ? (
+          <Empty text={view === 'exceptions' ? 'Tidak ada laporan yang perlu ditinjau.' : 'Belum ada laporan pada periode ini.'} />
         ) : (
           <View style={{ gap: 8, marginTop: 10 }}>
-            {exceptions.map((item) => {
+            {shown.map((item) => {
               const key = `${item.type}:${item.id}`;
               const nc = users.find((u) => u.id === item.ncId);
               const store = stores.find((s) => s.id === item.storeId);
               const review = reviewByKey.get(key);
-              const reason = review?.status === 'flagged' ? review.note || 'Ditandai untuk ditinjau' : 'Outlier: >3x rata-rata 7 hari NC ini';
+              const status = review?.status === 'flagged'
+                ? { label: 'Ditandai', color: '#B45309', icon: 'alert-circle' as const, reason: review.note || 'Ditandai untuk ditinjau' }
+                : review?.status === 'approved'
+                  ? { label: 'Disetujui', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Disetujui manual' }
+                  : item.isOutlier
+                    ? { label: 'Outlier', color: '#B45309', icon: 'alert-circle' as const, reason: 'Outlier: >3x rata-rata 7 hari NC ini' }
+                    : { label: 'Normal', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Otomatis disetujui' };
               return (
                 <View key={key} style={{ gap: 6 }}>
                   <ListRow
                     title={`${REPORT_TYPE_LABEL[item.type]} · ${nc?.name ?? '-'}`}
                     subtitle={`${store?.name ?? '-'} · ${fmtDateTime(item.createdAt)}`}
-                    meta={reason}
-                    trailing={
-                      <StatusBadge label={item.isOutlier ? 'Outlier' : 'Ditandai'} color="#B45309" icon="alert-circle" />
-                    }
+                    meta={status.reason}
+                    trailing={<StatusBadge label={status.label} color={status.color} icon={status.icon} />}
                   />
+                  {item.photoUrl && (
+                    <View style={{ paddingHorizontal: 4, alignSelf: 'flex-start' }}>
+                      <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => Linking.openURL(item.photoUrl!)} />
+                    </View>
+                  )}
                   {flaggingKey === key ? (
                     <View style={{ gap: 8, paddingHorizontal: 4 }}>
                       <Input

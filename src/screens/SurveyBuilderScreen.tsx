@@ -24,6 +24,12 @@ export default function SurveyBuilderScreen() {
   // makes zustand re-render on every store change.
   const surveys = useMemo(() => allSurveys.filter((sv) => sv.campaignTag !== NUTRITION_QUIZ_CAMPAIGN_TAG), [allSurveys]);
   const upsertSurvey = useStore((s) => s.upsertSurvey);
+  const surveyResponses = useStore((s) => s.surveyResponses);
+  const responseCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const r of surveyResponses) m.set(r.surveyId, (m.get(r.surveyId) ?? 0) + 1);
+    return m;
+  }, [surveyResponses]);
 
   const [creating, setCreating] = useState(false);
   const [title, setTitle] = useState('');
@@ -108,7 +114,13 @@ export default function SurveyBuilderScreen() {
             ) : (
               <View style={{ gap: 8 }}>
                 {surveys.map((s) => (
-                  <ListRow key={s.id} title={s.title} subtitle={`${s.questions.length} pertanyaan${s.campaignTag ? ` · ${s.campaignTag}` : ''}`} />
+                  <ListRow
+                    key={s.id}
+                    title={s.title}
+                    subtitle={`${s.questions.length} pertanyaan${s.campaignTag ? ` · ${s.campaignTag}` : ''} · ${responseCounts.get(s.id) ?? 0} respons`}
+                    meta="Lihat hasil"
+                    onPress={() => navigation.navigate('SurveyResults', { surveyId: s.id })}
+                  />
                 ))}
               </View>
             )}

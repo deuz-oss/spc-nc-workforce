@@ -5,6 +5,7 @@ import { Badge, Btn, Card, Chip, Empty, GeoValidBadge, H, ListRow, Muted, Sectio
 import { CATEGORY_LABEL, STORE_MANAGER_ROLES, VISIT_VALID_RADIUS_M } from '../config';
 import { showDialog } from '../components/dialog';
 import { HistoryNotice } from '../components/HistoryNotice';
+import { StoreEditForm } from '../components/StoreEditForm';
 import { C } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
@@ -24,6 +25,7 @@ export default function StoreDetailScreen() {
   const startVisit = useStore((s) => s.startVisit);
 
   const [assigning, setAssigning] = useState(false);
+  const [editing, setEditing] = useState(false);
   const [checking, setChecking] = useState(false);
 
   const storeVisits = useMemo(
@@ -132,7 +134,23 @@ export default function StoreDetailScreen() {
           </Muted>
           <Muted style={{ marginTop: 6 }}>NC: {nc?.name ?? 'Belum di-assign'}</Muted>
           <Muted>Dibuat: {fmtDateTime(store.createdAt)}</Muted>
+          {store.lat == null || store.lng == null ? (
+            <View style={{ marginTop: 8 }}>
+              <Badge label="Titik GPS belum diset — kunjungan tidak geo-valid" color={C.warn} />
+            </View>
+          ) : (
+            <Muted>
+              GPS: {store.lat.toFixed(6)}, {store.lng.toFixed(6)}
+            </Muted>
+          )}
+          {isManager && !editing && (
+            <View style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+              <Btn small variant="outline" title="Ubah Data Toko" onPress={() => setEditing(true)} />
+            </View>
+          )}
         </Card>
+
+        {isManager && editing && <StoreEditForm store={store} onDone={() => setEditing(false)} />}
 
         {isManager && (
           <Card>

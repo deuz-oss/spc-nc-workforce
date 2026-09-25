@@ -73,3 +73,21 @@ export function detectStops(
 
   return stops;
 }
+
+/**
+ * Parses a store pin typed as two text fields (comma or dot decimals, e.g.
+ * copied from Google Maps). Both empty = no pin (`null`); both valid =
+ * coordinates; anything else (one missing, out of range, not a number) =
+ * `'invalid'`.
+ */
+export function parseLatLng(latText: string, lngText: string): { lat: number; lng: number } | null | 'invalid' {
+  const lt = latText.trim().replace(',', '.');
+  const lg = lngText.trim().replace(',', '.');
+  if (!lt && !lg) return null;
+  const num = /^-?\d+(\.\d+)?$/;
+  if (!num.test(lt) || !num.test(lg)) return 'invalid';
+  const lat = Number(lt);
+  const lng = Number(lg);
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return 'invalid';
+  return { lat, lng };
+}

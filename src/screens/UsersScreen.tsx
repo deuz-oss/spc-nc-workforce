@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Badge, Btn, Card, Chip, Empty, Field, Input, ListRow, SectionHeader } from '../components/ui';
+import { Badge, Btn, Card, Chip, Empty, Field, Input, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { ROLE_LABEL } from '../config';
 import { C, F } from '../theme';
 import { MIN_PASSWORD, useStore } from '../store/useStore';
-import { Role, User } from '../types';
+import { Role, Team, User } from '../types';
 
 const ROLE_OPTIONS: Role[] = [
   'nc', 'tl', 'arco', 'pm', 'lead_trainer', 'trainer', 'data_analyst', 'admin_data_entry', 'reckitt_client', 'super_admin',
@@ -124,19 +124,36 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
   );
 }
 
-function AddTeamForm({ onDone }: { onDone: () => void }) {
+/** Create a team, or edit one when `team` is given (super_admin). */
+function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
   const users = useStore((s) => s.users);
   const addTeam = useStore((s) => s.addTeam);
-  const [name, setName] = useState('');
-  const [city, setCity] = useState('');
-  const [tlId, setTlId] = useState<string | null>(null);
-  const [arcoId, setArcoId] = useState<string | null>(null);
+  const updateTeam = useStore((s) => s.updateTeam);
+  const [name, setName] = useState(team?.name ?? '');
+  const [city, setCity] = useState(team?.city ?? '');
+  const [tlId, setTlId] = useState<string | null>(team?.tlId ?? null);
+  const [arcoId, setArcoId] = useState<string | null>(team?.arcoId ?? null);
+  const [busy, setBusy] = useState(false);
   const tls = users.filter((u) => u.role === 'tl' && u.active);
   const arcos = users.filter((u) => u.role === 'arco' && u.active);
 
+  const save = async () => {
+    setBusy(true);
+    try {
+      if (team) {
+        if (await updateTeam(team.id, { name, city, tlId, arcoId })) return; // error already shown
+      } else {
+        await addTeam({ name, city, tlId, arcoId });
+      }
+      onDone();
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title="Tambah Tim" subtitle="Satu TL per tim; ARCO boleh memegang beberapa tim" />
+      <SectionHeader title={team ? `Ubah ${team.name}` : 'Tambah Tim'} subtitle="Satu TL per tim; ARCO boleh memegang beberapa tim" />
       <Field label="Nama Tim"><Input value={name} onChangeText={setName} placeholder="mis. Tim Bandung 1" /></Field>
       <Field label="Kota"><Input value={city} onChangeText={setCity} /></Field>
       <Field label="Team Leader">
@@ -151,14 +168,11 @@ function AddTeamForm({ onDone }: { onDone: () => void }) {
           {arcos.map((u) => <Chip key={u.id} label={u.name} active={arcoId === u.id} onPress={() => setArcoId(u.id)} />)}
         </View>
       </Field>
-      <Btn
-        title="Simpan Tim"
-        disabled={!city.trim()}
-        onPress={async () => {
-          await addTeam({ name, city, tlId, arcoId });
-          onDone();
-        }}
-      />
+      <Muted>TL yang dipilih otomatis dipindah ke tim ini; TL sebelumnya dilepas dari tim ini.</Muted>
+      <View style={{ flexDirection: 'row', gap: 8 }}>
+        <Btn title="Simpan Tim" disabled={!city.trim() || busy} loading={busy} onPress={save} />
+        <Btn variant="outline" title="Batal" onPress={onDone} />
+      </View>
     </Card>
   );
 }
@@ -172,6 +186,8 @@ export default function UsersScreen() {
   const [showAddTeam, setShowAddTeam] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = users.find((u) => u.id === editingId);
+  const [editingTeamId, setEditingTeamId] = useState<string | null>(null);
+  const editingTeam = teams.find((t) => t.id === editingTeamId);
 
   return (
     <View role="main" style={{ flex: 1 }}>
@@ -185,10 +201,25 @@ export default function UsersScreen() {
         />
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Btn small variant="outline" title="Impor Massal (CSV, 215 akun)" onPress={() => navigation.navigate('Import')} />
-          <Btn small variant="outline" title={showAddTeam ? 'Tutup form tim' : `Tambah Tim (${teams.length})`} onPress={() => setShowAddTeam((v) => !v)} />
+          <Btn small variant="outline" title={showAddTeam ? 'Tutup Tim' : `Kelola Tim (${teams.length})`} onPress={() => setShowAddTeam((v) => !v)} />
         </View>
         {showAdd && <AddUserForm onDone={() => setShowAdd(false)} />}
-        {showAddTeam && <AddTeamForm onDone={() => setShowAddTeam(false)} />}
+        {showAddTeam && !editingTeam && <TeamForm onDone={() => setShowAddTeam(false)} />}
+        {showAddTeam && teams.length > 0 && (
+          <Card style={{ gap: 8 }}>
+            <SectionHeader title={`Tim (${teams.length})`} />
+            {teams.map((t) => (
+              <ListRow
+                key={t.id}
+                title={t.name}
+                subtitle={`${t.city} · TL: ${users.find((u) => u.id === t.tlId)?.name ?? '-'} · ARCO: ${users.find((u) => u.id === t.arcoId)?.name ?? '-'}`}
+                meta="Ubah"
+                onPress={() => setEditingTeamId(t.id)}
+              />
+            ))}
+          </Card>
+        )}
+        {editingTeam && <TeamForm key={editingTeam.id} team={editingTeam} onDone={() => setEditingTeamId(null)} />}
         {editing && <EditUserPanel key={editing.id} user={editing} onDone={() => setEditingId(null)} />}
       </View>
       <FlatList

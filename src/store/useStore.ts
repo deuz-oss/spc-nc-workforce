@@ -158,7 +158,11 @@ interface StoreState {
   ): Promise<string | null>;
   /** super_admin only, via the admin-users edge function. */
   setUserPassword(id: string, password: string): Promise<string | null>;
+  /** Any signed-in user: change their own password after re-verifying the current one. */
+  changeOwnPassword(current: string, next: string): Promise<string | null>;
   addTeam(p: { name: string; city: string; tlId: string | null; arcoId: string | null }): Promise<void>;
+  /** super_admin: edit a team; keeps the TL's profile.team_id in sync (see syncTeamLeader). */
+  updateTeam(id: string, p: { name: string; city: string; tlId: string | null; arcoId: string | null }): Promise<string | null>;
 
   upsertStore(s: Store): Promise<void>;
   /** CSV import path — batched inserts, awaited, with a real per-chunk result
@@ -1355,6 +1359,36 @@ async function hydrateAll(
   return true;
 }
 
+/**
+ * A TL's scope (RLS profiles_select/visits_select etc. use the TL's
+ * profiles.team_id) must follow teams.tl_id, or a newly assigned TL sees none
+ * of the team's NCs while the replaced TL keeps seeing all of them. So: the new
+ * TL's profile moves to this team, and the previous TL — if still attached to
+ * this team — is detached (team_id null) until reassigned. Runs after the team
+ * write itself succeeded; failures are surfaced, not rolled back.
+ */
+async function syncTeamLeader(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  teamId: string,
+  newTlId: string | null,
+  oldTlId: string | null,
+) {
+  const patch = new Map<string, string | null>();
+  if (newTlId) patch.set(newTlId, teamId);
+  if (oldTlId && oldTlId !== newTlId && get().users.find((u) => u.id === oldTlId)?.teamId === teamId) {
+    patch.set(oldTlId, null);
+  }
+  for (const [userId, teamIdForUser] of patch) {
+    const { error } = await supabase.from('profiles').update({ team_id: teamIdForUser }).eq('id', userId);
+    if (error) {
+      showDialog('Perlu Dicek', 'Tim tersimpan, tetapi tim pada profil TL gagal diperbarui. Atur manual lewat Pengguna → Ubah.');
+      continue;
+    }
+    set({ users: get().users.map((u) => (u.id === userId ? { ...u, teamId: teamIdForUser } : u)) });
+  }
+}
+
 async function callAdminUsers(body: Record<string, unknown>): Promise<{ data?: any; error?: string }> {
   const { data, error } = await supabase.functions.invoke('admin-users', { body });
   if (error) return { error: error.message ?? 'Gagal menghubungi server.' };
@@ -1680,6 +1714,23 @@ export const useStore = create<StoreState>()((set, get) => ({
     return error ?? null;
   },
 
+  changeOwnPassword: async (current, next) => {
+    const me = get().users.find((u) => u.id === get().sessionUserId);
+    if (!me) return 'Sesi tidak ditemukan. Silakan login ulang.';
+    if (next.length < MIN_PASSWORD) return `Password baru minimal ${MIN_PASSWORD} karakter.`;
+    if (next === current) return 'Password baru harus berbeda dari password lama.';
+    // Re-verify the current password: an unlocked phone left unattended must
+    // not be enough to take over the account.
+    const { error: verifyErr } = await supabase.auth.signInWithPassword({
+      email: `${me.username.toLowerCase()}@internal.spc`,
+      password: current,
+    });
+    if (verifyErr) return 'Password lama salah.';
+    const { error } = await supabase.auth.updateUser({ password: next });
+    if (error) return 'Gagal mengubah password. Periksa koneksi internet dan coba lagi.';
+    return null;
+  },
+
   addTeam: async ({ name, city, tlId, arcoId }) => {
     const t: Team = { id: uid('t_'), name: name.trim() || city.trim(), city: city.trim(), tlId, arcoId };
     set({ teams: [...get().teams, t] });
@@ -1693,7 +1744,26 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ teams: get().teams.filter((x) => x.id !== t.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan tim baru. Periksa koneksi internet dan coba lagi.');
+      return;
     }
+    await syncTeamLeader(set, get, t.id, t.tlId, null);
+  },
+
+  updateTeam: async (id, { name, city, tlId, arcoId }) => {
+    const before = get().teams.find((t) => t.id === id);
+    if (!before) return 'Tim tidak ditemukan.';
+    const next: Team = { ...before, name: name.trim() || city.trim(), city: city.trim(), tlId, arcoId };
+    const { error } = await supabase
+      .from('teams')
+      .update({ name: next.name, city: next.city, tl_id: next.tlId, arco_id: next.arcoId })
+      .eq('id', id);
+    if (error) {
+      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan perubahan tim. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    set({ teams: get().teams.map((t) => (t.id === id ? next : t)) });
+    if (before.tlId !== tlId) await syncTeamLeader(set, get, id, tlId, before.tlId);
+    return null;
   },
 
   upsertStore: async (m) => {
