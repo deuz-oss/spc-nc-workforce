@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import {
   Btn,
@@ -19,6 +19,8 @@ import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
 import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
+import { photoStoragePath } from '../utils/photoRef';
+import { openReportPhoto } from '../utils/storage';
 import { ReportType } from '../types';
 
 /**
@@ -41,7 +43,8 @@ interface ReportItem {
   photoUrl?: string;
 }
 
-const remotePhoto = (url?: string) => (url && /^https?:\/\//.test(url) ? url : undefined);
+/** Only photos that reached Storage are viewable by a reviewer — an offline-queued local file isn't. */
+const remotePhoto = (ref?: string) => (photoStoragePath(ref) ? ref : undefined);
 
 export default function ValidationQueueScreen() {
   const navigation = useNavigation<any>();
@@ -196,7 +199,7 @@ export default function ValidationQueueScreen() {
                   />
                   {item.photoUrl && (
                     <View style={{ paddingHorizontal: 4, alignSelf: 'flex-start' }}>
-                      <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => Linking.openURL(item.photoUrl!)} />
+                      <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => void openReportPhoto(item.photoUrl)} />
                     </View>
                   )}
                   {flaggingKey === key ? (

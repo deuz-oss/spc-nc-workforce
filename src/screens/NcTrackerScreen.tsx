@@ -1,10 +1,11 @@
 import React, { useMemo } from 'react';
-import { Linking, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useRoute } from '@react-navigation/native';
 import { Btn, Card, Empty, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
+import { openReportPhoto } from '../utils/storage';
 
 /**
  * Per-NC drill-down (PRD §10 "NC Tracker: per-NC detail — visit log, facing
@@ -76,7 +77,7 @@ export default function NcTrackerScreen() {
                   key={r.id}
                   title={store?.name ?? '-'}
                   subtitle={`${r.ownFacingCount}/${r.totalFacingCount} facing · ${fmtDateTime(r.createdAt)}`}
-                  trailing={<Btn small variant="outline" title="Lihat Foto" onPress={() => Linking.openURL(r.photoUrl)} />}
+                  trailing={<Btn small variant="outline" title="Lihat Foto" onPress={() => void openReportPhoto(r.photoUrl)} />}
                 />
               );
             })}

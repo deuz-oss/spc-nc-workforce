@@ -87,6 +87,7 @@ const created = {
   conversations: [] as string[],
   targets: [] as string[],
   certifications: [] as string[],
+  photos: [] as string[],
 };
 
 async function cleanup() {
@@ -95,6 +96,10 @@ async function cleanup() {
     const { error } = await admin.from(table).delete().in('id', ids);
     if (error) console.warn(`  cleanup ${table}: ${error.message}`);
   };
+  if (created.photos.length) {
+    const { error } = await admin.storage.from('report-media').remove(created.photos);
+    if (error) console.warn(`  cleanup photos: ${error.message}`);
+  }
   await del('conversations', created.conversations); // messages cascade
   await del('stock_taking', created.stockTaking);
   await del('visits', created.visits);
@@ -299,6 +304,26 @@ async function main() {
     const tamper = await nc.client.from('attendances').update({ clock_in_at: new Date(Date.now() - 5 * 3600000).toISOString() }).eq('id', attId).select();
     expect(tamper.error || !tamper.data?.length, 'clock_in_at was rewritten');
     expectOk(await nc.client.from('attendances').update({ clock_out_at: new Date().toISOString(), clock_out_lat: -6.2, clock_out_lng: 106.8 }).eq('id', attId), 'clock-out');
+  });
+
+  await check('evidence photos are private: no anonymous URL; signed URL for the TL, refused for another NC', async () => {
+    const path = `${visitId}/${RUN}.png`;
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    expectOk(await nc.client.storage.from('report-media').upload(path, png, { contentType: 'image/png' }), 'NC photo upload');
+    created.photos.push(path);
+
+    const publicUrl = admin.storage.from('report-media').getPublicUrl(path).data.publicUrl;
+    const anon = await fetch(publicUrl);
+    expect(anon.status !== 200, `photo readable anonymously via public URL (HTTP ${anon.status}) — 0011 not applied`);
+
+    const signed = await tl.client.storage.from('report-media').createSignedUrl(path, 60);
+    expect(!signed.error && signed.data?.signedUrl, `TL could not get a signed URL: ${signed.error?.message}`);
+    expect((await fetch(signed.data!.signedUrl)).status === 200, 'signed URL did not serve the photo');
+
+    if (nc2) {
+      const other = await nc2.client.storage.from('report-media').createSignedUrl(path, 60);
+      expect(other.error, 'another NC got a signed URL for this NC’s evidence photo');
+    }
   });
 
   // ===== 3. Consumer PII ======================================================

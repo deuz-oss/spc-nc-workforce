@@ -1,10 +1,13 @@
-import { Platform } from 'react-native';
+import { Linking, Platform } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { decode } from 'base64-arraybuffer';
 import { supabase } from '../lib/supabase';
+import { showDialog } from '../components/dialog';
+import { photoStoragePath, REPORT_MEDIA_BUCKET as BUCKET } from './photoRef';
 import { uid } from './uuid';
 
-const BUCKET = 'report-media';
+/** Signed-URL lifetime when a reviewer opens an evidence photo. */
+const SIGNED_URL_TTL_S = 60 * 60;
 
 const MIME_BY_EXT: Record<string, string> = {
   jpg: 'image/jpeg',
@@ -19,7 +22,9 @@ const MIME_BY_EXT: Record<string, string> = {
 /**
  * Uploads a locally-picked photo/document (report evidence — stock taking,
  * share of shelf, paid visibility, price monitoring, per PRD §5) to Supabase
- * Storage and returns its public URL. Web uses a real fetch() Blob; native
+ * Storage and returns its object path inside the (private, since 0011) bucket —
+ * that path is what report rows store as photo_url; see photoRef.ts and
+ * openReportPhoto for viewing. Web uses a real fetch() Blob; native
  * reads base64 via expo-file-system since React Native's fetch().blob() is
  * unreliable for binary uploads from file:// URIs.
  */
@@ -42,7 +47,32 @@ export async function uploadReportMedia(
     const { error } = await supabase.storage.from(BUCKET).upload(path, decode(base64), { contentType: type });
     if (error) throw error;
   }
-  return supabase.storage.from(BUCKET).getPublicUrl(path).data.publicUrl;
+  return path;
+}
+
+/**
+ * Opens a report's evidence photo via a short-lived signed URL. Storage only
+ * signs it when report_media_select RLS lets the viewer see that visit (own
+ * visit, TL/ARCO scope, monitor roles), so an unrelated user gets an error, not
+ * the photo. Accepts both stored formats (bucket path or legacy public URL).
+ */
+export async function openReportPhoto(ref: string | null | undefined): Promise<void> {
+  const path = photoStoragePath(ref);
+  if (!path) {
+    showDialog('Foto Belum Tersedia', 'Foto ini belum terupload (masih tersimpan offline di HP NC).');
+    return;
+  }
+  // Web: open the tab synchronously inside the click, then point it at the
+  // signed URL — a window.open() after the await would be popup-blocked.
+  const tab = Platform.OS === 'web' && typeof window !== 'undefined' ? window.open('', '_blank') : null;
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL_S);
+  if (error || !data?.signedUrl) {
+    tab?.close();
+    showDialog('Tidak Dapat Membuka Foto', 'Foto tidak ditemukan atau Anda tidak punya akses ke laporan ini.');
+    return;
+  }
+  if (tab) tab.location.href = data.signedUrl;
+  else await Linking.openURL(data.signedUrl);
 }
 
 const PENDING_DIR = `${FileSystem.documentDirectory ?? ''}pending-report-media/`;
