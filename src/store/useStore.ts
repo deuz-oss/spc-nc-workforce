@@ -267,6 +267,10 @@ interface StoreState {
   sendMessage(conversationId: string, body: string): Promise<void>;
   /** Marks the other participant's unread messages in this conversation as read. Best-effort. */
   markMessagesRead(conversationId: string): Promise<void>;
+  /** Re-fetches conversations + messages (login history window) and merges
+   * them in — catches anything realtime missed while the app was backgrounded.
+   * Called on app resume and when the chat screens open. Best-effort. */
+  refreshChat(): Promise<void>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -1512,7 +1516,12 @@ export const useStore = create<StoreState>()((set, get) => ({
       // NetInfo only fires on connectivity *changes* — a replay that failed
       // transiently while online would otherwise wait for the next drop/reconnect.
       AppState.addEventListener('change', (s) => {
-        if (s === 'active' && get().pendingOps.length) get().processPendingOps();
+        if (s !== 'active') return;
+        if (get().pendingOps.length) get().processPendingOps();
+        // Realtime events that fired while the app was backgrounded (socket
+        // asleep) are lost, not replayed — e.g. a chat message whose push
+        // notification arrived but whose row never reached the phone.
+        if (get().sessionUserId) void get().refreshChat();
       });
     }
   },
@@ -2491,6 +2500,23 @@ export const useStore = create<StoreState>()((set, get) => ({
     );
     if (existing) return existing.id;
 
+    // The counterpart may have started this conversation while our realtime
+    // socket was asleep — check the server before creating one, or the chat
+    // splits into two threads (each side seeing only its own messages).
+    const { data: remote } = await supabase
+      .from('conversations')
+      .select('*')
+      .eq('type', type)
+      .or(`and(participant_a.eq.${me},participant_b.eq.${otherUserId}),and(participant_a.eq.${otherUserId},participant_b.eq.${me})`)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    if (remote?.length) {
+      const found = mapConversation(remote[0]);
+      set({ conversations: upsertById(get().conversations, found) });
+      void get().refreshChat();
+      return found.id;
+    }
+
     const c: Conversation = {
       id: uid('cv_'),
       type,
@@ -2555,6 +2581,28 @@ export const useStore = create<StoreState>()((set, get) => ({
           // Best-effort only — push delivery failing must never affect the chat itself.
         });
     }
+  },
+
+  refreshChat: async () => {
+    const since = get().historyFrom ?? historyWindowStart(new Date(), HISTORY_DAYS);
+    const [convos, msgs] = await Promise.all([
+      fetchAll('conversations'),
+      fetchAll('messages', windowFilter('messages', since)),
+    ]);
+    if (convos.error || msgs.error) {
+      console.warn('refreshChat failed (non-fatal):', (convos.error ?? msgs.error)!.message);
+      return;
+    }
+    // Server rows win (e.g. read_at set on another device); local-only rows
+    // (a message mid-send) are kept.
+    const merge = <T extends { id: string }>(local: T[], server: T[]) => {
+      const ids = new Set(server.map((r) => r.id));
+      return [...server, ...local.filter((r) => !ids.has(r.id))];
+    };
+    set({
+      conversations: merge(get().conversations, convos.data.map(mapConversation)),
+      messages: merge(get().messages, msgs.data.map(mapMessage)),
+    });
   },
 
   markMessagesRead: async (conversationId) => {

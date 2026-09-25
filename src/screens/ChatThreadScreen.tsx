@@ -1,6 +1,6 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useFocusEffect, useRoute } from '@react-navigation/native';
 import { Btn, Input, Muted, StickyFooter } from '../components/ui';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -25,6 +25,15 @@ export default function ChatThreadScreen() {
   const thread = useMemo(
     () => allMessages.filter((m) => m.conversationId === conversationId).sort((a, b) => a.createdAt - b.createdAt),
     [allMessages, conversationId],
+  );
+
+  // Pull anything realtime missed (e.g. messages sent while the app was in the
+  // background) every time the thread is opened.
+  const refreshChat = useStore((s) => s.refreshChat);
+  useFocusEffect(
+    useCallback(() => {
+      void refreshChat();
+    }, [refreshChat]),
   );
 
   useEffect(() => {

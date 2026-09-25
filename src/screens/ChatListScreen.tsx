@@ -1,6 +1,6 @@
-import React, { useMemo } from 'react';
+import React, { useCallback, useMemo } from 'react';
 import { ScrollView } from 'react-native';
-import { useNavigation } from '@react-navigation/native';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { Badge, Empty, ListRow, SectionHeader } from '../components/ui';
 import { C } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -38,6 +38,15 @@ export default function ChatListScreen() {
   const conversations = useStore((s) => s.conversations);
   const messages = useStore((s) => s.messages);
   const ensureConversation = useStore((s) => s.ensureConversation);
+  const refreshChat = useStore((s) => s.refreshChat);
+
+  // New messages/conversations that arrived while the app was backgrounded
+  // never reach the phone over realtime — re-fetch whenever the tab is shown.
+  useFocusEffect(
+    useCallback(() => {
+      void refreshChat();
+    }, [refreshChat]),
+  );
 
   const rows: CounterpartRow[] = useMemo(() => {
     if (me.role === 'nc') {
