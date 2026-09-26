@@ -25,6 +25,7 @@ import {
   ReportType,
   Role,
   RoutePoint,
+  LivePosition,
   Scorecard,
   ShareOfShelfRow,
   StockTakingRow,
@@ -276,6 +277,13 @@ interface StoreState {
    * lost, not replayed. Runs on app resume (throttled) and on pull-to-refresh.
    * Returns an error message or null. */
   refreshData(): Promise<string | null>;
+  /** Last known position of every clocked-in user the caller may see (RLS-scoped,
+   * via the live_positions() RPC, 0012). Fetched on demand by the live map — not
+   * kept in global state. Throws on failure. */
+  fetchLivePositions(): Promise<LivePosition[]>;
+  /** GPS route of one attendance session (RLS-scoped), oldest first. For viewing
+   * another user's day — the store only mirrors the viewer's own routes. */
+  fetchRoute(attendanceId: string): Promise<RoutePoint[]>;
 
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
   /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
@@ -2590,6 +2598,34 @@ export const useStore = create<StoreState>()((set, get) => ({
     set(patch);
     lastRefreshAt = Date.now();
     return null;
+  },
+
+  fetchLivePositions: async () => {
+    const { data, error } = await supabase.rpc('live_positions');
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      userId: r.user_id,
+      attendanceId: r.attendance_id,
+      lat: r.lat,
+      lng: r.lng,
+      at: new Date(r.recorded_at).getTime(),
+      clockInAt: new Date(r.clock_in_at).getTime(),
+    }));
+  },
+
+  fetchRoute: async (attendanceId) => {
+    const out: RoutePoint[] = [];
+    for (let from = 0; ; from += PAGE_SIZE) {
+      const { data, error } = await supabase
+        .from('route_points')
+        .select('lat, lng, recorded_at')
+        .eq('attendance_id', attendanceId)
+        .order('recorded_at', { ascending: true })
+        .range(from, from + PAGE_SIZE - 1);
+      if (error) throw new Error(error.message);
+      out.push(...(data ?? []).map((p: any) => ({ lat: p.lat, lng: p.lng, t: new Date(p.recorded_at).getTime() })));
+      if (!data || data.length < PAGE_SIZE) return out;
+    }
   },
 
   refreshChat: async () => {

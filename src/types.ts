@@ -64,6 +64,17 @@ export interface RoutePoint {
   t: number;
 }
 
+/** Last known position of a clocked-in user (live_positions() RPC, 0012). */
+export interface LivePosition {
+  userId: string;
+  attendanceId: string;
+  lat: number;
+  lng: number;
+  /** When this position was recorded (the latest route point, or clock-in). */
+  at: number;
+  clockInAt: number;
+}
+
 export interface Attendance {
   id: string;
   userId: string;

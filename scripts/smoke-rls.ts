@@ -263,6 +263,32 @@ async function main() {
     created.stockTaking.push(stkId);
   });
 
+  await check('TL sees a clocked-in NC on the live map and their route; another NC and anon do not', async () => {
+    const pointAt = new Date(checkIn.getTime() + 5 * 60000).toISOString();
+    expectOk(
+      await nc.client.from('route_points').insert({ attendance_id: attId, user_id: nc.id, lat: -6.21, lng: 106.81, recorded_at: pointAt }),
+      'NC route point insert',
+    );
+    const live = await tl.client.rpc('live_positions');
+    if (live.error && /live_positions/.test(live.error.message)) throw new Error('live_positions() missing — run migration 0012');
+    expectOk(live, 'TL live_positions');
+    const row = (live.data as any[]).find((r) => r.attendance_id === attId);
+    expect(row, 'TL does not see the clocked-in NC in live_positions');
+    expect(Math.abs(new Date(row.recorded_at).getTime() - new Date(pointAt).getTime()) < 1000 && row.lat === -6.21, 'live position is not the latest route point');
+
+    const route = await tl.client.from('route_points').select('lat').eq('attendance_id', attId);
+    expect(!route.error && (route.data?.length ?? 0) >= 1, `TL cannot read the NC's route: ${route.error?.message ?? '0 rows'}`);
+
+    if (nc2) {
+      const other = await nc2.client.rpc('live_positions');
+      expect(!(other.data as any[] | null)?.some((r) => r.attendance_id === attId), 'another NC can see this NC on the live map');
+      const otherRoute = await nc2.client.from('route_points').select('lat').eq('attendance_id', attId);
+      expect(!otherRoute.data?.length, "another NC can read this NC's route");
+    }
+    const anon = createClient(url!, anonKey!, noSession);
+    expect((await anon.rpc('live_positions')).error, 'anon key can call live_positions');
+  });
+
   await check('NC cannot file a report under a different store than the visit', async () => {
     const id = `${RUN}_stk_wrong`;
     const res = await nc.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo2', sku: 'SMOKE', qty_on_hand: 1 });
