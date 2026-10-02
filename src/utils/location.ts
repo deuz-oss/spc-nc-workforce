@@ -3,7 +3,13 @@ import * as Location from 'expo-location';
 export interface Coords {
   lat: number;
   lng: number;
+  /** Android reports positions from a mock-location (fake GPS) app; always false elsewhere. */
+  mocked: boolean;
 }
+
+export const MOCK_LOCATION_TITLE = 'Lokasi Palsu Terdeteksi';
+export const MOCK_LOCATION_MESSAGE =
+  'HP melaporkan lokasi dari aplikasi pemalsu lokasi (mock location). Matikan aplikasi tersebut / opsi "Select mock location app" di Developer Options, lalu coba lagi.';
 
 export class LocationPermissionDeniedError extends Error {}
 
@@ -51,7 +57,7 @@ export async function requestCurrentCoords(): Promise<Coords> {
   const { status } = await Location.requestForegroundPermissionsAsync();
   if (status !== 'granted') throw new LocationPermissionDeniedError();
   const pos = await readPosition();
-  return { lat: pos.coords.latitude, lng: pos.coords.longitude };
+  return { lat: pos.coords.latitude, lng: pos.coords.longitude, mocked: pos.mocked === true };
 }
 
 /** Minta izin lalu ambil posisi sekarang; null bila izin ditolak/gagal */

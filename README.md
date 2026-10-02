@@ -56,12 +56,13 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0013`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0014`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
    `0012_live_positions.sql` (TL/ARCO live team map) and
-   `0013_route_buffer_and_report_dedup.sql` (late/offline GPS points accepted, one report per visit per SKU) are required.
+   `0013_route_buffer_and_report_dedup.sql` (late/offline GPS points accepted, one report per visit per SKU) and
+   `0014_server_side_field_checks.sql` (server-computed geofence, timestamp bounds, under-1 rule) are required.
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
    ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and
@@ -142,6 +143,16 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   items are listed and can't be submitted again — enforced in the app and by a server trigger (0013), so a
   repeated Offtake submission can no longer double units sold. *Correcting* a submitted report is still not
   possible (reports are insert-only by design) — needs a decision on who may correct and how it's audited.
+- ✅ **Field data is checked by the server, not trusted from the phone** (migration 0014). Visit
+  `geo_valid`/distance are recomputed from the store pin and the clock-in geofence from the team's home-base pin
+  (Pengguna → Kelola Tim; a team without one isn't checked). Positions an Android phone reports as mocked (fake
+  GPS) block clock-in/check-in in the app and are never geo-valid server-side. Client timestamps are bounded:
+  nothing in the future or older than 7 days offline, a store check-in must fall inside an attendance, and a report
+  or NTG step inside its visit (so nothing can be added after check-out). Reports carry a server `received_at`;
+  the Validasi queue flags late syncs (>12 h), non-geo-valid visits and offtake outliers.
+- ✅ **Evidence photos come from the camera** on the phone app (no gallery); the web app keeps a file picker.
+- ✅ **Under-1 rule enforced everywhere** (PRD §6): a consumer with a child under one year never advances past
+  "approached" — in the app and by a server trigger. The child's age is a bracket picker (no free text).
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
@@ -232,7 +243,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0013`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0014`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -245,7 +256,7 @@ this repo. Production gets its own Supabase project.
    already set for production; upload the FCM V1 key for the **production** profile too (`npx eas-cli credentials`).
 5. **Real data**, in this order, as the production Super Admin: teams (Pengguna → Kelola Tim) → accounts (Import →
    Akun Pengguna CSV, then assign teams/TLs) → stores (Import → Toko CSV; set GPS pins via Store Detail → Ubah Data
-   Toko) → products (Import → Master Produk) → monthly targets (Target Bulanan, CSV). Rehearse the whole sequence
+   Toko) → each team's home-base pin + radius for the clock-in geofence (Pengguna → Kelola Tim) → products (Import → Master Produk) → monthly targets (Target Bulanan, CSV). Rehearse the whole sequence
    on staging first.
 6. **Brand assets**: replace the placeholder icons in `assets/` (see Status & Gaps for sizes).
 7. **Backups**: enable Point-in-Time Recovery (paid Supabase plan) or at least schedule daily logical backups
@@ -263,7 +274,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 32 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 34 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)

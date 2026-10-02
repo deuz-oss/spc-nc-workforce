@@ -144,8 +144,10 @@ export default function StoreVisitScreen() {
         </Card>
 
         {/* Report forms are submit-only and RLS lets only the visit's own NC
-            insert — other roles review reports from the Validasi tab instead. */}
-        {isOwner && (
+            insert — other roles review reports from the Validasi tab instead.
+            Only while the visit is open: the server refuses reports made after
+            check-out (report_server_checks, 0014). */}
+        {editable && (
           <Card>
             <H>Laporan Kunjungan</H>
             <Muted style={{ marginTop: 2 }}>
@@ -168,7 +170,8 @@ export default function StoreVisitScreen() {
         {done && (
           <Card>
             <Muted>
-              Kunjungan selesai. Durasi di lokasi: {Math.round(((visit.checkOutAt ?? 0) - visit.checkInAt) / 60000)} menit.
+              Kunjungan selesai — laporan tidak bisa ditambahkan lagi. Durasi di lokasi:{' '}
+              {Math.round(((visit.checkOutAt ?? 0) - visit.checkInAt) / 60000)} menit.
             </Muted>
           </Card>
         )}

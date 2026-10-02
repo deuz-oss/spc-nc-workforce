@@ -30,7 +30,9 @@ function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
       // Record where the user actually is at clock-out; the last route point
       // can be stale (tracking stopped/denied). Fall back to it only if no fix.
       const last = active.route[active.route.length - 1] ?? { lat: active.clockInLat, lng: active.clockInLng };
-      const pos = (await getCurrentCoords()) ?? last;
+      // A mocked fix is not a real position — fall back like having no fix.
+      const fix = await getCurrentCoords();
+      const pos = fix && !fix.mocked ? { lat: fix.lat, lng: fix.lng } : last;
       const queued = await clockOutStore(pos);
       if (!queued) showDialog('Clock Out berhasil');
     } catch (e) {

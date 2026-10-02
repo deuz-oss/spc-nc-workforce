@@ -4,7 +4,13 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { NTG_GWP_STAGES, NTG_GWP_STAGE_LABEL } from '../config';
+import {
+  CHILD_AGE_BRACKETS,
+  isUnder1Bracket,
+  NTG_GWP_STAGES,
+  NTG_GWP_STAGE_LABEL,
+  UNDER1_MESSAGE,
+} from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Consumer, NtgGwpStage } from '../types';
@@ -49,7 +55,12 @@ export default function ConsumerDetailScreen() {
   const isCreate = !consumerId;
   const ownedByMe = isCreate || existing?.createdByNcId === me.id;
   const readOnly = me.role !== 'nc' || !ownedByMe;
-  const canAdvanceStage = !!visitId && !!storeId && !readOnly;
+  // Funnel steps belong to an open visit (the server refuses them after check-out, 0014).
+  const visit = useStore((s) => s.visits.find((v) => v.id === visitId));
+  const canAdvanceStage = !!visit && !visit.checkOutAt && !!storeId && !readOnly;
+  // PRD §6 / PP 33/2012: an under-1 consumer stays at "approached" (also enforced server-side, 0014).
+  const under1 = isUnder1Bracket(childAgeBracket);
+  const legacyBracket = !!childAgeBracket && !CHILD_AGE_BRACKETS.some((b) => b.key === childAgeBracket);
 
   const todaysStoreOfftake = useMemo(() => {
     if (!storeId) return [];
@@ -62,6 +73,11 @@ export default function ConsumerDetailScreen() {
     if (!name.trim()) return showDialog('Belum lengkap', 'Nama konsumen wajib diisi.');
     if (!waContact.trim()) return showDialog('Belum lengkap', 'Kontak WhatsApp wajib diisi.');
     if (!consent) return showDialog('Consent diperlukan', 'Konsumen harus menyetujui consent sebelum data disimpan (UU PDP).');
+    // The stage may have been picked before the age was set to under 1.
+    if (under1 && stage !== 'approached' && stage !== currentStage) {
+      setStage(currentStage);
+      return showDialog('Anak di Bawah 1 Tahun', UNDER1_MESSAGE);
+    }
 
     setBusy(true);
     try {
@@ -152,13 +168,20 @@ export default function ConsumerDetailScreen() {
                 <Input value={waContact} onChangeText={setWaContact} editable={!readOnly} placeholder="08xxxxxxxxxx" keyboardType="phone-pad" />
               </Field>
               <View style={{ height: 10 }} />
-              <Field label="Usia Anak (bracket)">
-                <Input
-                  value={childAgeBracket}
-                  onChangeText={setChildAgeBracket}
-                  editable={!readOnly}
-                  placeholder="mis. 1-2 tahun (bukan tanggal lahir — PRD §6)"
-                />
+              <Field label="Usia Anak (bracket — bukan tanggal lahir, PRD §6)">
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {CHILD_AGE_BRACKETS.map((b) => (
+                    <Chip
+                      key={b.key}
+                      label={b.label}
+                      active={childAgeBracket === b.key}
+                      onPress={readOnly ? undefined : () => setChildAgeBracket(b.key)}
+                    />
+                  ))}
+                </View>
+                {legacyBracket && (
+                  <Muted style={{ marginTop: 6 }}>Tercatat sebelumnya: "{childAgeBracket}" — pilih salah satu bracket di atas.</Muted>
+                )}
               </Field>
               <View style={{ height: 10 }} />
               <Field label="Brand Kompetitor Saat Ini (opsional)">
@@ -168,6 +191,12 @@ export default function ConsumerDetailScreen() {
 
             <Card>
               <H>Tahap Funnel</H>
+              {under1 && (
+                <View style={{ marginTop: 6 }}>
+                  <Badge label="Anak < 1 tahun" color={C.warn} />
+                  <Muted style={{ marginTop: 4 }}>{UNDER1_MESSAGE}</Muted>
+                </View>
+              )}
               {!canAdvanceStage && (
                 <Muted style={{ marginTop: 4 }}>
                   {readOnly
@@ -191,7 +220,7 @@ export default function ConsumerDetailScreen() {
                     key={s}
                     label={NTG_GWP_STAGE_LABEL[s]}
                     active={stage === s}
-                    onPress={canAdvanceStage && i >= currentStageIdx ? () => setStage(s) : undefined}
+                    onPress={canAdvanceStage && i >= currentStageIdx && !(under1 && s !== 'approached') ? () => setStage(s) : undefined}
                     color={i < currentStageIdx ? C.ok : C.primary}
                   />
                 ))}

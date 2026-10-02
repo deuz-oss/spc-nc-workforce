@@ -39,9 +39,25 @@ interface ReportItem {
   storeId: string;
   createdAt: number;
   isOutlier?: boolean;
+  /** Server receive time (0014) — far after createdAt means a late sync. */
+  receivedAt?: number;
   /** Evidence photo, when the module has one and it's been uploaded (a
    * still-offline local file:// path isn't viewable from a reviewer's device). */
   photoUrl?: string;
+}
+
+/** A report reaching the server this long after it was made is worth a look:
+ * a long offline stretch, or a phone whose clock was set back to backdate it. */
+const LATE_SYNC_MS = 12 * 3600000;
+
+/** Why a not-yet-reviewed report needs a manual look, or null if it auto-approves. */
+function autoFlagReason(item: ReportItem, visitGeoValid: boolean | undefined): string | null {
+  if (item.isOutlier) return 'Outlier: >3x rata-rata 7 hari NC ini';
+  if (visitGeoValid === false) return 'Kunjungan tidak geo-valid (di luar radius toko, toko tanpa pin, atau lokasi palsu)';
+  if (item.receivedAt != null && item.receivedAt - item.createdAt > LATE_SYNC_MS) {
+    return `Tersinkron ${Math.round((item.receivedAt - item.createdAt) / 3600000)} jam setelah dibuat — cek jam HP / alasan offline`;
+  }
+  return null;
 }
 
 /** Only photos that reached Storage are viewable by a reviewer — an offline-queued local file isn't. */
@@ -88,11 +104,11 @@ export default function ValidationQueueScreen() {
       return !!v && ncIds.has(v.ncId) && inRange(v.checkInAt, range);
     };
     const out: ReportItem[] = [];
-    for (const r of stockTakingRows) if (inScope(r.visitId)) out.push({ type: 'stock_taking', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of offtakeRows) if (inScope(r.visitId)) out.push({ type: 'offtake', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, isOutlier: r.isOutlier });
-    for (const r of shareOfShelfRows) if (inScope(r.visitId)) out.push({ type: 'share_of_shelf', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of paidVisibilityRows) if (inScope(r.visitId)) out.push({ type: 'paid_visibility', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of priceMonitoringRows) if (inScope(r.visitId)) out.push({ type: 'price_monitoring', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of stockTakingRows) if (inScope(r.visitId)) out.push({ type: 'stock_taking', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of offtakeRows) if (inScope(r.visitId)) out.push({ type: 'offtake', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, isOutlier: r.isOutlier });
+    for (const r of shareOfShelfRows) if (inScope(r.visitId)) out.push({ type: 'share_of_shelf', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of paidVisibilityRows) if (inScope(r.visitId)) out.push({ type: 'paid_visibility', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
+    for (const r of priceMonitoringRows) if (inScope(r.visitId)) out.push({ type: 'price_monitoring', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
     return out.sort((a, b) => b.createdAt - a.createdAt);
   }, [stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, visitsById, ncIds, range]);
 
@@ -108,9 +124,9 @@ export default function ValidationQueueScreen() {
         const review = reviewByKey.get(`${item.type}:${item.id}`);
         if (review?.status === 'approved') return false;
         if (review?.status === 'flagged') return true;
-        return item.type === 'offtake' && item.isOutlier === true;
+        return autoFlagReason(item, visitsById.get(item.visitId)?.geoValid) != null;
       }),
-    [items, reviewByKey],
+    [items, reviewByKey, visitsById],
   );
   const normalCount = items.length - exceptions.length;
   const shown = view === 'exceptions' ? exceptions : items;
@@ -185,12 +201,13 @@ export default function ValidationQueueScreen() {
               const nc = users.find((u) => u.id === item.ncId);
               const store = stores.find((s) => s.id === item.storeId);
               const review = reviewByKey.get(key);
+              const autoFlag = autoFlagReason(item, visitsById.get(item.visitId)?.geoValid);
               const status = review?.status === 'flagged'
                 ? { label: 'Ditandai', color: '#B45309', icon: 'alert-circle' as const, reason: review.note || 'Ditandai untuk ditinjau' }
                 : review?.status === 'approved'
                   ? { label: 'Disetujui', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Disetujui manual' }
-                  : item.isOutlier
-                    ? { label: 'Outlier', color: '#B45309', icon: 'alert-circle' as const, reason: 'Outlier: >3x rata-rata 7 hari NC ini' }
+                  : autoFlag
+                    ? { label: item.isOutlier ? 'Outlier' : 'Perlu Dicek', color: '#B45309', icon: 'alert-circle' as const, reason: autoFlag }
                     : { label: 'Normal', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Otomatis disetujui' };
               return (
                 <View key={key} style={{ gap: 6 }}>

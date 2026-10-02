@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, Chip, H, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { COMPLIANCE_CHECKLIST_ITEMS, VISIBILITY_TYPES } from '../config';
 import { C, F } from '../theme';
 import { ShownError, useStore } from '../store/useStore';
@@ -33,20 +33,7 @@ export default function PaidVisibilityScreen() {
 
   const toggleItem = (key: string) => setChecklist((c) => ({ ...c, [key]: !c[key] }));
 
-  const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
-  const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      showDialog('Izin kamera diperlukan');
-      return;
-    }
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
   const canSubmit = !busy && !!visibilityType && !doneTypes.has(visibilityType) && !!photoUri;
 
@@ -120,17 +107,7 @@ export default function PaidVisibilityScreen() {
         <Card>
           <H>Foto (wajib)</H>
           <Muted style={{ marginTop: 2 }}>Bukti pemasangan asset visibility.</Muted>
-          {photoUri ? (
-            <View style={{ marginTop: 10, gap: 8 }}>
-              <Image source={{ uri: photoUri }} style={{ width: '100%', height: 160, borderRadius: 12 }} />
-              <Btn small variant="outline" title="Hapus Foto" onPress={() => setPhotoUri(null)} />
-            </View>
-          ) : (
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-              <Btn small variant="outline" title="Pilih dari Galeri" onPress={pickPhoto} />
-              <Btn small variant="outline" title="Ambil Foto" onPress={takePhoto} />
-            </View>
-          )}
+          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
         </Card>
       </ScrollView>
 

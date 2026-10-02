@@ -19,7 +19,13 @@ import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
 import { getRange } from '../utils/period';
 import { fmtDurShort, fmtKm } from '../utils/format';
-import { LocationPermissionDeniedError, requestCurrentCoords } from '../utils/location';
+import {
+  Coords,
+  LocationPermissionDeniedError,
+  MOCK_LOCATION_MESSAGE,
+  MOCK_LOCATION_TITLE,
+  requestCurrentCoords,
+} from '../utils/location';
 
 /** Clock in/out entry point for field roles (NC/TL/ARCO) — geofence check happens
  * against the NC's assigned team city center for now; a per-team geofence pin
@@ -46,7 +52,7 @@ function ClockCard() {
   const doClockIn = async () => {
     setBusy(true);
     try {
-      let pos: { lat: number; lng: number };
+      let pos: Coords;
       try {
         pos = await requestCurrentCoords();
       } catch (e) {
@@ -57,9 +63,13 @@ function ClockCard() {
         }
         return;
       }
-      // Team home-base geofence pin isn't modeled yet in Phase 1 — clock-in is
-      // always accepted, flagged geoFenceOk=true, pending that data (see README).
-      const queued = await clockIn(pos, true);
+      if (pos.mocked) {
+        showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
+        return;
+      }
+      // Outside the team's home-base radius is allowed but flagged (geo_fence_ok,
+      // computed by the server — migration 0014).
+      const queued = await clockIn(pos);
       if (!queued) showDialog('Clock In berhasil');
     } catch (e) {
       // Connectivity problems never land here (they go to the offline queue) —

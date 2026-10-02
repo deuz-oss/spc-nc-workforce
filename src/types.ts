@@ -35,6 +35,11 @@ export interface Team {
   city: string;
   tlId: string | null;
   arcoId: string | null;
+  /** Clock-in geofence home base (migration 0014). Without a pin, the team's
+   * clock-ins can't be checked and count as inside the fence. */
+  baseLat: number | null;
+  baseLng: number | null;
+  baseRadiusM: number;
 }
 
 // PRD §15: channel definitions (DMS/LMT/MTI) are still pending client
@@ -85,7 +90,10 @@ export interface Attendance {
   clockOutLat?: number;
   clockOutLng?: number;
   route: RoutePoint[];
+  /** Recomputed by the server from the team's home-base pin (0014). */
   geoFenceOk: boolean;
+  /** The phone reported the clock-in position as mocked (fake-GPS app). */
+  locationMocked?: boolean;
   /**
    * MWH (Market Working Hours) definition is still open per PRD §7/§15 — if it
    * ends up needing excluded non-market blocks, this is where they'll be
@@ -104,8 +112,11 @@ export interface Visit {
   checkOutAt: number | null;
   lat: number;
   lng: number;
+  /** Both recomputed by the server from the store pin (0014) — never trusted from the client. */
   storeDistanceM: number | null;
   geoValid: boolean;
+  /** The phone reported the check-in position as mocked (fake-GPS app). */
+  locationMocked?: boolean;
 }
 
 // --- 7 report modules (PRD §5) — Phase 1 defines the shape; screens are stubs ---
@@ -119,6 +130,9 @@ export interface StockTakingRow {
   outOfStock: boolean;
   photoUrl?: string;
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 export interface ShareOfShelfRow {
@@ -131,6 +145,9 @@ export interface ShareOfShelfRow {
   totalFacingCount: number;
   photoUrl: string; // required per PRD §5.2
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 export interface OfftakeRow {
@@ -142,6 +159,9 @@ export interface OfftakeRow {
   revenue?: number;
   isOutlier: boolean; // >3x trailing 7-day avg — PRD §5.3
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 export type VisibilityType = string; // config list — shelf talker, endcap, banner, ...
@@ -154,6 +174,9 @@ export interface PaidVisibilityRow {
   complianceChecklist: Record<string, boolean>;
   photoUrl: string; // required per PRD §5.5
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 export interface PriceMonitoringRow {
@@ -165,6 +188,9 @@ export interface PriceMonitoringRow {
   competitorPrices: number[]; // up to 3
   photoUrl?: string;
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 export interface Survey {
@@ -241,6 +267,9 @@ export interface NtgGwp {
    * offtake" anomaly detection (PRD §5.4) is actually computable. */
   offtakeId?: string;
   createdAt: number;
+  /** When the server received it (server clock, 0014) — a long gap after
+   * createdAt means it was synced late (offline, or the phone's clock). */
+  receivedAt?: number;
 }
 
 // --- Scorecards / targets (PRD §9) ---

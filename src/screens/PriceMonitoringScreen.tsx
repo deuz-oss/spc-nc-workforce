@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { C, F } from '../theme';
 import { fmtIDR } from '../utils/format';
 import { reportedSkus, ShownError, useStore } from '../store/useStore';
@@ -71,20 +71,7 @@ export default function PriceMonitoringScreen() {
   const updateRow = (key: string, patch: Partial<DraftRow>) => setRows((r) => r.map((x) => (x.key === key ? { ...x, ...patch } : x)));
   const removeRow = (key: string) => setRows((r) => r.filter((x) => x.key !== key));
 
-  const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
-  const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      showDialog('Izin kamera diperlukan');
-      return;
-    }
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
   const validRows = rows.filter((r) => r.ownPrice.trim() !== '' && Number(r.ownPrice) >= 0);
   const canSubmit = validRows.length > 0 && !busy;
@@ -238,17 +225,7 @@ export default function PriceMonitoringScreen() {
 
         <Card>
           <H>Foto (opsional)</H>
-          {photoUri ? (
-            <View style={{ marginTop: 10, gap: 8 }}>
-              <Image source={{ uri: photoUri }} style={{ width: '100%', height: 160, borderRadius: 12 }} />
-              <Btn small variant="outline" title="Hapus Foto" onPress={() => setPhotoUri(null)} />
-            </View>
-          ) : (
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-              <Btn small variant="outline" title="Pilih dari Galeri" onPress={pickPhoto} />
-              <Btn small variant="outline" title="Ambil Foto" onPress={takePhoto} />
-            </View>
-          )}
+          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
         </Card>
       </ScrollView>
 

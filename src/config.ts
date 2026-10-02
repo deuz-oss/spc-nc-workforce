@@ -5,6 +5,10 @@ export const APP_NAME = 'SPC NC Workforce';
 /** Jarak maksimum titik check-in ke pin toko agar kunjungan dianggap valid — PRD §5 (default 300 m, configurable). */
 export const VISIT_VALID_RADIUS_M = 300;
 
+/** Radius default geofence clock-in di sekitar titik basis tim (m) — sama dengan default
+ * kolom teams.base_radius_m (migration 0014); bisa diubah per tim di Kelola Tim. */
+export const DEFAULT_TEAM_BASE_RADIUS_M = 10000;
+
 /** Riwayat data lapangan (kunjungan, absensi, laporan, pesan) yang dimuat saat login.
  * 62 hari = bulan berjalan + bulan sebelumnya pada tanggal berapa pun — cukup untuk
  * semua dashboard/KPI periode harian/mingguan/bulanan. Riwayat lebih lama dimuat
@@ -137,6 +141,17 @@ export const CHILD_AGE_BRACKETS: ChildAgeBracketOption[] = [
   { key: '2-3tahun', label: '2-3 tahun', under1: false },
   { key: '3tahun+', label: '3+ tahun', under1: false },
 ];
+
+/** Under-1 rule (PRD §6, PP 33/2012): such a consumer never advances past
+ * "approached" — no NTG, no GWP, no follow-up. Mirrored server-side by
+ * is_under1_bracket / ntg_gwp_under1_check (migration 0014). */
+export function isUnder1Bracket(key: string | null | undefined): boolean {
+  return CHILD_AGE_BRACKETS.some((b) => b.key === key && b.under1);
+}
+
+export const UNDER1_TITLE = 'Anak di Bawah 1 Tahun';
+export const UNDER1_MESSAGE =
+  'Untuk anak di bawah 1 tahun hanya boleh edukasi ASI/MPASI — tahap NTG & GWP tidak boleh dimajukan dan tidak ada follow-up produk.';
 
 // --- Phase 4a (PRD §16): TL/ARCO validation console + PM/Reckitt dashboards ---
 

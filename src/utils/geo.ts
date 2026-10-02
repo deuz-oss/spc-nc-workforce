@@ -17,6 +17,21 @@ export function haversineM(
   return 2 * R * Math.asin(Math.sqrt(s));
 }
 
+/**
+ * Clock-in geofence — mirrors attendances_server_checks (migration 0014), which
+ * has the final say: a mocked position is never inside; a team without a
+ * home-base pin can't be checked and counts as inside.
+ */
+export function clockInGeoFenceOk(
+  base: { baseLat: number | null; baseLng: number | null; baseRadiusM: number } | null | undefined,
+  pos: { lat: number; lng: number },
+  mocked: boolean,
+): boolean {
+  if (mocked) return false;
+  if (!base || base.baseLat == null || base.baseLng == null) return true;
+  return haversineM({ lat: base.baseLat, lng: base.baseLng }, pos) <= base.baseRadiusM;
+}
+
 /** Panjang total polyline rute dalam km */
 export function polylineKm(pts: RoutePoint[]): number {
   let m = 0;

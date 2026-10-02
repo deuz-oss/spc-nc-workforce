@@ -83,6 +83,7 @@ const created = {
   attendances: [] as string[],
   visits: [] as string[],
   stockTaking: [] as string[],
+  ntgGwp: [] as string[],
   consumers: [] as string[],
   conversations: [] as string[],
   targets: [] as string[],
@@ -102,6 +103,7 @@ async function cleanup() {
   }
   await del('conversations', created.conversations); // messages cascade
   await del('stock_taking', created.stockTaking);
+  await del('ntg_gwp', created.ntgGwp);
   await del('visits', created.visits);
   await del('attendances', created.attendances); // route_points cascade
   await del('consumers', created.consumers);
@@ -289,6 +291,54 @@ async function main() {
     expect((await anon.rpc('live_positions')).error, 'anon key can call live_positions');
   });
 
+  await check('server recomputes geo-validity and bounds field timestamps (0014)', async () => {
+    const { data: st } = await admin.from('stores').select('lat, lng').eq('id', 'st_demo1').single();
+    if (st?.lat == null || st?.lng == null) throw new Skip('st_demo1 has no GPS pin');
+    const farId = `${RUN}_v_far`;
+    expectOk(
+      await nc.client.from('visits').insert({
+        id: farId, store_id: 'st_demo1', nc_id: nc.id, check_in_at: new Date(checkIn.getTime() + 2 * 60000).toISOString(),
+        lat: st.lat + 0.05, lng: st.lng, store_distance_m: 5, geo_valid: true,
+      }),
+      'far visit insert',
+    );
+    created.visits.push(farId);
+    const { data: fv } = await admin.from('visits').select('geo_valid, store_distance_m').eq('id', farId).single();
+    expect(fv?.geo_valid === false && Number(fv.store_distance_m) > 5000, `client-claimed geo_valid was kept (${JSON.stringify(fv)}) — run migration 0014`);
+
+    const early = await nc.client.from('visits').insert({
+      id: `${RUN}_v_early`, store_id: 'st_demo1', nc_id: nc.id, check_in_at: new Date(checkIn.getTime() - 30 * 60000).toISOString(),
+      lat: st.lat, lng: st.lng, store_distance_m: 0, geo_valid: true,
+    });
+    if (!early.error) created.visits.push(`${RUN}_v_early`);
+    expect(early.error, 'store check-in outside any attendance session was accepted');
+
+    const old = await nc.client.from('attendances').insert({
+      id: `${RUN}_a_old`, user_id: nc.id, clock_in_at: new Date(Date.now() - 30 * 86400000).toISOString(),
+      clock_in_lat: -6.2, clock_in_lng: 106.8, geo_fence_ok: true,
+    });
+    if (!old.error) created.attendances.push(`${RUN}_a_old`);
+    expect(old.error, 'clock-in 30 days in the past was accepted');
+
+    const before = await nc.client.from('stock_taking').insert({
+      id: `${RUN}_stk_early`, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE_EARLY', qty_on_hand: 1,
+      created_at: new Date(checkIn.getTime() - 10 * 60000).toISOString(),
+    });
+    if (!before.error) created.stockTaking.push(`${RUN}_stk_early`);
+    expect(before.error, 'report timestamped before its visit was accepted');
+
+    const rcvId = `${RUN}_stk_rcv`;
+    expectOk(
+      await nc.client.from('stock_taking').insert({
+        id: rcvId, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE_RCV', qty_on_hand: 1, received_at: '2020-01-01T00:00:00Z',
+      }),
+      'report insert',
+    );
+    created.stockTaking.push(rcvId);
+    const { data: rcv } = await admin.from('stock_taking').select('received_at').eq('id', rcvId).single();
+    expect(rcv && Date.now() - new Date(rcv.received_at).getTime() < 5 * 60000, `received_at is client-settable (${rcv?.received_at})`);
+  });
+
   await check('a second report for the same visit + SKU is rejected; replaying the same row is a no-op', async () => {
     const id = `${RUN}_stk_dup`;
     const dup = await nc.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo1', sku: 'smoke', qty_on_hand: 9 });
@@ -391,6 +441,35 @@ async function main() {
     created.consumers.push(consumerId);
     const { data } = await nc.client.from('consumers').select('id').eq('id', consumerId);
     expect(data?.length === 1, 'creator cannot see their own new consumer');
+  });
+
+  await check('under-1 consumer cannot advance the NTG funnel; unknown age bracket refused (0014)', async () => {
+    const babyId = `${RUN}_cons_baby`;
+    expectOk(
+      await nc.client.from('consumers').insert({
+        id: babyId, name: 'Smoke Under-1', wa_contact: '080000000001', consent: true, child_age_bracket: '0-6bulan', created_by_nc_id: nc.id,
+      }),
+      'under-1 consumer insert',
+    );
+    created.consumers.push(babyId);
+    const inVisit = new Date(checkIn.getTime() + 5 * 60000).toISOString(); // inside the (closed) smoke visit
+    const okId = `${RUN}_ntg_ok`;
+    expectOk(
+      await nc.client.from('ntg_gwp').insert({ id: okId, consumer_id: babyId, visit_id: visitId, stage: 'approached', created_at: inVisit }),
+      '"approached" step',
+    );
+    created.ntgGwp.push(okId);
+    const bad = await nc.client.from('ntg_gwp').insert({
+      id: `${RUN}_ntg_bad`, consumer_id: babyId, visit_id: visitId, stage: 'ntg_confirmed', created_at: inVisit,
+    });
+    if (!bad.error) created.ntgGwp.push(`${RUN}_ntg_bad`);
+    expect(bad.error && /1 tahun/.test(bad.error.message), `under-1 consumer advanced to ntg_confirmed (${bad.error?.message ?? 'accepted'})`);
+
+    const free = await nc.client.from('consumers').insert({
+      id: `${RUN}_cons_free`, name: 'Smoke Free Text', wa_contact: '080000000002', consent: true, child_age_bracket: '8 bulan', created_by_nc_id: nc.id,
+    });
+    if (!free.error) created.consumers.push(`${RUN}_cons_free`);
+    expect(free.error, 'free-text age bracket accepted');
   });
 
   const seesConsumer = async (c: SupabaseClient) => ((await c.from('consumers').select('id').eq('id', consumerId)).data?.length ?? 0) === 1;

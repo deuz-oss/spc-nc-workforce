@@ -3,10 +3,17 @@ import { FlatList, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Badge, Btn, Card, Chip, Empty, Field, Input, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { ROLE_LABEL } from '../config';
+import { DEFAULT_TEAM_BASE_RADIUS_M, ROLE_LABEL } from '../config';
 import { C, F } from '../theme';
 import { MIN_PASSWORD, useStore } from '../store/useStore';
 import { Role, Team, User } from '../types';
+import { parseLatLng } from '../utils/geo';
+import {
+  LocationPermissionDeniedError,
+  MOCK_LOCATION_MESSAGE,
+  MOCK_LOCATION_TITLE,
+  requestCurrentCoords,
+} from '../utils/location';
 
 const ROLE_OPTIONS: Role[] = [
   'nc', 'tl', 'arco', 'pm', 'lead_trainer', 'trainer', 'data_analyst', 'admin_data_entry', 'reckitt_client', 'super_admin',
@@ -133,17 +140,46 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
   const [city, setCity] = useState(team?.city ?? '');
   const [tlId, setTlId] = useState<string | null>(team?.tlId ?? null);
   const [arcoId, setArcoId] = useState<string | null>(team?.arcoId ?? null);
+  const [baseLat, setBaseLat] = useState(team?.baseLat != null ? String(team.baseLat) : '');
+  const [baseLng, setBaseLng] = useState(team?.baseLng != null ? String(team.baseLng) : '');
+  const [radiusKm, setRadiusKm] = useState(String((team?.baseRadiusM ?? DEFAULT_TEAM_BASE_RADIUS_M) / 1000));
+  const [locating, setLocating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const pin = parseLatLng(baseLat, baseLng);
+  const radiusM = Math.round(Number(radiusKm.replace(',', '.')) * 1000);
+
+  const useMyLocation = async () => {
+    setLocating(true);
+    try {
+      const c = await requestCurrentCoords();
+      if (c.mocked) {
+        showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
+        return;
+      }
+      setBaseLat(c.lat.toFixed(6));
+      setBaseLng(c.lng.toFixed(6));
+    } catch (e) {
+      const denied = e instanceof LocationPermissionDeniedError;
+      showDialog(denied ? 'Izin lokasi diperlukan' : 'Gagal', denied ? 'Aktifkan izin lokasi.' : 'Tidak dapat mengambil lokasi. Coba lagi.');
+    } finally {
+      setLocating(false);
+    }
+  };
   const tls = users.filter((u) => u.role === 'tl' && u.active);
   const arcos = users.filter((u) => u.role === 'arco' && u.active);
 
   const save = async () => {
+    if (pin === 'invalid') {
+      return showDialog('Koordinat tidak valid', 'Isi latitude dan longitude keduanya (mis. -6.208763 dan 106.845599), atau kosongkan keduanya.');
+    }
+    if (!(radiusM > 0)) return showDialog('Radius tidak valid', 'Isi radius geofence dalam km, lebih dari 0.');
+    const input = { name, city, tlId, arcoId, baseLat: pin?.lat ?? null, baseLng: pin?.lng ?? null, baseRadiusM: radiusM };
     setBusy(true);
     try {
       if (team) {
-        if (await updateTeam(team.id, { name, city, tlId, arcoId })) return; // error already shown
+        if (await updateTeam(team.id, input)) return; // error already shown
       } else {
-        await addTeam({ name, city, tlId, arcoId });
+        await addTeam(input);
       }
       onDone();
     } finally {
@@ -169,6 +205,26 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
         </View>
       </Field>
       <Muted>TL yang dipilih otomatis dipindah ke tim ini; TL sebelumnya dilepas dari tim ini.</Muted>
+      <Field label="Titik Basis Tim (geofence clock-in)">
+        <View style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={{ flex: 1 }}>
+            <Input value={baseLat} onChangeText={setBaseLat} placeholder="Latitude" keyboardType="numbers-and-punctuation" />
+          </View>
+          <View style={{ flex: 1 }}>
+            <Input value={baseLng} onChangeText={setBaseLng} placeholder="Longitude" keyboardType="numbers-and-punctuation" />
+          </View>
+        </View>
+      </Field>
+      <View style={{ alignSelf: 'flex-start' }}>
+        <Btn small variant="outline" title="Pakai Lokasi Saya Sekarang" onPress={useMyLocation} loading={locating} disabled={locating} />
+      </View>
+      <Field label="Radius Geofence (km)">
+        <Input value={radiusKm} onChangeText={setRadiusKm} keyboardType="decimal-pad" />
+      </Field>
+      <Muted>
+        Clock-in di luar radius ini tetap diterima tetapi ditandai "Pengecualian". Tanpa titik basis, clock-in tim ini
+        tidak dicek geofence.
+      </Muted>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Btn title="Simpan Tim" disabled={!city.trim() || busy} loading={busy} onPress={save} />
         <Btn variant="outline" title="Batal" onPress={onDone} />

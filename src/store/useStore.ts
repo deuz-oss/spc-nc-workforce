@@ -6,7 +6,14 @@ import Constants from 'expo-constants';
 import { isAuthRetryableFetchError, type RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
-import { HISTORY_DAYS, TRACK_MIN_STEP_M } from '../config';
+import {
+  DEFAULT_TEAM_BASE_RADIUS_M,
+  HISTORY_DAYS,
+  isUnder1Bracket,
+  TRACK_MIN_STEP_M,
+  UNDER1_MESSAGE,
+  UNDER1_TITLE,
+} from '../config';
 import {
   Attendance,
   Certification,
@@ -38,7 +45,7 @@ import {
   User,
   Visit,
 } from '../types';
-import { haversineM } from '../utils/geo';
+import { clockInGeoFenceOk, haversineM } from '../utils/geo';
 import { loadQueue, saveQueue, QueuedOp } from '../utils/offlineQueue';
 import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, uploadReportMedia } from '../utils/storage';
 import { fmtDate } from '../utils/format';
@@ -89,6 +96,17 @@ export interface NewStoreInput {
   category: Store['category'];
   lat: number | null;
   lng: number | null;
+}
+
+/** Editable team fields; the home-base pin drives the clock-in geofence (0014). */
+export interface TeamInput {
+  name: string;
+  city: string;
+  tlId: string | null;
+  arcoId: string | null;
+  baseLat: number | null;
+  baseLng: number | null;
+  baseRadiusM: number;
 }
 
 interface StoreState {
@@ -176,9 +194,9 @@ interface StoreState {
   setUserPassword(id: string, password: string): Promise<string | null>;
   /** Any signed-in user: change their own password after re-verifying the current one. */
   changeOwnPassword(current: string, next: string): Promise<string | null>;
-  addTeam(p: { name: string; city: string; tlId: string | null; arcoId: string | null }): Promise<void>;
+  addTeam(p: TeamInput): Promise<void>;
   /** super_admin: edit a team; keeps the TL's profile.team_id in sync (see syncTeamLeader). */
-  updateTeam(id: string, p: { name: string; city: string; tlId: string | null; arcoId: string | null }): Promise<string | null>;
+  updateTeam(id: string, p: TeamInput): Promise<string | null>;
 
   upsertStore(s: Store): Promise<void>;
   /** CSV import path — batched inserts, awaited, with a real per-chunk result
@@ -186,10 +204,12 @@ interface StoreState {
   addStoresBulk(stores: Store[]): Promise<{ created: number; errors: string[] }>;
   assignStores(ids: string[], ncId: string | null): Promise<void>;
 
+  /** `distM`/`geoValid` are the phone's own view (shown until the server's
+   * recomputed values arrive — visits_server_checks, 0014). */
   startVisit(
     storeId: string,
     ncId: string,
-    pos: { lat: number; lng: number },
+    pos: { lat: number; lng: number; mocked?: boolean },
     distM: number | null,
     geoValid: boolean,
   ): Promise<string>;
@@ -304,7 +324,7 @@ interface StoreState {
   fetchRoute(attendanceId: string): Promise<RoutePoint[]>;
 
   /** Resolves true if it was saved offline only (the user has already been told). */
-  clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<boolean>;
+  clockIn(pos: { lat: number; lng: number; mocked?: boolean }): Promise<boolean>;
   /** Resolves true if it was saved offline only (the user has already been told). */
   clockOut(pos: { lat: number; lng: number }): Promise<boolean>;
 }
@@ -346,6 +366,14 @@ export function consumerScope(s: Pick<StoreState, 'consumers' | 'users' | 'teams
   return s.consumers; // monitor roles: program-wide
 }
 
+/** A business rule raised by a server trigger (P0001, e.g. the 0014 checks)
+ * carries a message meant for the user; anything else gets the caller's text. */
+function serverRuleMessage(error: { code?: string; message: string }): string | null {
+  return error.code?.startsWith('P0') ? error.message : null;
+}
+
+const optTime = (v: string | null | undefined) => (v ? new Date(v).getTime() : undefined);
+
 function upsertById<T extends { id: string | number }>(list: T[], row: T): T[] {
   const i = list.findIndex((x) => x.id === row.id);
   return i === -1 ? [row, ...list] : list.map((x, idx) => (idx === i ? row : x));
@@ -374,6 +402,9 @@ function mapTeam(t: any): Team {
     city: t.city,
     tlId: t.tl_id,
     arcoId: t.arco_id,
+    baseLat: t.base_lat ?? null,
+    baseLng: t.base_lng ?? null,
+    baseRadiusM: t.base_radius_m ?? DEFAULT_TEAM_BASE_RADIUS_M,
   };
 }
 
@@ -406,6 +437,7 @@ function mapVisit(v: any): Visit {
     lng: v.lng,
     storeDistanceM: v.store_distance_m,
     geoValid: v.geo_valid,
+    locationMocked: v.location_mocked ?? false,
   };
 }
 
@@ -421,6 +453,7 @@ function mapAttendance(a: any, route: RoutePoint[]): Attendance {
     clockOutLng: a.clock_out_lng ?? undefined,
     route,
     geoFenceOk: a.geo_fence_ok,
+    locationMocked: a.location_mocked ?? false,
     nonMarketMs: a.non_market_ms ?? undefined,
   };
 }
@@ -446,6 +479,7 @@ function mapStockTaking(r: any): StockTakingRow {
     outOfStock: r.out_of_stock,
     photoUrl: r.photo_url ?? undefined,
     createdAt: new Date(r.created_at).getTime(),
+    receivedAt: optTime(r.received_at),
   };
 }
 
@@ -459,6 +493,7 @@ function mapOfftake(r: any): OfftakeRow {
     revenue: r.revenue ?? undefined,
     isOutlier: r.is_outlier,
     createdAt: new Date(r.created_at).getTime(),
+    receivedAt: optTime(r.received_at),
   };
 }
 
@@ -486,6 +521,7 @@ function mapNtgGwp(g: any): NtgGwp {
     gwpQty: g.gwp_qty ?? undefined,
     offtakeId: g.offtake_id ?? undefined,
     createdAt: new Date(g.created_at).getTime(),
+    receivedAt: optTime(g.received_at),
   };
 }
 
@@ -500,6 +536,7 @@ function mapShareOfShelf(r: any): ShareOfShelfRow {
     totalFacingCount: r.total_facing_count,
     photoUrl: r.photo_url,
     createdAt: new Date(r.created_at).getTime(),
+    receivedAt: optTime(r.received_at),
   };
 }
 
@@ -512,6 +549,7 @@ function mapPaidVisibility(r: any): PaidVisibilityRow {
     complianceChecklist: r.compliance_checklist ?? {},
     photoUrl: r.photo_url,
     createdAt: new Date(r.created_at).getTime(),
+    receivedAt: optTime(r.received_at),
   };
 }
 
@@ -525,6 +563,7 @@ function mapPriceMonitoring(r: any): PriceMonitoringRow {
     competitorPrices: r.competitor_prices ?? [],
     photoUrl: r.photo_url ?? undefined,
     createdAt: new Date(r.created_at).getTime(),
+    receivedAt: optTime(r.received_at),
   };
 }
 
@@ -730,12 +769,26 @@ function storeRow(m: Store) {
   };
 }
 
+function teamRow(t: Team) {
+  return {
+    name: t.name,
+    city: t.city,
+    tl_id: t.tlId,
+    arco_id: t.arcoId,
+    base_lat: t.baseLat,
+    base_lng: t.baseLng,
+    base_radius_m: t.baseRadiusM,
+  };
+}
+
 function visitRow(v: Visit) {
   return {
     lat: v.lat,
     lng: v.lng,
+    // Recomputed server-side (visits_server_checks, 0014) — sent only for older backends.
     store_distance_m: v.storeDistanceM,
     geo_valid: v.geoValid,
+    location_mocked: v.locationMocked ?? false,
   };
 }
 
@@ -828,7 +881,8 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       clock_in_lat: a.clockInLat,
       clock_in_lng: a.clockInLng,
       clock_out_at: null,
-      geo_fence_ok: a.geoFenceOk,
+      geo_fence_ok: a.geoFenceOk, // recomputed server-side (attendances_server_checks, 0014)
+      location_mocked: a.locationMocked ?? false,
     });
     if (!error) {
       // The clock-in position is the route's first point — the online path
@@ -1207,6 +1261,13 @@ async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVis
 /** SKUs (lower-cased) already reported in this visit for a per-SKU module. */
 export function reportedSkus(rows: Array<{ visitId: string; sku: string }>, visitId: string): Set<string> {
   return new Set(rows.filter((r) => r.visitId === visitId).map((r) => r.sku.toLowerCase()));
+}
+
+/** Reports belong inside their visit — the server refuses one made after
+ * check-out (report_server_checks, 0014), so say so before trying. */
+function assertVisitOpen(get: () => StoreState, visitId: string) {
+  const v = get().visits.find((x) => x.id === visitId);
+  if (v?.checkOutAt) throw new Error('Kunjungan ini sudah check-out — laporan tidak bisa ditambahkan lagi.');
 }
 
 /** One report per visit per SKU (category / visibility type for SoS / PV) —
@@ -2222,16 +2283,10 @@ export const useStore = create<StoreState>()((set, get) => ({
     return null;
   },
 
-  addTeam: async ({ name, city, tlId, arcoId }) => {
-    const t: Team = { id: uid('t_'), name: name.trim() || city.trim(), city: city.trim(), tlId, arcoId };
+  addTeam: async (p) => {
+    const t: Team = { id: uid('t_'), ...p, name: p.name.trim() || p.city.trim(), city: p.city.trim() };
     set({ teams: [...get().teams, t] });
-    const { error } = await supabase.from('teams').insert({
-      id: t.id,
-      name: t.name,
-      city: t.city,
-      tl_id: t.tlId,
-      arco_id: t.arcoId,
-    });
+    const { error } = await supabase.from('teams').insert({ id: t.id, ...teamRow(t) });
     if (error) {
       set({ teams: get().teams.filter((x) => x.id !== t.id) });
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan tim baru. Periksa koneksi internet dan coba lagi.');
@@ -2240,14 +2295,12 @@ export const useStore = create<StoreState>()((set, get) => ({
     await syncTeamLeader(set, get, t.id, t.tlId, null);
   },
 
-  updateTeam: async (id, { name, city, tlId, arcoId }) => {
+  updateTeam: async (id, p) => {
     const before = get().teams.find((t) => t.id === id);
     if (!before) return 'Tim tidak ditemukan.';
-    const next: Team = { ...before, name: name.trim() || city.trim(), city: city.trim(), tlId, arcoId };
-    const { error } = await supabase
-      .from('teams')
-      .update({ name: next.name, city: next.city, tl_id: next.tlId, arco_id: next.arcoId })
-      .eq('id', id);
+    const tlId = p.tlId;
+    const next: Team = { ...before, ...p, name: p.name.trim() || p.city.trim(), city: p.city.trim() };
+    const { error } = await supabase.from('teams').update(teamRow(next)).eq('id', id);
     if (error) {
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan perubahan tim. Periksa koneksi internet dan coba lagi.');
       return error.message;
@@ -2328,7 +2381,8 @@ export const useStore = create<StoreState>()((set, get) => ({
       lat: pos.lat,
       lng: pos.lng,
       storeDistanceM: distM,
-      geoValid,
+      geoValid: geoValid && !pos.mocked,
+      locationMocked: !!pos.mocked,
     };
     set({ visits: [v, ...get().visits] });
     await runOrQueue(set, get, { id: uid('op_'), type: 'startVisit', visit: v }, 'Check-in toko', () =>
@@ -2420,6 +2474,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       .map((r) => ({ sku: r.sku.trim(), qtyOnHand: r.qtyOnHand, outOfStock: r.outOfStock }))
       .filter((r) => r.sku && r.qtyOnHand >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan jumlah valid (>= 0).');
+    assertVisitOpen(get, visitId);
     assertNewSkus(get().stockTakingRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
@@ -2449,6 +2504,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       .map((r) => ({ sku: r.sku.trim(), unitsSold: r.unitsSold, revenue: r.revenue }))
       .filter((r) => r.sku && r.unitsSold >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan unit terjual valid (>= 0).');
+    assertVisitOpen(get, visitId);
     assertNewSkus(get().offtakeRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
@@ -2504,7 +2560,7 @@ export const useStore = create<StoreState>()((set, get) => ({
           ? get().consumers.map((x) => (x.id === c.id ? before : x))
           : get().consumers.filter((x) => x.id !== c.id),
       });
-      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data konsumen ke server. Periksa koneksi internet dan coba lagi.');
+      showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data konsumen ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;
@@ -2514,6 +2570,12 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (visitPendingSync(get, n.visitId)) {
       showVisitPendingDialog();
       return 'visit not synced yet';
+    }
+    // PRD §6 / PP 33/2012 — also enforced by ntg_gwp_under1_check (0014).
+    const consumer = get().consumers.find((c) => c.id === n.consumerId);
+    if (n.stage !== 'approached' && consumer && isUnder1Bracket(consumer.childAgeBracket)) {
+      showDialog(UNDER1_TITLE, UNDER1_MESSAGE);
+      return 'under-1 consumer';
     }
     set({ ntgGwps: [n, ...get().ntgGwps] });
     // Funnel history is append-only (ntg_gwp_insert policy, 0008 migration).
@@ -2529,7 +2591,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     });
     if (error) {
       set({ ntgGwps: get().ntgGwps.filter((x) => x.id !== n.id) });
-      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
+      showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;
@@ -2547,6 +2609,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (input.ownFacingCount > input.totalFacingCount) {
       throw new Error('Own facing tidak boleh melebihi total facing.');
     }
+    assertVisitOpen(get, visitId);
     if (get().shareOfShelfRows.some((r) => r.visitId === visitId && r.category === input.category)) {
       throw new Error(`Share of Shelf kategori ${input.category} sudah dilaporkan di kunjungan ini.`);
     }
@@ -2573,6 +2636,7 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   submitPaidVisibility: async (visitId, storeId, input, photoUri) => {
     if (!input.visibilityType) throw new Error('Pilih jenis visibility.');
+    assertVisitOpen(get, visitId);
     if (get().paidVisibilityRows.some((r) => r.visitId === visitId && r.visibilityType === input.visibilityType)) {
       throw new Error('Paid Visibility jenis ini sudah dilaporkan di kunjungan ini.');
     }
@@ -2606,6 +2670,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       }))
       .filter((r) => r.sku && r.ownPrice >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan harga sendiri yang valid (>= 0).');
+    assertVisitOpen(get, visitId);
     assertNewSkus(get().priceMonitoringRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
@@ -3020,9 +3085,11 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) console.warn('markMessagesRead failed (non-fatal):', error.message);
   },
 
-  clockIn: async (pos, geoFenceOk) => {
+  clockIn: async (pos) => {
     const userId = get().sessionUserId!;
     const t = Date.now();
+    const me = get().users.find((u) => u.id === userId);
+    const team = get().teams.find((x) => x.id === me?.teamId);
     const a: Attendance = {
       id: uid('a_'),
       userId,
@@ -3030,8 +3097,10 @@ export const useStore = create<StoreState>()((set, get) => ({
       clockInLat: pos.lat,
       clockInLng: pos.lng,
       clockOutAt: null,
-      route: [{ ...pos, t }],
-      geoFenceOk,
+      route: [{ lat: pos.lat, lng: pos.lng, t }],
+      // Shown until the server's own computation (same rule, 0014) comes back.
+      geoFenceOk: clockInGeoFenceOk(team, pos, !!pos.mocked),
+      locationMocked: !!pos.mocked,
     };
     set({ attendances: [a, ...get().attendances] });
     // A rejected insert means the user isn't clocked in server-side, so the

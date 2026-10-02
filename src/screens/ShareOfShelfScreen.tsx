@@ -1,9 +1,9 @@
 import React, { useMemo, useState } from 'react';
-import { Image, ScrollView, View } from 'react-native';
+import { ScrollView, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
-import * as ImagePicker from 'expo-image-picker';
 import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { CATEGORY_LABEL } from '../config';
 import { C } from '../theme';
 import { ShownError, useStore } from '../store/useStore';
@@ -47,20 +47,7 @@ export default function ShareOfShelfScreen() {
   const facingInvalid =
     ownFacing.trim() !== '' && totalFacing.trim() !== '' && Number(ownFacing) > Number(totalFacing);
 
-  const pickPhoto = async () => {
-    const res = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
-  const takePhoto = async () => {
-    const perm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!perm.granted) {
-      showDialog('Izin kamera diperlukan');
-      return;
-    }
-    const res = await ImagePicker.launchCameraAsync({ quality: 0.4 });
-    if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
-  };
 
   const canSubmit =
     !busy &&
@@ -154,17 +141,7 @@ export default function ShareOfShelfScreen() {
         <Card>
           <H>Foto Rak (wajib)</H>
           <Muted style={{ marginTop: 2 }}>Bukti evidence — hitung manual tetap jadi sumber data utama (annotasi foto di luar scope v1).</Muted>
-          {photoUri ? (
-            <View style={{ marginTop: 10, gap: 8 }}>
-              <Image source={{ uri: photoUri }} style={{ width: '100%', height: 160, borderRadius: 12 }} />
-              <Btn small variant="outline" title="Hapus Foto" onPress={() => setPhotoUri(null)} />
-            </View>
-          ) : (
-            <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
-              <Btn small variant="outline" title="Pilih dari Galeri" onPress={pickPhoto} />
-              <Btn small variant="outline" title="Ambil Foto" onPress={takePhoto} />
-            </View>
-          )}
+          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
         </Card>
       </ScrollView>
 

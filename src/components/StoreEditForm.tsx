@@ -7,7 +7,12 @@ import { C } from '../theme';
 import { useStore } from '../store/useStore';
 import { Store, StoreCategory } from '../types';
 import { parseLatLng } from '../utils/geo';
-import { LocationPermissionDeniedError, requestCurrentCoords } from '../utils/location';
+import {
+  LocationPermissionDeniedError,
+  MOCK_LOCATION_MESSAGE,
+  MOCK_LOCATION_TITLE,
+  requestCurrentCoords,
+} from '../utils/location';
 
 /**
  * Edit a store's master data, including its GPS pin (PRD §5 geofence). A store
@@ -35,6 +40,10 @@ export function StoreEditForm({ store, onDone }: { store: Store; onDone: () => v
     setLocating(true);
     try {
       const c = await requestCurrentCoords();
+      if (c.mocked) {
+        showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
+        return;
+      }
       setLat(c.lat.toFixed(6));
       setLng(c.lng.toFixed(6));
     } catch (e) {

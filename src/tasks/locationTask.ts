@@ -16,9 +16,13 @@ import { flushRouteBuffer } from '../utils/routeSync';
 export const LOCATION_TASK_NAME = 'spc-nc-background-location';
 
 /** Shared by the native background task and the web foreground watcher. */
-export async function handleLocations(locations: Array<Pick<Location.LocationObject, 'coords' | 'timestamp'>>): Promise<void> {
+export async function handleLocations(
+  locations: Array<Pick<Location.LocationObject, 'coords' | 'timestamp' | 'mocked'>>,
+): Promise<void> {
+  // Positions from a mock-location app are not where the phone is — never record them.
+  const real = locations.filter((l) => !l.mocked);
   const userId = await recordLocations(
-    locations.map((l) => ({ lat: l.coords.latitude, lng: l.coords.longitude, t: Math.round(l.timestamp) })),
+    real.map((l) => ({ lat: l.coords.latitude, lng: l.coords.longitude, t: Math.round(l.timestamp) })),
     TRACK_MIN_STEP_M,
   );
   if (userId) await flushRouteBuffer(userId);

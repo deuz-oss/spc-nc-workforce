@@ -10,7 +10,12 @@ import { C } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
 import { haversineM } from '../utils/geo';
-import { LocationPermissionDeniedError, requestCurrentCoords } from '../utils/location';
+import {
+  LocationPermissionDeniedError,
+  MOCK_LOCATION_MESSAGE,
+  MOCK_LOCATION_TITLE,
+  requestCurrentCoords,
+} from '../utils/location';
 
 export default function StoreDetailScreen() {
   const route = useRoute<any>();
@@ -70,9 +75,9 @@ export default function StoreDetailScreen() {
       return;
     }
     setChecking(true);
-    let lat: number, lng: number;
+    let lat: number, lng: number, mocked: boolean;
     try {
-      ({ lat, lng } = await requestCurrentCoords());
+      ({ lat, lng, mocked } = await requestCurrentCoords());
     } catch (e) {
       setChecking(false);
       if (e instanceof LocationPermissionDeniedError) {
@@ -80,6 +85,11 @@ export default function StoreDetailScreen() {
       } else {
         showDialog('Gagal', 'Tidak dapat mengambil lokasi. Coba lagi.');
       }
+      return;
+    }
+    if (mocked) {
+      setChecking(false);
+      showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
       return;
     }
     let dist: number | null = null;

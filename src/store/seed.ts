@@ -1,4 +1,4 @@
-import { NUTRITION_QUIZ_CAMPAIGN_TAG, NUTRITION_QUIZ_SURVEY_ID } from '../config';
+import { DEFAULT_TEAM_BASE_RADIUS_M, NUTRITION_QUIZ_CAMPAIGN_TAG, NUTRITION_QUIZ_SURVEY_ID } from '../config';
 import { Role, Store, Team } from '../types';
 
 /**
@@ -37,7 +37,16 @@ export interface SeedResult {
 
 export function buildSeed(): SeedResult {
   const teams: Team[] = [
-    { id: 't_jaksel', name: 'Tim Jakarta Selatan', city: 'Jakarta Selatan', tlId: null, arcoId: null },
+    {
+      id: 't_jaksel',
+      name: 'Tim Jakarta Selatan',
+      city: 'Jakarta Selatan',
+      tlId: null,
+      arcoId: null,
+      baseLat: null,
+      baseLng: null,
+      baseRadiusM: DEFAULT_TEAM_BASE_RADIUS_M,
+    },
   ];
 
   const users: SeedUser[] = [
