@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Badge, Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { C, F } from '../theme';
-import { useCurrentUser, useStore } from '../store/useStore';
+import { ShownError, useCurrentUser, useStore } from '../store/useStore';
 
 /** One in-progress Stock Taking row (PRD §5.1) before submit — not yet a StockTakingRow. */
 interface DraftRow {
@@ -88,15 +88,17 @@ export default function StockTakingScreen() {
     }
     setBusy(true);
     try {
-      await submitStockTaking(
+      const { queued } = await submitStockTaking(
         visitId,
         storeId,
         validRows.map((r) => ({ sku: r.sku, qtyOnHand: Number(r.qty), outOfStock: r.outOfStock })),
         photoUri ?? undefined,
       );
-      showDialog('Stock Taking Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      // Saved offline: the store already told the user — just leave the form.
+      if (queued) navigation.goBack();
+      else showDialog('Stock Taking Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
-      showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Stock Taking. Coba lagi.');
+      if (!(e instanceof ShownError)) showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Stock Taking. Coba lagi.');
     } finally {
       setBusy(false);
     }

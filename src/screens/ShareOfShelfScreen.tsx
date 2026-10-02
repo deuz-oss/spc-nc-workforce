@@ -71,13 +71,14 @@ export default function ShareOfShelfScreen() {
     }
     setBusy(true);
     try {
-      await submitShareOfShelf(
+      const { queued } = await submitShareOfShelf(
         visitId,
         storeId,
         { channel: channel.trim(), category, ownFacingCount: Number(ownFacing), totalFacingCount: Number(totalFacing) },
         photoUri,
       );
-      showDialog('Share of Shelf Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      if (queued) navigation.goBack(); // saved offline — the store already told the user
+      else showDialog('Share of Shelf Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
       // store action already showed a dialog for offline/upload-failure cases
       if (!(e instanceof ShownError)) {

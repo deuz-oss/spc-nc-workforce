@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { drainQueue, ReplayResult, settle } from './replay';
+import { drainQueue, isNetworkError, queueReason, ReplayResult, settle } from './replay';
 import type { QueuedOp } from '../utils/offlineQueue';
 
 const op = (id: string): QueuedOp => ({ id, type: 'finishVisit', visitId: `v_${id}`, checkOutAt: 0 });
@@ -40,6 +40,30 @@ describe('settle', () => {
 
   it('treats network / unknown / PostgREST errors as retry', () => {
     for (const error of [{}, { code: '' }, { code: 'PGRST301' }, { code: '08006' }]) assert.equal(settle(error), 'retry');
+  });
+});
+
+describe('isNetworkError', () => {
+  it('is true only for errors without a server code', () => {
+    assert.equal(isNetworkError({ code: '' }), true);
+    assert.equal(isNetworkError({}), true);
+    assert.equal(isNetworkError(null), false);
+    for (const code of ['PGRST116', '42501', '23505']) assert.equal(isNetworkError({ code }), false, code);
+  });
+});
+
+describe('queueReason', () => {
+  it('sends directly only when online with nothing queued', () => {
+    assert.equal(queueReason(true, 0), null);
+  });
+
+  it('queues behind earlier ops even when online (keeps clock-in before clock-out)', () => {
+    assert.equal(queueReason(true, 2), 'backlog');
+  });
+
+  it('queues when offline', () => {
+    assert.equal(queueReason(false, 0), 'offline');
+    assert.equal(queueReason(false, 3), 'offline');
   });
 });
 

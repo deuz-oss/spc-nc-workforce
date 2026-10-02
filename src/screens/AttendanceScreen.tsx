@@ -33,8 +33,9 @@ function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
       const pos = (await getCurrentCoords()) ?? last;
       const queued = await clockOutStore(pos);
       if (!queued) showDialog('Clock Out berhasil');
-    } catch {
-      showDialog('Gagal Clock Out', 'Tidak dapat menyimpan clock-out ke server. Periksa koneksi internet dan coba lagi.');
+    } catch (e) {
+      // Connectivity problems are queued offline, never thrown — this is a server rejection.
+      showDialog('Gagal Clock Out', e instanceof Error ? e.message : 'Coba lagi.');
     } finally {
       setBusy(false);
     }

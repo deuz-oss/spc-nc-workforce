@@ -124,6 +124,14 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   ~66%, `android-icon-background.png` 1024², `android-icon-monochrome.png` 1024² single-colour silhouette,
   `notification-icon.png` 96² white-on-transparent, `favicon.png` 48².
 
+- ✅ **Opens without signal.** A cold start that can't reach the server no longer signs the user out: the app
+  opens from an on-device snapshot (`src/utils/offlineCache.ts` — reference data plus the user's own last 2 days
+  of field activity, saved as it changes) with a "Mode offline" strip, and completes the session by itself once
+  the server is reachable. Network errors never count as "account deactivated". Every queueable write
+  (clock, store check-in/out, the report modules) takes one path, `runOrQueue` in `useStore.ts`: it is sent now
+  only when the device actually reaches the internet (`isInternetReachable`, not just "connected") **and** nothing
+  is queued ahead of it — otherwise it queues behind earlier ops so they reach the server in order; a request
+  that fails at the network level is queued rather than lost. The tab header shows how many writes still wait.
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further

@@ -46,17 +46,25 @@ function ClockCard() {
   const doClockIn = async () => {
     setBusy(true);
     try {
-      const { lat, lng } = await requestCurrentCoords();
+      let pos: { lat: number; lng: number };
+      try {
+        pos = await requestCurrentCoords();
+      } catch (e) {
+        if (e instanceof LocationPermissionDeniedError) {
+          showDialog('Izin lokasi diperlukan', 'Aktifkan izin lokasi untuk clock-in.');
+        } else {
+          showDialog('Gagal Clock In', 'Tidak dapat mengambil lokasi. Coba lagi.');
+        }
+        return;
+      }
       // Team home-base geofence pin isn't modeled yet in Phase 1 — clock-in is
       // always accepted, flagged geoFenceOk=true, pending that data (see README).
-      await clockIn({ lat, lng }, true);
-      showDialog('Clock In berhasil');
+      const queued = await clockIn(pos, true);
+      if (!queued) showDialog('Clock In berhasil');
     } catch (e) {
-      if (e instanceof LocationPermissionDeniedError) {
-        showDialog('Izin lokasi diperlukan', 'Aktifkan izin lokasi untuk clock-in.');
-      } else {
-        showDialog('Gagal Clock In', 'Tidak dapat menyimpan clock-in. Periksa koneksi internet dan coba lagi.');
-      }
+      // Connectivity problems never land here (they go to the offline queue) —
+      // this is the server rejecting the clock-in.
+      showDialog('Gagal Clock In', e instanceof Error ? e.message : 'Coba lagi.');
     } finally {
       setBusy(false);
     }

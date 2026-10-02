@@ -100,8 +100,9 @@ export default function StoreDetailScreen() {
       // PRD §7 valid-visit KPI with zero location evidence).
       const id = await startVisit(store.id, me.id, { lat, lng }, dist, dist != null);
       navigation.navigate('StoreVisit', { visitId: id });
-    } catch {
-      showDialog('Gagal Check-in', 'Tidak dapat menyimpan kunjungan ke server. Periksa koneksi internet dan coba lagi.');
+    } catch (e) {
+      // Connectivity problems are queued offline, never thrown — this is a server rejection.
+      showDialog('Gagal Check-in', e instanceof Error ? e.message : 'Coba lagi.');
     } finally {
       setChecking(false);
     }

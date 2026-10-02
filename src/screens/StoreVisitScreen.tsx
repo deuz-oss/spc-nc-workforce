@@ -77,8 +77,9 @@ export default function StoreVisitScreen() {
             try {
               await finishVisit(visit.id);
               navigation.goBack();
-            } catch {
-              showDialog('Gagal Check-out', 'Tidak dapat menyimpan check-out ke server. Periksa koneksi internet dan coba lagi.');
+            } catch (e) {
+              // Connectivity problems are queued offline, never thrown — this is a server rejection.
+              showDialog('Gagal Check-out', e instanceof Error ? e.message : 'Coba lagi.');
             } finally {
               setBusy(false);
             }

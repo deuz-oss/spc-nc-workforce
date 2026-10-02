@@ -4,7 +4,7 @@ import { useNavigation, useRoute } from '@react-navigation/native';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { C, F } from '../theme';
-import { useStore } from '../store/useStore';
+import { ShownError, useStore } from '../store/useStore';
 
 interface DraftRow {
   key: string;
@@ -75,7 +75,9 @@ export default function OfftakeScreen() {
           revenue: r.revenue.trim() ? Number(r.revenue) : undefined,
         })),
       );
-      if (res.outlierSkus.length) {
+      if (res.queued) {
+        navigation.goBack(); // saved offline — the store already told the user
+      } else if (res.outlierSkus.length) {
         showDialog(
           'Offtake Tersimpan — Ada SKU Ditandai',
           `SKU berikut ditandai outlier (>3x rata-rata 7 hari terakhir) untuk ditinjau TL: ${res.outlierSkus.join(', ')}.`,
@@ -85,7 +87,7 @@ export default function OfftakeScreen() {
         showDialog('Offtake Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
       }
     } catch (e: any) {
-      showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Offtake. Coba lagi.');
+      if (!(e instanceof ShownError)) showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Offtake. Coba lagi.');
     } finally {
       setBusy(false);
     }

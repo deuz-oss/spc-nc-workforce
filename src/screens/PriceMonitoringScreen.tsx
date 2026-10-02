@@ -86,7 +86,7 @@ export default function PriceMonitoringScreen() {
     }
     setBusy(true);
     try {
-      await submitPriceMonitoring(
+      const { queued } = await submitPriceMonitoring(
         visitId,
         storeId,
         validRows.map((r) => ({
@@ -99,7 +99,8 @@ export default function PriceMonitoringScreen() {
         })),
         photoUri ?? undefined,
       );
-      showDialog('Price Monitoring Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      if (queued) navigation.goBack(); // saved offline — the store already told the user
+      else showDialog('Price Monitoring Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
       if (!(e instanceof ShownError)) {
         showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');

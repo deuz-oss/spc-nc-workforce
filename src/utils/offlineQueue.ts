@@ -25,7 +25,16 @@ import { Attendance, OfftakeRow, PaidVisibilityRow, PriceMonitoringRow, ShareOfS
  */
 export type QueuedOp =
   | { id: string; type: 'clockIn'; attendance: Attendance }
-  | { id: string; type: 'clockOut'; attendanceId: string; clockOutAt: number; lat: number; lng: number }
+  | {
+      id: string;
+      type: 'clockOut';
+      attendanceId: string;
+      clockOutAt: number;
+      lat: number;
+      lng: number;
+      /** Record the clock-out position as the route's last point (it moved since the last ping). */
+      addPoint?: boolean;
+    }
   | { id: string; type: 'startVisit'; visit: Visit }
   | { id: string; type: 'finishVisit'; visitId: string; checkOutAt: number }
   | { id: string; type: 'submitStockTaking'; rows: StockTakingRow[]; localPhotoUri?: string }

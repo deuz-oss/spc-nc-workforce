@@ -24,6 +24,28 @@ export function settle(error: { code?: string } | null): ReplayResult {
   return error.code && /^(22|23|42|P0)/.test(error.code) ? 'failed' : 'retry';
 }
 
+/** A request that never got an answer from the server (no connectivity, DNS
+ * failure, a captive portal's HTML page) — postgrest-js reports these with an
+ * empty `code`; every real server error carries a SQLSTATE or PGRST code. */
+export function isNetworkError(error: { code?: string } | null): boolean {
+  return !!error && !error.code;
+}
+
+/**
+ * Why a new queueable write must go into the offline queue instead of straight
+ * to the server, or null if it may be sent now:
+ * - `offline`: no usable connection.
+ * - `backlog`: earlier writes are still queued — sending this one first would
+ *   reorder them (a clock-out landing before its clock-in, a report before its
+ *   store check-in), so it waits its turn behind them.
+ */
+export type QueueReason = 'offline' | 'backlog' | null;
+
+export function queueReason(online: boolean, pendingCount: number): QueueReason {
+  if (!online) return 'offline';
+  return pendingCount > 0 ? 'backlog' : null;
+}
+
 export const OP_LABEL: Record<QueuedOp['type'], string> = {
   clockIn: 'Clock-in',
   clockOut: 'Clock-out',

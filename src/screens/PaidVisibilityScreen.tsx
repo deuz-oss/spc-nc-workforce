@@ -55,8 +55,9 @@ export default function PaidVisibilityScreen() {
     }
     setBusy(true);
     try {
-      await submitPaidVisibility(visitId, storeId, { visibilityType, complianceChecklist: checklist }, photoUri);
-      showDialog('Paid Visibility Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      const { queued } = await submitPaidVisibility(visitId, storeId, { visibilityType, complianceChecklist: checklist }, photoUri);
+      if (queued) navigation.goBack(); // saved offline — the store already told the user
+      else showDialog('Paid Visibility Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
     } catch (e: any) {
       if (!(e instanceof ShownError)) {
         showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');

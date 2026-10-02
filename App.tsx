@@ -25,6 +25,7 @@ import { useBreakpoint } from './src/utils/responsive';
 import { DialogHost } from './src/components/dialog';
 import { useCurrentUser, useStore } from './src/store/useStore';
 import { Role, User } from './src/types';
+import { fmtDateTime } from './src/utils/format';
 
 import LoginScreen from './src/screens/LoginScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
@@ -71,6 +72,39 @@ const TAB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   Pengguna: 'people-outline',
   Profil: 'person-circle-outline',
 };
+
+/**
+ * Sync status strip under the tab header: shown while the app runs from the
+ * on-device snapshot (cold start without a server connection — data may be
+ * stale), and while writes are still waiting in the offline queue, so a field
+ * user never mistakes "saved on this phone" for "reached the server".
+ */
+function SyncStatusBanner({ snapshotAt, pendingCount }: { snapshotAt: number | null; pendingCount: number }) {
+  if (snapshotAt == null && pendingCount === 0) return null;
+  const parts: string[] = [];
+  if (snapshotAt != null) parts.push(`Mode offline — data tersimpan per ${fmtDateTime(snapshotAt)}`);
+  if (pendingCount > 0) parts.push(`${pendingCount} data menunggu dikirim ke server`);
+  return (
+    <View
+      role="status"
+      style={{
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        backgroundColor: C.warnBg,
+        borderBottomWidth: 1,
+        borderColor: C.border,
+      }}
+    >
+      <Ionicons name="cloud-offline-outline" size={16} color={C.warn} />
+      <Text style={{ flex: 1, color: C.text, fontFamily: F.semi, fontSize: 12 }}>
+        {parts.join(' · ')}. Disinkron otomatis saat koneksi tersedia.
+      </Text>
+    </View>
+  );
+}
 
 const RAIL_WIDTH = 232;
 const COMPACT_RAIL_WIDTH = 76;
@@ -328,6 +362,8 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
   const { isTablet, isDesktop } = useBreakpoint();
   const railWidth = isDesktop ? RAIL_WIDTH : isTablet ? COMPACT_RAIL_WIDTH : 0;
   const tabs = tabsForRole(role);
+  const offlineSnapshotAt = useStore((s) => s.offlineSnapshotAt);
+  const pendingCount = useStore((s) => s.pendingOps.length);
 
   return (
     <Tabs.Navigator
@@ -341,6 +377,7 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
         header: ({ layout, options, route: r }: BottomTabHeaderProps) => (
           <View role="banner">
             <Header {...options} layout={layout} title={getHeaderTitle(options, r.name)} />
+            <SyncStatusBanner snapshotAt={offlineSnapshotAt} pendingCount={pendingCount} />
           </View>
         ),
         headerRight: () => (

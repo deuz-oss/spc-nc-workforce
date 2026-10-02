@@ -3,7 +3,7 @@ import { AppState, Platform } from 'react-native';
 import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import type { RealtimeChannel } from '@supabase/supabase-js';
+import { isAuthRetryableFetchError, type RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
 import { HISTORY_DAYS, TRACK_MIN_STEP_M } from '../config';
@@ -44,15 +44,24 @@ import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, u
 import { fmtDate } from '../utils/format';
 import { historyWindowStart } from '../utils/period';
 import { uid } from '../utils/uuid';
-import { drainQueue, OP_LABEL, ReplayResult, settle } from './replay';
+import { deleteSnapshot, getLastUser, loadSnapshot, OfflineSnapshot, saveSnapshot, setLastUser } from '../utils/offlineCache';
+import { drainQueue, isNetworkError, OP_LABEL, QueueReason, queueReason, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
  * showDialog — screens must not show a second dialog for it. */
 export class ShownError extends Error {}
 
+/** "Connected" is not "online": a phone on Wi-Fi or mobile data with no actual
+ * internet (dead hotspot, captive portal, exhausted quota) reports
+ * isConnected=true. isInternetReachable is null while NetInfo is still probing
+ * — unknown is not treated as offline; a request that then fails at the
+ * network level falls back to the offline queue anyway (see runOrQueue). */
+function reachable(state: { isConnected: boolean | null; isInternetReachable?: boolean | null }): boolean {
+  return state.isConnected === true && state.isInternetReachable !== false;
+}
+
 async function isOnline(): Promise<boolean> {
-  const state = await NetInfo.fetch();
-  return state.isConnected === true;
+  return reachable(await NetInfo.fetch());
 }
 
 /** Roles not attached to a specific team */
@@ -128,6 +137,10 @@ interface StoreState {
    * once loadFullHistory() has pulled everything. Screens showing periods
    * that reach further back use this to offer "load older history". */
   historyFrom: number | null;
+  /** Set while the app runs from the on-device snapshot because the server
+   * couldn't be reached at cold start (time the snapshot was saved); cleared
+   * once a full sync succeeds. Screens show an "offline data" notice. */
+  offlineSnapshotAt: number | null;
 
   /** Restores an existing Supabase session (if any) on cold app start. Call once from App.tsx. */
   init(): Promise<void>;
@@ -181,6 +194,9 @@ interface StoreState {
   finishVisit(id: string): Promise<void>;
 
   // --- Phase 2: product master + core daily report modules ---
+  // Every queueable write below (and startVisit/finishVisit/clockIn/clockOut)
+  // goes through runOrQueue: sent now when possible, otherwise queued — see
+  // its comment for the `queued` contract. Rejected writes throw.
   upsertProduct(p: Product): Promise<void>;
   /** Bulk create from CSV (Data Analyst/Admin Data Entry/Super Admin), mirrors addUsersBulk's shape. */
   addProductsBulk(
@@ -212,7 +228,7 @@ interface StoreState {
   // offlineQueue.ts's QueuedOp comment. Web stays online-required for photo
   // handling (deliberate scope boundary, see the same comment).
 
-  /** Share of Shelf (PRD §5.2) — required photo. Native: queues locally when offline (upload deferred to replay). Web: fails outright if offline or the upload fails. */
+  /** Share of Shelf (PRD §5.2) — required photo. Native: photo kept on the device and uploaded by replayOp (now or from the queue). Web: online-only — fails (ShownError) if offline or the upload fails. */
   submitShareOfShelf(
     visitId: string,
     storeId: string,
@@ -285,8 +301,9 @@ interface StoreState {
    * another user's day — the store only mirrors the viewer's own routes. */
   fetchRoute(attendanceId: string): Promise<RoutePoint[]>;
 
-  clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<string>;
-  /** Resolves true if the write was queued offline (not yet synced), false once it's actually saved/attempted. */
+  /** Resolves true if it was saved offline only (the user has already been told). */
+  clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<boolean>;
+  /** Resolves true if it was saved offline only (the user has already been told). */
   clockOut(pos: { lat: number; lng: number }): Promise<boolean>;
   addRoutePoint(userId: string, p: Omit<RoutePoint, 't'>): void;
 }
@@ -788,8 +805,19 @@ function priceMonitoringRow(r: PriceMonitoringRow) {
 }
 
 
-/** Replays one queued op against Supabase. */
+/** Message of the last server error seen by replayOp — runOrQueue surfaces it
+ * when a write sent straight to the server is rejected. */
+let lastWriteError: string | null = null;
+
+function settleLogged(error: { code?: string; message?: string } | null): ReplayResult {
+  lastWriteError = error?.message ?? null;
+  return settle(error);
+}
+
+/** Sends one queueable op to Supabase — used both for writes made while online
+ * (runOrQueue) and for replaying the offline queue, so the two paths can't drift. */
 async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreState, op: QueuedOp): Promise<ReplayResult> {
+  lastWriteError = null;
   if (op.type === 'clockIn') {
     const a = op.attendance;
     const { error } = await supabase.from('attendances').insert({
@@ -813,9 +841,21 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       });
       if (rpErr) console.warn('replay clockIn route point failed:', rpErr.message);
     }
-    return settle(error);
+    return settleLogged(error);
   }
   if (op.type === 'clockOut') {
+    if (op.addPoint) {
+      // Before closing the session: route_points_insert_own only accepts points
+      // for an attendance that is still open.
+      const { error: rpErr } = await supabase.from('route_points').insert({
+        attendance_id: op.attendanceId,
+        user_id: get().sessionUserId,
+        lat: op.lat,
+        lng: op.lng,
+        recorded_at: new Date(op.clockOutAt).toISOString(),
+      });
+      if (rpErr) console.warn('clockOut route point failed:', rpErr.message);
+    }
     const { error } = await supabase
       .from('attendances')
       .update({
@@ -824,7 +864,7 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
         clock_out_lng: op.lng,
       })
       .eq('id', op.attendanceId);
-    return settle(error);
+    return settleLogged(error);
   }
   if (op.type === 'startVisit') {
     const v = op.visit;
@@ -836,17 +876,21 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
       check_out_at: null,
       ...visitRow(v),
     });
-    return settle(error);
+    return settleLogged(error);
   }
   if (op.type === 'submitStockTaking') {
     return replayOptionalPhotoBatch(set, get, 'stockTakingRows', 'stock_taking', op.rows, stockTakingRow, op.localPhotoUri, 'Stock Taking');
   }
   if (op.type === 'submitOfftake') {
-    // Replayed inserts don't read back is_outlier — the row's flag stays as last
-    // known (false) locally until the next hydrateAll/realtime update corrects
-    // it; the server-side value (set by the trigger) is authoritative regardless.
-    const { error } = await supabase.from('offtake').insert(op.rows.map(offtakeRow));
-    return settle(error);
+    // is_outlier is set by the server trigger on insert — read it back so the
+    // local rows (and submitOfftake's outlier notice) show the real flag.
+    const { data, error } = await supabase.from('offtake').insert(op.rows.map(offtakeRow)).select('id, is_outlier');
+    const result = settleLogged(error);
+    const outlierIds = new Set((data ?? []).filter((r: any) => r.is_outlier).map((r: any) => r.id as string));
+    if (outlierIds.size) {
+      set({ offtakeRows: get().offtakeRows.map((x) => (outlierIds.has(x.id) ? { ...x, isOutlier: true } : x)) });
+    }
+    return result;
   }
   if (op.type === 'submitPriceMonitoring') {
     return replayOptionalPhotoBatch(
@@ -880,7 +924,7 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
     p_visit_id: op.visitId,
     p_check_out_at: new Date(op.checkOutAt).toISOString(),
   });
-  return settle(error);
+  return settleLogged(error);
 }
 
 /** Shared replay logic for optional-photo batch reports (Stock Taking, Price
@@ -913,13 +957,15 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
     }
   }
 
-  const rowsWithPhoto = rows.map((r) => ({ ...r, photoUrl }));
+  // Without a deferred local photo the rows go as-is: either no photo, or (web)
+  // one that was already uploaded before the op was built.
+  const rowsWithPhoto = localPhotoUri ? rows.map((r) => ({ ...r, photoUrl })) : rows;
   const { error } = await supabase.from(table).insert(rowsWithPhoto.map(toDbRow));
-  const result = settle(error);
-  if (result !== 'done') return result;
+  const result = settleLogged(error);
+  if (result !== 'done' || !localPhotoUri) return result;
 
   if (photoUrl) {
-    await discardLocalPhoto(localPhotoUri!);
+    await discardLocalPhoto(localPhotoUri);
   }
   // Patch local state's photoUrl from the (possibly-dead) local path to the
   // real remote URL, or clear it if the photo never made it — never leave a
@@ -972,7 +1018,7 @@ async function replayRequiredPhotoRow<K extends 'shareOfShelfRows' | 'paidVisibi
 
   const fullRow = { ...row, photoUrl } as unknown as R;
   const { error } = await supabase.from(table).insert(toDbRow(fullRow));
-  const result = settle(error);
+  const result = settleLogged(error);
   if (result !== 'done') return result;
 
   await discardLocalPhoto(localPhotoUri);
@@ -987,6 +1033,184 @@ async function enqueueOp(set: (p: Partial<StoreState>) => void, get: () => Store
   set({ pendingOps: next });
   const userId = get().sessionUserId;
   if (userId) await saveQueue(userId, next);
+}
+
+/** Ops queued silently behind a backlog (see runOrQueue) — their sync isn't announced. */
+const silentOpIds = new Set<string>();
+
+async function currentQueueReason(get: () => StoreState): Promise<QueueReason> {
+  // A session opened from the offline snapshot can't write until resumeSession
+  // has confirmed it with the server — queue like offline (that also kicks it).
+  if (resumeUserId) return 'offline';
+  return queueReason(await isOnline(), get().pendingOps.length);
+}
+
+/**
+ * The single write path for every queueable action (clock in/out, store
+ * check-in/out, the report modules). The optimistic local state must already
+ * be applied; `undo` reverts it if the server rejects the write.
+ *
+ * - offline → queued, user told it's saved on the phone;
+ * - earlier ops still queued → queued silently behind them and the queue is
+ *   kicked, so writes always reach the server in the order they were made;
+ * - otherwise sent now via replayOp; a transient failure (no real internet
+ *   despite a connection, timeout, 5xx) is queued instead of lost, and only a
+ *   deterministic rejection rolls back and throws.
+ *
+ * `queued: true` means "saved on the phone only, and the user has been told
+ * so" — screens then skip their own success message. An op queued silently
+ * behind a backlog syncs within moments and reports `queued: false`.
+ */
+async function runOrQueue(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  op: QueuedOp,
+  label: string,
+  undo: () => void,
+): Promise<{ queued: boolean }> {
+  const reason = await currentQueueReason(get);
+  if (!reason) {
+    const result = await replayOp(set, get, op);
+    if (result === 'done') return { queued: false };
+    if (result === 'dropped') {
+      undo();
+      throw new ShownError(`${label} tidak tersimpan.`);
+    }
+    if (result === 'failed') {
+      undo();
+      throw new Error(`${label} ditolak server${lastWriteError ? `: ${lastWriteError}` : '.'}`);
+    }
+  }
+  await enqueueOp(set, get, op);
+  if (reason === 'backlog') {
+    silentOpIds.add(op.id);
+    void get().processPendingOps();
+  } else {
+    if (reason === 'offline') {
+      if (resumeUserId) void resumeSession(set, get);
+    } else {
+      scheduleQueueRetry(set, get); // transient failure while "online" — no NetInfo event will come
+    }
+    showDialog(
+      'Tersimpan Offline',
+      reason === 'offline'
+        ? `${label} tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.`
+        : `Koneksi internet tidak stabil. ${label} tersimpan di HP dan akan dikirim otomatis.`,
+    );
+  }
+  return { queued: reason !== 'backlog' };
+}
+
+/**
+ * Optional evidence photo (Stock Taking, Price Monitoring). Native: copied to
+ * app storage and uploaded by replayOp — immediately when online, later from
+ * the queue otherwise, so a dropped connection mid-upload never loses it.
+ * Web: browser file URIs don't survive a reload, so the photo is uploaded now
+ * or (offline) left out. A photo problem never blocks the report itself.
+ */
+async function prepareOptionalPhoto(
+  visitId: string,
+  photoUri: string | undefined,
+): Promise<{ localPhotoUri?: string; photoUrl?: string }> {
+  if (!photoUri) return {};
+  if (Platform.OS !== 'web') {
+    try {
+      return { localPhotoUri: await persistPhotoLocally(photoUri) };
+    } catch {
+      showDialog('Foto Gagal Disimpan', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
+      return {};
+    }
+  }
+  if (!(await isOnline())) {
+    showDialog('Offline', 'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.');
+    return {};
+  }
+  try {
+    return { photoUrl: await uploadReportMedia(visitId, photoUri, extFromUri(photoUri)) };
+  } catch {
+    showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
+    return {};
+  }
+}
+
+/**
+ * Required-photo reports (Share of Shelf, Paid Visibility) — the row can never
+ * exist without its photo (DB not-null). Native: the photo is copied to app
+ * storage and the op goes through runOrQueue; replayRequiredPhotoRow uploads
+ * it and only then inserts, now or later from the queue. Web can't keep a
+ * picked file across a reload, so it stays online-only: upload, then insert.
+ */
+async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVisibilityRows', R extends { id: string; visitId: string }>(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  p: {
+    stateKey: K;
+    table: string;
+    toDbRow: (r: any) => Record<string, unknown>;
+    row: R;
+    photoUri: string;
+    label: string;
+    makeOp: (localPhotoUri: string) => QueuedOp;
+  },
+): Promise<{ queued: boolean }> {
+  const rowsOf = () => get()[p.stateKey] as unknown as Array<{ id: string }>;
+  const setRows = (rows: Array<{ id: string }>) => set({ [p.stateKey]: rows } as unknown as Partial<StoreState>);
+
+  if (Platform.OS !== 'web') {
+    let localPhotoUri: string;
+    try {
+      localPhotoUri = await persistPhotoLocally(p.photoUri);
+    } catch {
+      showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
+      throw new ShownError('Gagal menyimpan foto secara lokal.');
+    }
+    setRows([{ ...p.row, photoUrl: localPhotoUri }, ...rowsOf()]);
+    return runOrQueue(set, get, p.makeOp(localPhotoUri), p.label, () => {
+      setRows(rowsOf().filter((r) => r.id !== p.row.id));
+      void discardLocalPhoto(localPhotoUri);
+    });
+  }
+
+  const reason = await currentQueueReason(get);
+  if (reason) {
+    showDialog(
+      reason === 'offline' ? 'Offline' : 'Menunggu Sinkronisasi',
+      reason === 'offline'
+        ? `${p.label} butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.`
+        : `Masih ada data offline yang sedang dikirim ke server. Coba simpan ${p.label} lagi sebentar lagi.`,
+    );
+    throw new ShownError('Tidak dapat disimpan sekarang.');
+  }
+  let photoUrl: string;
+  try {
+    photoUrl = await uploadReportMedia(p.row.visitId, p.photoUri, extFromUri(p.photoUri));
+  } catch {
+    showDialog('Gagal Upload Foto', `Foto wajib untuk ${p.label} tidak berhasil diupload. Laporan tidak disimpan — coba lagi.`);
+    throw new ShownError('Upload foto gagal.');
+  }
+  const full = { ...p.row, photoUrl };
+  setRows([full, ...rowsOf()]);
+  const { error } = await supabase.from(p.table).insert(p.toDbRow(full));
+  if (error) {
+    setRows(rowsOf().filter((r) => r.id !== p.row.id));
+    showDialog('Gagal Menyimpan', `Tidak dapat menyimpan ${p.label} ke server. Periksa koneksi internet dan coba lagi.`);
+    throw new ShownError(error.message);
+  }
+  return { queued: false };
+}
+
+/** True while this visit's own check-in is still in the offline queue — the
+ * visits row doesn't exist server-side yet, so online-only writes that
+ * reference it (NTG & GWP, survey responses) would fail on the foreign key. */
+function visitPendingSync(get: () => StoreState, visitId: string | null | undefined): boolean {
+  return !!visitId && get().pendingOps.some((op) => op.type === 'startVisit' && op.visit.id === visitId);
+}
+
+function showVisitPendingDialog() {
+  showDialog(
+    'Kunjungan Belum Tersinkron',
+    'Check-in toko ini masih tersimpan offline di HP. Tunggu sampai tersinkron (butuh koneksi internet), lalu simpan lagi.',
+  );
 }
 
 /** Loads the signed-in user's persisted queue and re-applies each op's
@@ -1010,6 +1234,97 @@ let replayingQueue = false;
 /** Last full data re-sync (refreshData) — throttles the resume trigger. */
 let lastRefreshAt = Date.now();
 const RESUME_REFRESH_MIN_INTERVAL_MS = 2 * 60 * 1000;
+
+/** User whose session was opened from the offline snapshot (or couldn't be
+ * opened at all) at cold start and still needs a full server sync — set by
+ * init(), cleared by resumeSession() once the server answers. */
+let resumeUserId: string | null = null;
+
+/** A queue left behind by a transient replay failure while online gets no
+ * NetInfo event to retry it — this timer does, until the queue drains. */
+let queueRetryTimer: ReturnType<typeof setTimeout> | null = null;
+const QUEUE_RETRY_MS = 30 * 1000;
+
+function clearQueueRetry() {
+  if (queueRetryTimer) clearTimeout(queueRetryTimer);
+  queueRetryTimer = null;
+}
+
+function scheduleQueueRetry(set: (p: Partial<StoreState>) => void, get: () => StoreState) {
+  if (queueRetryTimer) return;
+  queueRetryTimer = setTimeout(() => {
+    queueRetryTimer = null;
+    onMaybeOnline(set, get);
+  }, QUEUE_RETRY_MS);
+}
+
+// --- on-device snapshot for offline cold starts (see utils/offlineCache) ---
+
+/** Own field activity kept in the snapshot: the last 2 days, plus anything
+ * still open (an attendance/visit started earlier and never closed). */
+const OFFLINE_CACHE_DAYS = 2;
+
+/** Slices whose change triggers a snapshot save. */
+const SNAPSHOT_KEYS = [
+  'users',
+  'teams',
+  'stores',
+  'products',
+  'surveys',
+  'targets',
+  'attendances',
+  'visits',
+  'stockTakingRows',
+  'offtakeRows',
+  'shareOfShelfRows',
+  'paidVisibilityRows',
+  'priceMonitoringRows',
+] as const satisfies ReadonlyArray<keyof StoreState>;
+
+function buildOfflineSnapshot(s: StoreState, userId: string): OfflineSnapshot {
+  const since = Date.now() - OFFLINE_CACHE_DAYS * 86400000;
+  const attendances = s.attendances.filter((a) => a.userId === userId && (!a.clockOutAt || a.clockInAt >= since));
+  const visits = s.visits.filter((v) => v.ncId === userId && (!v.checkOutAt || v.checkInAt >= since));
+  const visitIds = new Set(visits.map((v) => v.id));
+  const ofVisits = <T extends { visitId: string }>(rows: T[]) => rows.filter((r) => visitIds.has(r.visitId));
+  return {
+    savedAt: Date.now(),
+    historyFrom: since,
+    data: {
+      users: s.users,
+      teams: s.teams,
+      stores: s.stores,
+      products: s.products,
+      surveys: s.surveys,
+      targets: s.targets,
+      attendances,
+      visits,
+      stockTakingRows: ofVisits(s.stockTakingRows),
+      offtakeRows: ofVisits(s.offtakeRows),
+      shareOfShelfRows: ofVisits(s.shareOfShelfRows),
+      paidVisibilityRows: ofVisits(s.paidVisibilityRows),
+      priceMonitoringRows: ofVisits(s.priceMonitoringRows),
+    },
+  };
+}
+
+/** Opens the app for `userId` from the on-device snapshot. False if none exists. */
+async function bootFromSnapshot(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  userId: string,
+): Promise<boolean> {
+  const snap = await loadSnapshot(userId);
+  if (!snap || !(snap.data.users as User[] | undefined)?.some((u) => u.id === userId)) return false;
+  set({
+    ...(snap.data as Partial<StoreState>),
+    sessionUserId: userId,
+    historyFrom: snap.historyFrom,
+    offlineSnapshotAt: snap.savedAt,
+  });
+  await restoreQueue(set, get, userId);
+  return true;
+}
 
 function teardownRealtime() {
   if (channel) {
@@ -1199,7 +1514,7 @@ interface TimeFilter {
   keepNull?: string;
 }
 
-async function fetchAll(table: string, filter?: TimeFilter): Promise<{ data: any[]; error: { message: string } | null }> {
+async function fetchAll(table: string, filter?: TimeFilter): Promise<{ data: any[]; error: { message: string; code?: string } | null }> {
   const out: any[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     let q = supabase.from(table).select('*');
@@ -1309,7 +1624,7 @@ const SNAPSHOT_TABLES: Array<{ table: string; key: keyof StoreState; map: (r: an
 ];
 
 /** Fetches every SNAPSHOT_TABLES table (windowed ones from `since`). Raw rows, keyed by table. */
-async function fetchSnapshot(since: number): Promise<{ rows: Record<string, any[]>; error: { message: string } | null }> {
+async function fetchSnapshot(since: number): Promise<{ rows: Record<string, any[]>; error: { message: string; code?: string } | null }> {
   const results = await Promise.all(SNAPSHOT_TABLES.map((t) => fetchAll(t.table, windowFilter(t.table, since))));
   const rows: Record<string, any[]> = {};
   SNAPSHOT_TABLES.forEach((t, i) => (rows[t.table] = results[i].data));
@@ -1321,12 +1636,22 @@ async function hydrateAll(
   set: (partial: Partial<StoreState>) => void,
   get: () => StoreState,
   userId: string,
-): Promise<boolean> {
+): Promise<HydrateResult> {
   const { data: me, error: meErr } = await supabase.from('profiles').select('*').eq('id', userId).single();
-  if (meErr || !me || !me.active) return false;
+  // PGRST116 = no row: the profile is gone / not visible. Any other failure
+  // (no network, timeout, 5xx) says nothing about the account — never treat
+  // it as "deactivated", or a phone without signal signs its user out.
+  if (meErr) return meErr.code === 'PGRST116' ? 'inactive' : 'offline';
+  if (!me?.active) return 'inactive';
 
   const since = historyWindowStart(new Date(), HISTORY_DAYS);
-  const { rows } = await fetchSnapshot(since);
+  const { rows, error: snapErr } = await fetchSnapshot(since);
+  if (snapErr) {
+    // Connection dropped mid-load: keep whatever the caller already has rather
+    // than replacing it with a partial snapshot.
+    if (isNetworkError(snapErr)) return 'offline';
+    console.warn('hydrateAll: some tables failed to load:', snapErr.message);
+  }
 
   const routePoints = await fetchOwnRoutePoints(userId, rows.attendances);
   const routesByAttendance = new Map<string, RoutePoint[]>();
@@ -1337,14 +1662,81 @@ async function hydrateAll(
   }
   for (const arr of routesByAttendance.values()) arr.sort((a, b) => a.t - b.t);
 
-  const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: since };
+  const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: since, offlineSnapshotAt: null };
   for (const t of SNAPSHOT_TABLES) (patch as any)[t.key] = rows[t.table].map(t.map);
   patch.attendances = rows.attendances.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? []));
   set(patch);
   lastRefreshAt = Date.now();
+  void setLastUser(userId);
 
   subscribeRealtime(set, get, userId);
-  return true;
+  return 'ok';
+}
+
+/** 'offline' = the server couldn't be reached (state untouched); 'inactive' =
+ * the account is deactivated or has no profile. */
+type HydrateResult = 'ok' | 'inactive' | 'offline';
+
+/**
+ * Completes a session that cold start opened from the offline snapshot (or
+ * couldn't open at all): once the server is reachable, does the full load and
+ * re-applies still-queued ops on top (the fresh server snapshot doesn't
+ * contain them yet). A session that turns out to be truly gone (refresh token
+ * revoked/expired) drops back to the login screen.
+ */
+let resuming = false;
+
+async function resumeSession(set: (p: Partial<StoreState>) => void, get: () => StoreState): Promise<void> {
+  if (resuming) return;
+  resuming = true;
+  try {
+    await resumeSessionOnce(set, get);
+  } finally {
+    resuming = false;
+  }
+}
+
+async function resumeSessionOnce(set: (p: Partial<StoreState>) => void, get: () => StoreState): Promise<void> {
+  const userId = resumeUserId;
+  if (!userId || !(await isOnline())) return;
+  const {
+    data: { session },
+    error,
+  } = await supabase.auth.getSession();
+  if (resumeUserId !== userId) return; // logged out meanwhile
+  if (!session) {
+    if (error && isAuthRetryableFetchError(error)) return; // still can't reach auth — try again later
+    // The session is really gone (refresh token revoked/expired): back to the
+    // login screen. The queue stays on disk and resumes on the next login.
+    resumeUserId = null;
+    void setLastUser(null);
+    void deleteSnapshot(userId);
+    teardownRealtime();
+    set(SIGNED_OUT_STATE);
+    return;
+  }
+  const result = await hydrateAll(set, get, session.user.id);
+  if (result === 'offline') return;
+  resumeUserId = null;
+  if (result === 'inactive') {
+    await get().logout();
+    showDialog('Akun Nonaktif', 'Akun dinonaktifkan atau tidak ditemukan. Hubungi admin.');
+    return;
+  }
+  if (session.user.id === userId && get().pendingOps.length) {
+    for (const op of get().pendingOps) applyQueuedOpLocally(set, get, op);
+  } else {
+    await restoreQueue(set, get, session.user.id);
+  }
+  void get().processPendingOps();
+  registerPushToken();
+}
+
+/** Connectivity may be back (NetInfo change, app foregrounded, retry timer):
+ * finish an offline-opened session first, otherwise flush the queue. */
+function onMaybeOnline(set: (p: Partial<StoreState>) => void, get: () => StoreState) {
+  if (resumeUserId) void resumeSession(set, get);
+  else if (get().pendingOps.length) void get().processPendingOps();
 }
 
 /**
@@ -1439,6 +1831,7 @@ const SIGNED_OUT_STATE: Partial<StoreState> = {
   certifications: [],
   pendingOps: [],
   historyFrom: null,
+  offlineSnapshotAt: null,
 };
 
 export const useStore = create<StoreState>()((set, get) => ({
@@ -1468,17 +1861,35 @@ export const useStore = create<StoreState>()((set, get) => ({
   certifications: [],
   pendingOps: [],
   historyFrom: null,
+  offlineSnapshotAt: null,
 
   init: async () => {
     const {
       data: { session },
+      error: sessionErr,
     } = await supabase.auth.getSession();
     if (session?.user) {
-      const ok = await hydrateAll(set, get, session.user.id);
-      if (!ok) await supabase.auth.signOut();
-      else {
+      const result = await hydrateAll(set, get, session.user.id);
+      if (result === 'inactive') {
+        await supabase.auth.signOut();
+      } else if (result === 'ok') {
         await restoreQueue(set, get, session.user.id);
         registerPushToken(); // fire-and-forget, PRD §17
+      } else {
+        // No server: open from the on-device snapshot so field work (clock,
+        // check-in, reports → offline queue) can continue. Without a snapshot
+        // the login screen shows, but the session is kept and resumes by itself
+        // once the server is reachable — never sign out over a network error.
+        resumeUserId = session.user.id;
+        await bootFromSnapshot(set, get, session.user.id);
+      }
+    } else if (sessionErr && isAuthRetryableFetchError(sessionErr)) {
+      // The stored access token expired and couldn't be refreshed offline —
+      // auth-js keeps the session in storage, so it's still ours to resume.
+      const lastUser = await getLastUser();
+      if (lastUser) {
+        resumeUserId = lastUser;
+        await bootFromSnapshot(set, get, lastUser);
       }
     }
     set({ ready: true });
@@ -1487,20 +1898,29 @@ export const useStore = create<StoreState>()((set, get) => ({
       authListenerBound = true;
       supabase.auth.onAuthStateChange((event) => {
         if (event === 'SIGNED_OUT') {
+          const userId = get().sessionUserId ?? resumeUserId;
+          resumeUserId = null;
+          clearQueueRetry();
           teardownRealtime();
           set(SIGNED_OUT_STATE);
+          void setLastUser(null);
+          if (userId) void deleteSnapshot(userId);
         }
       });
     }
     if (!netInfoListenerBound) {
       netInfoListenerBound = true;
       NetInfo.addEventListener((state) => {
-        if (state.isConnected && get().pendingOps.length) get().processPendingOps();
+        if (reachable(state)) onMaybeOnline(set, get);
       });
       // NetInfo only fires on connectivity *changes* — a replay that failed
       // transiently while online would otherwise wait for the next drop/reconnect.
       AppState.addEventListener('change', (s) => {
         if (s !== 'active') return;
+        if (resumeUserId) {
+          void resumeSession(set, get);
+          return;
+        }
         if (get().pendingOps.length) get().processPendingOps();
         // Realtime events that fired while the app was backgrounded (socket
         // asleep) are lost, not replayed — e.g. a chat message whose push
@@ -1512,18 +1932,30 @@ export const useStore = create<StoreState>()((set, get) => ({
         if (Date.now() - lastRefreshAt >= RESUME_REFRESH_MIN_INTERVAL_MS) void get().refreshData();
       });
     }
+    if (resumeUserId) void resumeSession(set, get); // in case the network came back during boot
   },
 
   processPendingOps: async () => {
     const userId = get().sessionUserId;
-    if (replayingQueue || !userId || !get().pendingOps.length) return;
+    // Not while an offline-opened session is still unconfirmed: without a
+    // valid token the requests would go out as anon, RLS would reject them
+    // as "failed", and the ops would be dropped. resumeSession() flushes after.
+    if (replayingQueue || resumeUserId || !userId || !get().pendingOps.length) return;
     replayingQueue = true;
+    clearQueueRetry();
     let synced = 0;
+    let silentSynced = 0;
     let failedOps: QueuedOp[] = [];
     try {
       ({ synced, failed: failedOps } = await drainQueue({
         head: () => get().pendingOps[0],
-        replay: (op) => replayOp(set, get, op),
+        replay: async (op) => {
+          const result = await replayOp(set, get, op);
+          // Ops queued only to keep order behind a backlog were never announced
+          // as "saved offline" — don't announce their sync either.
+          if (result === 'done' && silentOpIds.delete(op.id)) silentSynced++;
+          return result;
+        },
         remove: async (op) => {
           const next = get().pendingOps.filter((o) => o.id !== op.id);
           set({ pendingOps: next });
@@ -1534,13 +1966,14 @@ export const useStore = create<StoreState>()((set, get) => ({
     } finally {
       replayingQueue = false;
     }
+    if (get().sessionUserId === userId && get().pendingOps.length) scheduleQueueRetry(set, get);
     const failed = failedOps.map((op) => OP_LABEL[op.type]);
     if (failed.length) {
       showDialog(
         'Sebagian Data Offline Ditolak Server',
         `Data berikut tidak bisa disimpan dan perlu diisi ulang: ${failed.join(', ')}. Hubungi TL/admin bila berulang.`,
       );
-    } else if (synced && !get().pendingOps.length) {
+    } else if (synced > silentSynced && !get().pendingOps.length) {
       showDialog('Tersinkron', 'Data yang tersimpan offline berhasil dikirim ke server.');
     }
   },
@@ -1565,6 +1998,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   login: async (username, password) => {
+    resumeUserId = null; // an explicit login replaces any session still waiting to resume
     const email = `${username.trim().toLowerCase()}@internal.spc`;
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) {
@@ -1573,10 +2007,12 @@ export const useStore = create<StoreState>()((set, get) => ({
         ? 'Username atau password salah.'
         : 'Tidak dapat terhubung ke server. Periksa koneksi internet dan coba lagi.';
     }
-    const ok = await hydrateAll(set, get, data.user.id);
-    if (!ok) {
+    const result = await hydrateAll(set, get, data.user.id);
+    if (result !== 'ok') {
       await supabase.auth.signOut();
-      return 'Akun dinonaktifkan atau tidak ditemukan. Hubungi admin.';
+      return result === 'inactive'
+        ? 'Akun dinonaktifkan atau tidak ditemukan. Hubungi admin.'
+        : 'Koneksi terputus saat memuat data. Periksa koneksi internet dan coba lagi.';
     }
     // init() only restores a queue when a session already existed at cold
     // start — a queue persisted before the session expired must load here.
@@ -1586,11 +2022,17 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   logout: async () => {
+    const userId = get().sessionUserId;
+    resumeUserId = null;
+    clearQueueRetry();
     teardownRealtime();
     await supabase.auth.signOut();
     // The persisted queue stays on disk under this user's key and resumes on
-    // their next login; only the in-memory copy is cleared.
+    // their next login; only the in-memory copy is cleared. The offline
+    // snapshot is deleted — it holds this user's data on a possibly shared phone.
     set(SIGNED_OUT_STATE);
+    void setLastUser(null);
+    if (userId) void deleteSnapshot(userId);
   },
 
   addUser: async ({ name, username, password, role, teamId, city, phone }) => {
@@ -1837,50 +2279,20 @@ export const useStore = create<StoreState>()((set, get) => ({
       geoValid,
     };
     set({ visits: [v, ...get().visits] });
-
-    if (!(await isOnline())) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'startVisit', visit: v });
-      showDialog('Tersimpan Offline', 'Kunjungan tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return v.id;
-    }
-
-    const { error } = await supabase.from('visits').insert({
-      id: v.id,
-      store_id: v.storeId,
-      nc_id: v.ncId,
-      check_in_at: new Date(v.checkInAt).toISOString(),
-      check_out_at: null,
-      ...visitRow(v),
-    });
-    if (error) {
-      set({ visits: get().visits.filter((x) => x.id !== v.id) });
-      throw new Error(error.message);
-    }
+    await runOrQueue(set, get, { id: uid('op_'), type: 'startVisit', visit: v }, 'Check-in toko', () =>
+      set({ visits: get().visits.filter((x) => x.id !== v.id) }),
+    );
     return v.id;
   },
 
   finishVisit: async (id) => {
-    const s = get();
-    const v = s.visits.find((x) => x.id === id);
+    const v = get().visits.find((x) => x.id === id);
     if (!v) return;
     const checkOutAt = Date.now();
-    const beforeVisits = s.visits;
-    set({ visits: s.visits.map((x) => (x.id === id ? { ...x, checkOutAt } : x)) });
-
-    if (!(await isOnline())) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'finishVisit', visitId: id, checkOutAt });
-      showDialog('Tersimpan Offline', 'Check-out tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return;
-    }
-
-    const { error } = await supabase.rpc('finish_visit', {
-      p_visit_id: id,
-      p_check_out_at: new Date(checkOutAt).toISOString(),
-    });
-    if (error) {
-      set({ visits: beforeVisits });
-      throw new Error(error.message);
-    }
+    set({ visits: get().visits.map((x) => (x.id === id ? { ...x, checkOutAt } : x)) });
+    await runOrQueue(set, get, { id: uid('op_'), type: 'finishVisit', visitId: id, checkOutAt }, 'Check-out toko', () =>
+      set({ visits: get().visits.map((x) => (x.id === id ? { ...x, checkOutAt: v.checkOutAt } : x)) }),
+    );
   },
 
   // --- Phase 2: product master ------------------------------------------
@@ -1957,60 +2369,26 @@ export const useStore = create<StoreState>()((set, get) => ({
       .filter((r) => r.sku && r.qtyOnHand >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan jumlah valid (>= 0).');
 
-    const online = await isOnline();
     const now = Date.now();
-    const baseRows: StockTakingRow[] = clean.map((r) => ({
+    const { localPhotoUri, photoUrl } = await prepareOptionalPhoto(visitId, photoUri);
+    const newRows: StockTakingRow[] = clean.map((r) => ({
       id: uid('stk_'),
       visitId,
       storeId,
       sku: r.sku,
       qtyOnHand: r.qtyOnHand,
       outOfStock: r.outOfStock,
-      photoUrl: undefined,
+      photoUrl,
       createdAt: now,
     }));
-
-    if (!online) {
-      // Phase 5: native persists the photo locally and defers its upload to
-      // replay time; web keeps the pre-Phase-5 "photo dropped" behavior (see
-      // offlineQueue.ts's QueuedOp comment on the web scope boundary).
-      let localPhotoUri: string | undefined;
-      if (photoUri && Platform.OS !== 'web') {
-        try {
-          localPhotoUri = await persistPhotoLocally(photoUri);
-        } catch {
-          showDialog('Foto Gagal Disimpan', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
-        }
-      } else if (photoUri) {
-        showDialog(
-          'Offline',
-          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
-        );
-      }
-      const displayRows = localPhotoUri ? baseRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : baseRows;
-      set({ stockTakingRows: [...displayRows, ...get().stockTakingRows] });
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitStockTaking', rows: baseRows, localPhotoUri });
-      showDialog('Tersimpan Offline', 'Stock Taking tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return { queued: true };
-    }
-
-    let photoUrl: string | undefined;
-    if (photoUri) {
-      try {
-        photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-      } catch {
-        showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto. Coba lampirkan foto lagi nanti.');
-      }
-    }
-    const newRows = baseRows.map((r) => ({ ...r, photoUrl }));
-    set({ stockTakingRows: [...newRows, ...get().stockTakingRows] });
-
-    const { error } = await supabase.from('stock_taking').insert(newRows.map(stockTakingRow));
-    if (error) {
-      set({ stockTakingRows: get().stockTakingRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
-      throw new Error(error.message);
-    }
-    return { queued: false };
+    const ids = new Set(newRows.map((r) => r.id));
+    // A pending local photo is shown from its file until replay swaps in the remote path.
+    const display = localPhotoUri ? newRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : newRows;
+    set({ stockTakingRows: [...display, ...get().stockTakingRows] });
+    return runOrQueue(set, get, { id: uid('op_'), type: 'submitStockTaking', rows: newRows, localPhotoUri }, 'Stock Taking', () => {
+      set({ stockTakingRows: get().stockTakingRows.filter((x) => !ids.has(x.id)) });
+      if (localPhotoUri) void discardLocalPhoto(localPhotoUri);
+    });
   },
 
   submitOfftake: async (visitId, storeId, rows) => {
@@ -2027,35 +2405,18 @@ export const useStore = create<StoreState>()((set, get) => ({
       sku: r.sku,
       unitsSold: r.unitsSold,
       revenue: r.revenue,
-      isOutlier: false, // server trigger (0003 migration) sets the real value on insert
+      isOutlier: false, // server trigger (0003 migration) sets the real value on insert — replayOp reads it back
       createdAt: now,
     }));
-
+    const ids = new Set(newRows.map((r) => r.id));
     set({ offtakeRows: [...newRows, ...get().offtakeRows] });
 
-    if (!(await isOnline())) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitOfftake', rows: newRows });
-      showDialog(
-        'Tersimpan Offline',
-        'Offtake tersimpan di HP dan akan otomatis disinkron saat koneksi kembali. Deteksi outlier dihitung saat data tersinkron ke server.',
-      );
-      return { queued: true, outlierSkus: [] };
-    }
-
-    const { data, error } = await supabase.from('offtake').insert(newRows.map(offtakeRow)).select('sku, is_outlier');
-    if (error) {
-      set({ offtakeRows: get().offtakeRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
-      throw new Error(error.message);
-    }
-    const outlierSkus = (data ?? []).filter((r: any) => r.is_outlier).map((r: any) => r.sku as string);
-    if (outlierSkus.length) {
-      set({
-        offtakeRows: get().offtakeRows.map((x) =>
-          newRows.some((n) => n.id === x.id) && outlierSkus.includes(x.sku) ? { ...x, isOutlier: true } : x,
-        ),
-      });
-    }
-    return { queued: false, outlierSkus };
+    const { queued } = await runOrQueue(set, get, { id: uid('op_'), type: 'submitOfftake', rows: newRows }, 'Offtake', () =>
+      set({ offtakeRows: get().offtakeRows.filter((x) => !ids.has(x.id)) }),
+    );
+    // Queued rows get their outlier flag when they sync (the trigger runs server-side).
+    const outlierSkus = queued ? [] : get().offtakeRows.filter((x) => ids.has(x.id) && x.isOutlier).map((x) => x.sku);
+    return { queued, outlierSkus };
   },
 
   // --- Phase 2: NTG & GWP consumer funnel (PRD §5.4) -----------------------
@@ -2096,6 +2457,10 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   addNtgGwp: async (n) => {
+    if (visitPendingSync(get, n.visitId)) {
+      showVisitPendingDialog();
+      return 'visit not synced yet';
+    }
     set({ ntgGwps: [n, ...get().ntgGwps] });
     // Funnel history is append-only (ntg_gwp_insert policy, 0008 migration).
     const { error } = await supabase.from('ntg_gwp').insert({
@@ -2128,8 +2493,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (input.ownFacingCount > input.totalFacingCount) {
       throw new Error('Own facing tidak boleh melebihi total facing.');
     }
-
-    const baseRow: Omit<ShareOfShelfRow, 'photoUrl'> = {
+    const row: Omit<ShareOfShelfRow, 'photoUrl'> = {
       id: uid('sos_'),
       visitId,
       storeId,
@@ -2139,52 +2503,20 @@ export const useStore = create<StoreState>()((set, get) => ({
       totalFacingCount: input.totalFacingCount,
       createdAt: Date.now(),
     };
-
-    if (!(await isOnline())) {
-      // Phase 5: native persists the required photo locally and defers upload
-      // to replay — the row can never be inserted without it (DB not-null
-      // constraint), so replay itself withholds the insert until the upload
-      // succeeds (see replayRequiredPhotoRow). Web keeps the pre-Phase-5
-      // online-required behavior (see offlineQueue.ts's QueuedOp comment).
-      if (Platform.OS === 'web') {
-        showDialog('Offline', 'Share of Shelf butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-        throw new ShownError('Tidak ada koneksi internet.');
-      }
-      let localPhotoUri: string;
-      try {
-        localPhotoUri = await persistPhotoLocally(photoUri);
-      } catch {
-        showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
-        throw new ShownError('Gagal menyimpan foto secara lokal.');
-      }
-      set({ shareOfShelfRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().shareOfShelfRows] });
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitShareOfShelf', row: baseRow, localPhotoUri });
-      showDialog('Tersimpan Offline', 'Share of Shelf tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return { queued: true };
-    }
-
-    let photoUrl: string;
-    try {
-      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-    } catch {
-      showDialog('Gagal Upload Foto', 'Foto wajib untuk Share of Shelf tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
-      throw new ShownError('Upload foto gagal.');
-    }
-    const row: ShareOfShelfRow = { ...baseRow, photoUrl };
-    set({ shareOfShelfRows: [row, ...get().shareOfShelfRows] });
-    const { error } = await supabase.from('share_of_shelf').insert(shareOfShelfRow(row));
-    if (error) {
-      set({ shareOfShelfRows: get().shareOfShelfRows.filter((x) => x.id !== row.id) });
-      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Share of Shelf ke server. Periksa koneksi internet dan coba lagi.');
-      throw new ShownError(error.message);
-    }
-    return { queued: false };
+    return submitRequiredPhotoReport(set, get, {
+      stateKey: 'shareOfShelfRows',
+      table: 'share_of_shelf',
+      toDbRow: shareOfShelfRow,
+      row,
+      photoUri,
+      label: 'Share of Shelf',
+      makeOp: (localPhotoUri) => ({ id: uid('op_'), type: 'submitShareOfShelf', row, localPhotoUri }),
+    });
   },
 
   submitPaidVisibility: async (visitId, storeId, input, photoUri) => {
     if (!input.visibilityType) throw new Error('Pilih jenis visibility.');
-
-    const baseRow: Omit<PaidVisibilityRow, 'photoUrl'> = {
+    const row: Omit<PaidVisibilityRow, 'photoUrl'> = {
       id: uid('pv_'),
       visitId,
       storeId,
@@ -2192,41 +2524,15 @@ export const useStore = create<StoreState>()((set, get) => ({
       complianceChecklist: input.complianceChecklist,
       createdAt: Date.now(),
     };
-
-    if (!(await isOnline())) {
-      if (Platform.OS === 'web') {
-        showDialog('Offline', 'Paid Visibility butuh foto sebagai bukti wajib — tidak dapat disimpan tanpa koneksi internet. Coba lagi saat online.');
-        throw new ShownError('Tidak ada koneksi internet.');
-      }
-      let localPhotoUri: string;
-      try {
-        localPhotoUri = await persistPhotoLocally(photoUri);
-      } catch {
-        showDialog('Gagal Menyimpan Foto', 'Tidak dapat menyimpan foto di perangkat. Laporan tidak disimpan — coba lagi.');
-        throw new ShownError('Gagal menyimpan foto secara lokal.');
-      }
-      set({ paidVisibilityRows: [{ ...baseRow, photoUrl: localPhotoUri }, ...get().paidVisibilityRows] });
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitPaidVisibility', row: baseRow, localPhotoUri });
-      showDialog('Tersimpan Offline', 'Paid Visibility tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return { queued: true };
-    }
-
-    let photoUrl: string;
-    try {
-      photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-    } catch {
-      showDialog('Gagal Upload Foto', 'Foto wajib untuk Paid Visibility tidak berhasil diupload. Laporan tidak disimpan — coba lagi.');
-      throw new ShownError('Upload foto gagal.');
-    }
-    const row: PaidVisibilityRow = { ...baseRow, photoUrl };
-    set({ paidVisibilityRows: [row, ...get().paidVisibilityRows] });
-    const { error } = await supabase.from('paid_visibility').insert(paidVisibilityRow(row));
-    if (error) {
-      set({ paidVisibilityRows: get().paidVisibilityRows.filter((x) => x.id !== row.id) });
-      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Paid Visibility ke server. Periksa koneksi internet dan coba lagi.');
-      throw new ShownError(error.message);
-    }
-    return { queued: false };
+    return submitRequiredPhotoReport(set, get, {
+      stateKey: 'paidVisibilityRows',
+      table: 'paid_visibility',
+      toDbRow: paidVisibilityRow,
+      row,
+      photoUri,
+      label: 'Paid Visibility',
+      makeOp: (localPhotoUri) => ({ id: uid('op_'), type: 'submitPaidVisibility', row, localPhotoUri }),
+    });
   },
 
   // --- Phase 3: Price Monitoring (PRD §5.6) — optional photo -------------
@@ -2241,57 +2547,31 @@ export const useStore = create<StoreState>()((set, get) => ({
       .filter((r) => r.sku && r.ownPrice >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan harga sendiri yang valid (>= 0).');
 
-    const online = await isOnline();
     const now = Date.now();
-    const baseRows: PriceMonitoringRow[] = clean.map((r) => ({
+    const { localPhotoUri, photoUrl } = await prepareOptionalPhoto(visitId, photoUri);
+    const newRows: PriceMonitoringRow[] = clean.map((r) => ({
       id: uid('pm_'),
       visitId,
       storeId,
       sku: r.sku,
       ownPrice: r.ownPrice,
       competitorPrices: r.competitorPrices,
-      photoUrl: undefined,
+      photoUrl,
       createdAt: now,
     }));
-
-    if (!online) {
-      let localPhotoUri: string | undefined;
-      if (photoUri && Platform.OS !== 'web') {
-        try {
-          localPhotoUri = await persistPhotoLocally(photoUri);
-        } catch {
-          showDialog('Foto Gagal Disimpan', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
-        }
-      } else if (photoUri) {
-        showDialog(
-          'Offline',
-          'Foto tidak disertakan karena tidak ada koneksi. Laporan tetap tersimpan; lampirkan foto saat online jika perlu.',
-        );
-      }
-      const displayRows = localPhotoUri ? baseRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : baseRows;
-      set({ priceMonitoringRows: [...displayRows, ...get().priceMonitoringRows] });
-      await enqueueOp(set, get, { id: uid('op_'), type: 'submitPriceMonitoring', rows: baseRows, localPhotoUri });
-      showDialog('Tersimpan Offline', 'Price Monitoring tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return { queued: true };
-    }
-
-    let photoUrl: string | undefined;
-    if (photoUri) {
-      try {
-        photoUrl = await uploadReportMedia(visitId, photoUri, extFromUri(photoUri));
-      } catch {
-        showDialog('Foto Gagal Diupload', 'Laporan tetap disimpan tanpa foto (foto bersifat opsional). Coba lampirkan foto lagi nanti.');
-      }
-    }
-    const newRows = baseRows.map((r) => ({ ...r, photoUrl }));
-    set({ priceMonitoringRows: [...newRows, ...get().priceMonitoringRows] });
-    const { error } = await supabase.from('price_monitoring').insert(newRows.map(priceMonitoringRow));
-    if (error) {
-      set({ priceMonitoringRows: get().priceMonitoringRows.filter((x) => !newRows.some((n) => n.id === x.id)) });
-      showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan Price Monitoring ke server. Periksa koneksi internet dan coba lagi.');
-      throw new ShownError(error.message);
-    }
-    return { queued: false };
+    const ids = new Set(newRows.map((r) => r.id));
+    const display = localPhotoUri ? newRows.map((r) => ({ ...r, photoUrl: localPhotoUri })) : newRows;
+    set({ priceMonitoringRows: [...display, ...get().priceMonitoringRows] });
+    return runOrQueue(
+      set,
+      get,
+      { id: uid('op_'), type: 'submitPriceMonitoring', rows: newRows, localPhotoUri },
+      'Price Monitoring',
+      () => {
+        set({ priceMonitoringRows: get().priceMonitoringRows.filter((x) => !ids.has(x.id)) });
+        if (localPhotoUri) void discardLocalPhoto(localPhotoUri);
+      },
+    );
   },
 
   // --- Phase 3: Survey (PRD §5.7) + Nutrition Quiz (PRD §6, via NutritionQuizScreen) ---
@@ -2317,6 +2597,10 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   submitSurveyResponse: async (r) => {
+    if (visitPendingSync(get, r.visitId)) {
+      showVisitPendingDialog();
+      return 'visit not synced yet';
+    }
     const list = get().surveyResponses;
     set({ surveyResponses: [r, ...list] });
     const { error } = await supabase.from('survey_responses').insert({
@@ -2573,6 +2857,11 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   refreshData: async () => {
     if (!get().sessionUserId) return null;
+    if (resumeUserId) {
+      // Opened from the offline snapshot: a refresh means "try the full sync now".
+      await resumeSession(set, get);
+      return resumeUserId ? 'Masih offline.' : null;
+    }
     const since = historyWindowStart(new Date(), HISTORY_DAYS);
     const { rows, error } = await fetchSnapshot(since);
     if (error) return error.message; // partial data would drop rows from the merge below — keep what we have
@@ -2681,33 +2970,12 @@ export const useStore = create<StoreState>()((set, get) => ({
       geoFenceOk,
     };
     set({ attendances: [a, ...get().attendances] });
-
-    if (!(await isOnline())) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'clockIn', attendance: a });
-      showDialog('Tersimpan Offline', 'Clock-in tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return a.id;
-    }
-
-    const { error } = await supabase.from('attendances').insert({
-      id: a.id,
-      user_id: a.userId,
-      clock_in_at: new Date(a.clockInAt).toISOString(),
-      clock_in_lat: a.clockInLat,
-      clock_in_lng: a.clockInLng,
-      clock_out_at: null,
-      geo_fence_ok: a.geoFenceOk,
-    });
-    if (error) {
-      // rollback optimistic state — a failed insert means the user isn't actually
-      // clocked in server-side, so the local cache must not claim otherwise.
-      set({ attendances: get().attendances.filter((x) => x.id !== a.id) });
-      throw new Error(error.message);
-    }
-    const { error: rpErr } = await supabase
-      .from('route_points')
-      .insert({ attendance_id: a.id, user_id: userId, lat: pos.lat, lng: pos.lng, recorded_at: new Date(t).toISOString() });
-    if (rpErr) console.warn('clockIn route point failed:', rpErr.message);
-    return a.id;
+    // A rejected insert means the user isn't clocked in server-side, so the
+    // local cache must not claim otherwise.
+    const { queued } = await runOrQueue(set, get, { id: uid('op_'), type: 'clockIn', attendance: a }, 'Clock-in', () =>
+      set({ attendances: get().attendances.filter((x) => x.id !== a.id) }),
+    );
+    return queued;
   },
 
   clockOut: async (pos) => {
@@ -2715,44 +2983,29 @@ export const useStore = create<StoreState>()((set, get) => ({
     const a = get().attendances.find((x) => x.userId === userId && !x.clockOutAt);
     if (!a) return false;
     const t = Date.now();
-    const shouldAddPoint =
+    const addPoint =
       haversineM(a.route[a.route.length - 1] ?? { lat: a.clockInLat, lng: a.clockInLng }, pos) > TRACK_MIN_STEP_M;
-    const before = get().attendances;
     set({
-      attendances: before.map((x) =>
+      attendances: get().attendances.map((x) =>
         x.id === a.id
           ? {
               ...x,
               clockOutAt: t,
               clockOutLat: pos.lat,
               clockOutLng: pos.lng,
-              route: shouldAddPoint ? [...x.route, { ...pos, t }] : x.route,
+              route: addPoint ? [...x.route, { ...pos, t }] : x.route,
             }
           : x,
       ),
     });
-
-    if (!(await isOnline())) {
-      await enqueueOp(set, get, { id: uid('op_'), type: 'clockOut', attendanceId: a.id, clockOutAt: t, lat: pos.lat, lng: pos.lng });
-      showDialog('Tersimpan Offline', 'Clock-out tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.');
-      return true;
-    }
-
-    const { error } = await supabase
-      .from('attendances')
-      .update({ clock_out_at: new Date(t).toISOString(), clock_out_lat: pos.lat, clock_out_lng: pos.lng })
-      .eq('id', a.id);
-    if (error) {
-      set({ attendances: before });
-      throw new Error(error.message);
-    }
-    if (shouldAddPoint) {
-      const { error: rpErr } = await supabase
-        .from('route_points')
-        .insert({ attendance_id: a.id, user_id: userId, lat: pos.lat, lng: pos.lng, recorded_at: new Date(t).toISOString() });
-      if (rpErr) console.warn('clockOut route point failed:', rpErr.message);
-    }
-    return false;
+    const { queued } = await runOrQueue(
+      set,
+      get,
+      { id: uid('op_'), type: 'clockOut', attendanceId: a.id, clockOutAt: t, lat: pos.lat, lng: pos.lng, addPoint },
+      'Clock-out',
+      () => set({ attendances: get().attendances.map((x) => (x.id === a.id ? a : x)) }),
+    );
+    return queued;
   },
 
   addRoutePoint: (userId, p) => {
@@ -2772,6 +3025,28 @@ export const useStore = create<StoreState>()((set, get) => ({
       });
   },
 }));
+
+// Keep the offline snapshot current: debounced save whenever a cached slice
+// changes (a clock-in made after the last full sync must survive a cold start
+// without signal, or the NC would be shown as not clocked in).
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+const SNAPSHOT_SAVE_DEBOUNCE_MS = 2000;
+
+useStore.subscribe((state, prev) => {
+  if (!state.sessionUserId) {
+    if (snapshotTimer) clearTimeout(snapshotTimer);
+    snapshotTimer = null;
+    return;
+  }
+  if (state.sessionUserId !== prev.sessionUserId && state.offlineSnapshotAt) return; // just loaded from it
+  if (!SNAPSHOT_KEYS.some((k) => state[k] !== prev[k])) return;
+  if (snapshotTimer) clearTimeout(snapshotTimer);
+  snapshotTimer = setTimeout(() => {
+    snapshotTimer = null;
+    const s = useStore.getState();
+    if (s.sessionUserId) void saveSnapshot(s.sessionUserId, buildOfflineSnapshot(s, s.sessionUserId));
+  }, SNAPSHOT_SAVE_DEBOUNCE_MS);
+});
 
 export function useCurrentUser(): User | null {
   return useStore((s) =>
