@@ -289,9 +289,20 @@ async function main() {
     expect((await anon.rpc('live_positions')).error, 'anon key can call live_positions');
   });
 
+  await check('a second report for the same visit + SKU is rejected; replaying the same row is a no-op', async () => {
+    const id = `${RUN}_stk_dup`;
+    const dup = await nc.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo1', sku: 'smoke', qty_on_hand: 9 });
+    if (!dup.error) created.stockTaking.push(id);
+    expect(dup.error, 'duplicate SKU for the same visit was accepted — run migration 0013');
+    expect(dup.error.code === 'P0001', `duplicate SKU rejected with ${dup.error.code}, expected P0001 (app must not read it as "already saved")`);
+    const replay = await nc.client.from('stock_taking').insert({ id: stkId, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE', qty_on_hand: 5 });
+    expect(replay.error?.code === '23505', `replaying the same row gave ${replay.error?.code ?? 'success'}, expected 23505`);
+  });
+
   await check('NC cannot file a report under a different store than the visit', async () => {
     const id = `${RUN}_stk_wrong`;
-    const res = await nc.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo2', sku: 'SMOKE', qty_on_hand: 1 });
+    // Distinct SKU: the duplicate-report trigger (0013) fires before RLS and must not be what refuses this.
+    const res = await nc.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo2', sku: 'SMOKE_STORE', qty_on_hand: 1 });
     if (!res.error) created.stockTaking.push(id);
     expect(res.error, 'report accepted with a store_id that does not match the visit');
   });
@@ -311,7 +322,7 @@ async function main() {
   await check('another NC cannot report against this NC’s visit', async () => {
     if (!nc2) throw new Skip('second NC unavailable');
     const id = `${RUN}_stk_other`;
-    const res = await nc2.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE', qty_on_hand: 1 });
+    const res = await nc2.client.from('stock_taking').insert({ id, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE_NC2', qty_on_hand: 1 });
     if (!res.error) created.stockTaking.push(id);
     expect(res.error, 'foreign NC report accepted');
   });
@@ -330,6 +341,23 @@ async function main() {
     const tamper = await nc.client.from('attendances').update({ clock_in_at: new Date(Date.now() - 5 * 3600000).toISOString() }).eq('id', attId).select();
     expect(tamper.error || !tamper.data?.length, 'clock_in_at was rewritten');
     expectOk(await nc.client.from('attendances').update({ clock_out_at: new Date().toISOString(), clock_out_lat: -6.2, clock_out_lng: 106.8 }).eq('id', attId), 'clock-out');
+  });
+
+  await check('late route points: in-session point accepted after clock-out, re-upload ignored, out-of-session refused', async () => {
+    const late = { attendance_id: attId, user_id: nc.id, lat: -6.22, lng: 106.82, recorded_at: new Date(checkIn.getTime() + 10 * 60000).toISOString() };
+    const upsert = () => nc.client.from('route_points').upsert(late, { onConflict: 'attendance_id,recorded_at', ignoreDuplicates: true });
+    expectOk(await upsert(), 'buffered in-session point uploaded after clock-out (run migration 0013)');
+    expectOk(await upsert(), 're-upload of the same point');
+    const { count } = await admin
+      .from('route_points')
+      .select('id', { count: 'exact', head: true })
+      .eq('attendance_id', attId)
+      .eq('recorded_at', late.recorded_at);
+    expect(count === 1, `same point stored ${count} times`);
+    const after = await nc.client
+      .from('route_points')
+      .insert({ ...late, recorded_at: new Date(Date.now() + 60 * 60000).toISOString() });
+    expect(after.error, 'point after clock-out / in the future was accepted');
   });
 
   await check('evidence photos are private: no anonymous URL; signed URL for the TL, refused for another NC', async () => {

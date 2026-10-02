@@ -11,6 +11,8 @@ import { StoreCategory } from '../types';
 
 /** Share of Shelf (PRD §5.2) — one row per visit, required photo (evidence is
  * the source of truth for v1; photo annotation is explicitly out of scope). */
+const CATEGORIES: StoreCategory[] = ['premium', 'super_premium'];
+
 export default function ShareOfShelfScreen() {
   const route = useRoute<any>();
   const navigation = useNavigation<any>();
@@ -20,7 +22,16 @@ export default function ShareOfShelfScreen() {
   const submitShareOfShelf = useStore((s) => s.submitShareOfShelf);
 
   const [channel, setChannel] = useState('');
-  const [category, setCategory] = useState<StoreCategory>('premium');
+  // One Share of Shelf per category per visit — categories already reported can't be picked again.
+  const allSos = useStore((s) => s.shareOfShelfRows);
+  const doneCategories = useMemo(
+    () => new Set(allSos.filter((r) => r.visitId === visitId).map((r) => r.category)),
+    [allSos, visitId],
+  );
+  const [category, setCategory] = useState<StoreCategory>(() =>
+    CATEGORIES.find((c) => !doneCategories.has(c)) ?? 'premium',
+  );
+  const allDone = CATEGORIES.every((c) => doneCategories.has(c));
   const [ownFacing, setOwnFacing] = useState('');
   const [totalFacing, setTotalFacing] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -53,6 +64,7 @@ export default function ShareOfShelfScreen() {
 
   const canSubmit =
     !busy &&
+    !doneCategories.has(category) &&
     ownFacing.trim() !== '' &&
     totalFacing.trim() !== '' &&
     !facingInvalid &&
@@ -105,11 +117,18 @@ export default function ShareOfShelfScreen() {
           <View style={{ height: 10 }} />
           <Field label="Kategori">
             <View style={{ flexDirection: 'row', gap: 8 }}>
-              {(['premium', 'super_premium'] as StoreCategory[]).map((c) => (
-                <Chip key={c} label={CATEGORY_LABEL[c]} active={category === c} onPress={() => setCategory(c)} />
-              ))}
+              {CATEGORIES.map((c) =>
+                doneCategories.has(c) ? (
+                  <Chip key={c} label={`${CATEGORY_LABEL[c]} ✓ sudah dilaporkan`} color={C.ok} />
+                ) : (
+                  <Chip key={c} label={CATEGORY_LABEL[c]} active={category === c} onPress={() => setCategory(c)} />
+                ),
+              )}
             </View>
           </Field>
+          {allDone && (
+            <Muted style={{ marginTop: 8 }}>Semua kategori sudah dilaporkan untuk kunjungan ini.</Muted>
+          )}
         </Card>
 
         <Card>

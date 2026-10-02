@@ -5,7 +5,8 @@ import * as ImagePicker from 'expo-image-picker';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { C, F } from '../theme';
-import { ShownError, useStore } from '../store/useStore';
+import { fmtIDR } from '../utils/format';
+import { reportedSkus, ShownError, useStore } from '../store/useStore';
 
 interface DraftRow {
   key: string;
@@ -37,16 +38,25 @@ export default function PriceMonitoringScreen() {
   const [busy, setBusy] = useState(false);
 
   const pickedSkus = useMemo(() => new Set(rows.map((r) => r.sku.toLowerCase())), [rows]);
+  // One report per visit per SKU (a second one would double the numbers):
+  // SKUs already sent for this visit are listed, not offered again.
+  const allReported = useStore((s) => s.priceMonitoringRows);
+  const reportedList = useMemo(() => allReported.filter((r) => r.visitId === visitId), [allReported, visitId]);
+  const reported = useMemo(() => reportedSkus(reportedList, visitId), [reportedList, visitId]);
   const suggestions = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return products
-      .filter((p) => !pickedSkus.has(p.sku.toLowerCase()))
+      .filter((p) => !pickedSkus.has(p.sku.toLowerCase()) && !reported.has(p.sku.toLowerCase()))
       .filter((p) => !needle || p.sku.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle))
       .slice(0, 8);
-  }, [products, query, pickedSkus]);
+  }, [products, query, pickedSkus, reported]);
 
   const addProduct = (sku: string, label: string, manual: boolean) => {
     if (pickedSkus.has(sku.toLowerCase())) return;
+    if (reported.has(sku.toLowerCase())) {
+      showDialog('Sudah Dilaporkan', `SKU ${sku} sudah dilaporkan di kunjungan ini.`);
+      return;
+    }
     setRows((r) => [...r, { key: sku + Date.now(), sku, label, ownPrice: '', competitor1: '', competitor2: '', competitor3: '', manual }]);
     setQuery('');
   };
@@ -118,6 +128,13 @@ export default function PriceMonitoringScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Price Monitoring" subtitle="Bi-weekly · harga sendiri vs kompetitor (PRD §5.6)" />
+
+        {reportedList.length > 0 && (
+          <Card>
+            <H>Sudah Dilaporkan di Kunjungan Ini ({reportedList.length} SKU)</H>
+            <Muted style={{ marginTop: 2 }}>{reportedList.map((r) => `${r.sku}: ${fmtIDR(r.ownPrice)}`).join(' · ')}</Muted>
+          </Card>
+        )}
 
         <Card>
           <Field label="Cari SKU dari master produk">

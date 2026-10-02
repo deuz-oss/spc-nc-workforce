@@ -3,7 +3,8 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { TRACK_INTERVAL_MS } from '../config';
 import { useCurrentUser, useStore } from '../store/useStore';
-import { LOCATION_TASK_NAME } from '../tasks/locationTask';
+import { handleLocations, LOCATION_TASK_NAME } from '../tasks/locationTask';
+import { clearTrackingContext, startTrackingContext } from '../utils/routeBuffer';
 
 /**
  * Dipasang sekali di root: start/stop perekaman GPS selama ada sesi absensi
@@ -24,10 +25,10 @@ export function TrackingWatcher() {
     if (!me || me.role === 'reckitt_client' || me.role === 'super_admin') return null;
     return s.attendances.find((a) => a.userId === me.id && !a.clockOutAt)?.id ?? null;
   });
-  const addRoutePoint = useStore((s) => s.addRoutePoint);
 
   useEffect(() => {
     if (!me || !activeId) {
+      void clearTrackingContext();
       if (Platform.OS !== 'web') {
         Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
           .then((started) => (started ? Location.stopLocationUpdatesAsync(LOCATION_TASK_NAME) : undefined))
@@ -51,14 +52,21 @@ export function TrackingWatcher() {
     })();
 
     async function startTracking() {
+      // The background task records from this persisted context, not from the
+      // store — it must keep working when Android restarts it with the app killed.
+      const route = useStore.getState().attendances.find((a) => a.id === activeId)?.route ?? [];
+      await startTrackingContext(userId, activeId!, route[route.length - 1] ?? null);
+      if (cancelled) return;
+
       const fg = await Location.requestForegroundPermissionsAsync();
       if (fg.status !== 'granted' || cancelled) return;
 
       if (Platform.OS === 'web') {
         sub = await Location.watchPositionAsync(
           { accuracy: Location.Accuracy.Balanced, timeInterval: TRACK_INTERVAL_MS, distanceInterval: 10 },
-          (pos) => addRoutePoint(userId, { lat: pos.coords.latitude, lng: pos.coords.longitude }),
+          (pos) => void handleLocations([pos]),
         );
+        if (cancelled) sub.remove(); // unmounted while the watcher was starting
         return;
       }
 

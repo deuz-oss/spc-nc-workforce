@@ -1,20 +1,36 @@
 import * as TaskManager from 'expo-task-manager';
-import * as Location from 'expo-location';
-import { useStore } from '../store/useStore';
+import type * as Location from 'expo-location';
+import { TRACK_MIN_STEP_M } from '../config';
+import { recordLocations } from '../utils/routeBuffer';
+import { flushRouteBuffer } from '../utils/routeSync';
 
 /**
  * Registered once at module load (imported from index.ts, before the app
  * mounts) so the native side can wake this callback even while the app is
- * backgrounded — TrackingWatcher only starts/stops it, the actual point
- * recording happens here via useStore.getState() (works outside React).
+ * backgrounded — or killed: Android then runs it in a headless JS context
+ * where the zustand store was never hydrated. So this path never touches the
+ * store: whose session to record comes from the persisted tracking context
+ * (TrackingWatcher writes it), points go to the on-device buffer, and the
+ * upload uses only the persisted Supabase session.
  */
 export const LOCATION_TASK_NAME = 'spc-nc-background-location';
+
+/** Shared by the native background task and the web foreground watcher. */
+export async function handleLocations(locations: Array<Pick<Location.LocationObject, 'coords' | 'timestamp'>>): Promise<void> {
+  const userId = await recordLocations(
+    locations.map((l) => ({ lat: l.coords.latitude, lng: l.coords.longitude, t: Math.round(l.timestamp) })),
+    TRACK_MIN_STEP_M,
+  );
+  if (userId) await flushRouteBuffer(userId);
+}
 
 TaskManager.defineTask(LOCATION_TASK_NAME, async ({ data, error }) => {
   if (error || !data) return;
   const { locations } = data as { locations: Location.LocationObject[] };
-  const last = locations[locations.length - 1];
-  const userId = useStore.getState().sessionUserId;
-  if (!last || !userId) return;
-  useStore.getState().addRoutePoint(userId, { lat: last.coords.latitude, lng: last.coords.longitude });
+  if (!locations?.length) return;
+  try {
+    await handleLocations(locations);
+  } catch (e) {
+    console.warn('location task failed:', e instanceof Error ? e.message : e);
+  }
 });

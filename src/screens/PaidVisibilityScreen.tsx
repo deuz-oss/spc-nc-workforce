@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Image, ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import * as ImagePicker from 'expo-image-picker';
@@ -20,6 +20,12 @@ export default function PaidVisibilityScreen() {
 
   const submitPaidVisibility = useStore((s) => s.submitPaidVisibility);
 
+  // One Paid Visibility per type per visit — types already reported can't be picked again.
+  const allPv = useStore((s) => s.paidVisibilityRows);
+  const doneTypes = useMemo(
+    () => new Set(allPv.filter((r) => r.visitId === visitId).map((r) => r.visibilityType)),
+    [allPv, visitId],
+  );
   const [visibilityType, setVisibilityType] = useState<string | null>(null);
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [photoUri, setPhotoUri] = useState<string | null>(null);
@@ -42,7 +48,7 @@ export default function PaidVisibilityScreen() {
     if (!res.canceled && res.assets[0]) setPhotoUri(res.assets[0].uri);
   };
 
-  const canSubmit = !busy && !!visibilityType && !!photoUri;
+  const canSubmit = !busy && !!visibilityType && !doneTypes.has(visibilityType) && !!photoUri;
 
   const submit = async () => {
     if (!visibilityType) {
@@ -79,9 +85,13 @@ export default function PaidVisibilityScreen() {
         <Card>
           <H>Jenis Visibility</H>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
-            {VISIBILITY_TYPES.map((v) => (
-              <Chip key={v.key} label={v.label} active={visibilityType === v.key} onPress={() => setVisibilityType(v.key)} />
-            ))}
+            {VISIBILITY_TYPES.map((v) =>
+              doneTypes.has(v.key) ? (
+                <Chip key={v.key} label={`${v.label} ✓ sudah dilaporkan`} color={C.ok} />
+              ) : (
+                <Chip key={v.key} label={v.label} active={visibilityType === v.key} onPress={() => setVisibilityType(v.key)} />
+              ),
+            )}
           </View>
         </Card>
 

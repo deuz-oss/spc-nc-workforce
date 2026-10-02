@@ -45,6 +45,8 @@ import { fmtDate } from '../utils/format';
 import { historyWindowStart } from '../utils/period';
 import { uid } from '../utils/uuid';
 import { deleteSnapshot, getLastUser, loadSnapshot, OfflineSnapshot, saveSnapshot, setLastUser } from '../utils/offlineCache';
+import { BufferedPoint, onPointsRecorded, readBufferedPoints } from '../utils/routeBuffer';
+import { flushRouteBuffer } from '../utils/routeSync';
 import { drainQueue, isNetworkError, OP_LABEL, QueueReason, queueReason, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
@@ -305,7 +307,6 @@ interface StoreState {
   clockIn(pos: { lat: number; lng: number }, geoFenceOk: boolean): Promise<boolean>;
   /** Resolves true if it was saved offline only (the user has already been told). */
   clockOut(pos: { lat: number; lng: number }): Promise<boolean>;
-  addRoutePoint(userId: string, p: Omit<RoutePoint, 't'>): void;
 }
 
 /** user yang datanya boleh dilihat `viewer` sesuai posisi (role) — mirrors profiles_select RLS */
@@ -844,6 +845,10 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
     return settleLogged(error);
   }
   if (op.type === 'clockOut') {
+    // Upload what the phone still holds of this session first (best-effort —
+    // since 0013 the server also accepts in-session points after clock-out).
+    const userId = get().sessionUserId;
+    if (userId) await flushRouteBuffer(userId);
     if (op.addPoint) {
       // Before closing the session: route_points_insert_own only accepts points
       // for an attendance that is still open.
@@ -1199,6 +1204,20 @@ async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVis
   return { queued: false };
 }
 
+/** SKUs (lower-cased) already reported in this visit for a per-SKU module. */
+export function reportedSkus(rows: Array<{ visitId: string; sku: string }>, visitId: string): Set<string> {
+  return new Set(rows.filter((r) => r.visitId === visitId).map((r) => r.sku.toLowerCase()));
+}
+
+/** One report per visit per SKU (category / visibility type for SoS / PV) —
+ * a second submission would double the numbers. Mirrors the server-side
+ * reject_duplicate_report trigger (0013), which also covers other devices. */
+function assertNewSkus(rows: Array<{ visitId: string; sku: string }>, visitId: string, skus: string[]) {
+  const done = reportedSkus(rows, visitId);
+  const dup = skus.filter((sku) => done.has(sku.toLowerCase()));
+  if (dup.length) throw new Error(`SKU berikut sudah dilaporkan di kunjungan ini: ${dup.join(', ')}.`);
+}
+
 /** True while this visit's own check-in is still in the offline queue — the
  * visits row doesn't exist server-side yet, so online-only writes that
  * reference it (NTG & GWP, survey responses) would fail on the foreign key. */
@@ -1323,6 +1342,7 @@ async function bootFromSnapshot(
     offlineSnapshotAt: snap.savedAt,
   });
   await restoreQueue(set, get, userId);
+  await syncRoutePoints(set, get, false);
   return true;
 }
 
@@ -1380,7 +1400,7 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
       const t = new Date(p.recorded_at).getTime();
       set({
         attendances: get().attendances.map((a) =>
-          // addRoutePoint already appended this point optimistically — skip the echo.
+          // Recorded locally first (routeBuffer listener) — skip the echo.
           a.id === p.attendance_id && !a.route.some((r) => r.t === t)
             ? { ...a, route: [...a.route, { lat: p.lat, lng: p.lng, t }].sort((x, y) => x.t - y.t) }
             : a,
@@ -1729,14 +1749,42 @@ async function resumeSessionOnce(set: (p: Partial<StoreState>) => void, get: () 
     await restoreQueue(set, get, session.user.id);
   }
   void get().processPendingOps();
+  void syncRoutePoints(set, get);
   registerPushToken();
 }
 
+/** Adds GPS points to the local copy of their attendance's route (display
+ * only — km, point count, the map). Idempotent: points already there are skipped. */
+function applyRoutePoints(set: (p: Partial<StoreState>) => void, get: () => StoreState, points: BufferedPoint[]) {
+  if (!points.length) return;
+  const byAttendance = new Map<string, BufferedPoint[]>();
+  for (const p of points) byAttendance.set(p.attendanceId, [...(byAttendance.get(p.attendanceId) ?? []), p]);
+  let changed = false;
+  const attendances = get().attendances.map((a) => {
+    const add = byAttendance.get(a.id)?.filter((p) => !a.route.some((r) => r.t === p.t));
+    if (!add?.length) return a;
+    changed = true;
+    return { ...a, route: [...a.route, ...add.map(({ lat, lng, t }) => ({ lat, lng, t }))].sort((x, y) => x.t - y.t) };
+  });
+  if (changed) set({ attendances });
+}
+
+/** Shows the points still waiting on this phone (a fresh server load doesn't
+ * have them yet), then uploads them. */
+async function syncRoutePoints(set: (p: Partial<StoreState>) => void, get: () => StoreState, upload = true) {
+  const userId = get().sessionUserId;
+  if (!userId) return;
+  applyRoutePoints(set, get, await readBufferedPoints(userId));
+  if (upload && !resumeUserId) await flushRouteBuffer(userId);
+}
+
 /** Connectivity may be back (NetInfo change, app foregrounded, retry timer):
- * finish an offline-opened session first, otherwise flush the queue. */
+ * finish an offline-opened session first, otherwise flush the queue (which
+ * uploads buffered route points when it's done) or just the route points. */
 function onMaybeOnline(set: (p: Partial<StoreState>) => void, get: () => StoreState) {
   if (resumeUserId) void resumeSession(set, get);
   else if (get().pendingOps.length) void get().processPendingOps();
+  else void syncRoutePoints(set, get);
 }
 
 /**
@@ -1874,6 +1922,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         await supabase.auth.signOut();
       } else if (result === 'ok') {
         await restoreQueue(set, get, session.user.id);
+        void syncRoutePoints(set, get);
         registerPushToken(); // fire-and-forget, PRD §17
       } else {
         // No server: open from the on-device snapshot so field work (clock,
@@ -1967,6 +2016,8 @@ export const useStore = create<StoreState>()((set, get) => ({
       replayingQueue = false;
     }
     if (get().sessionUserId === userId && get().pendingOps.length) scheduleQueueRetry(set, get);
+    // Clock-ins that just landed unblock their buffered route points.
+    if (get().sessionUserId === userId) void flushRouteBuffer(userId);
     const failed = failedOps.map((op) => OP_LABEL[op.type]);
     if (failed.length) {
       showDialog(
@@ -2017,6 +2068,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     // init() only restores a queue when a session already existed at cold
     // start — a queue persisted before the session expired must load here.
     await restoreQueue(set, get, data.user.id);
+    void syncRoutePoints(set, get);
     registerPushToken(); // fire-and-forget, PRD §17
     return null;
   },
@@ -2368,6 +2420,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       .map((r) => ({ sku: r.sku.trim(), qtyOnHand: r.qtyOnHand, outOfStock: r.outOfStock }))
       .filter((r) => r.sku && r.qtyOnHand >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan jumlah valid (>= 0).');
+    assertNewSkus(get().stockTakingRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
     const { localPhotoUri, photoUrl } = await prepareOptionalPhoto(visitId, photoUri);
@@ -2396,6 +2449,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       .map((r) => ({ sku: r.sku.trim(), unitsSold: r.unitsSold, revenue: r.revenue }))
       .filter((r) => r.sku && r.unitsSold >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan unit terjual valid (>= 0).');
+    assertNewSkus(get().offtakeRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
     const newRows: OfftakeRow[] = clean.map((r) => ({
@@ -2493,6 +2547,9 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (input.ownFacingCount > input.totalFacingCount) {
       throw new Error('Own facing tidak boleh melebihi total facing.');
     }
+    if (get().shareOfShelfRows.some((r) => r.visitId === visitId && r.category === input.category)) {
+      throw new Error(`Share of Shelf kategori ${input.category} sudah dilaporkan di kunjungan ini.`);
+    }
     const row: Omit<ShareOfShelfRow, 'photoUrl'> = {
       id: uid('sos_'),
       visitId,
@@ -2516,6 +2573,9 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   submitPaidVisibility: async (visitId, storeId, input, photoUri) => {
     if (!input.visibilityType) throw new Error('Pilih jenis visibility.');
+    if (get().paidVisibilityRows.some((r) => r.visitId === visitId && r.visibilityType === input.visibilityType)) {
+      throw new Error('Paid Visibility jenis ini sudah dilaporkan di kunjungan ini.');
+    }
     const row: Omit<PaidVisibilityRow, 'photoUrl'> = {
       id: uid('pv_'),
       visitId,
@@ -2546,6 +2606,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       }))
       .filter((r) => r.sku && r.ownPrice >= 0);
     if (!clean.length) throw new Error('Isi minimal satu SKU dengan harga sendiri yang valid (>= 0).');
+    assertNewSkus(get().priceMonitoringRows, visitId, clean.map((r) => r.sku));
 
     const now = Date.now();
     const { localPhotoUri, photoUrl } = await prepareOptionalPhoto(visitId, photoUri);
@@ -2755,8 +2816,11 @@ export const useStore = create<StoreState>()((set, get) => ({
     // Deliberate explicit refetch instead of relying on realtime — a single
     // compute run can upsert 200+ rows, which isn't worth subscribing to live
     // (see the `scorecards` state field's comment).
-    const { data, error: fetchErr } = await supabase.from('scorecards').select('*');
-    if (!fetchErr) set({ scorecards: (data ?? []).map(mapScorecard) });
+    // Paged: one row per subject per month grows past PostgREST's 1000-row cap
+    // within months, and a plain select would truncate silently.
+    const { data, error: fetchErr } = await fetchAll('scorecards');
+    if (fetchErr) console.warn('computeScorecards: refetch failed:', fetchErr.message);
+    else set({ scorecards: data.map(mapScorecard) });
     return null;
   },
 
@@ -3007,24 +3071,14 @@ export const useStore = create<StoreState>()((set, get) => ({
     );
     return queued;
   },
-
-  addRoutePoint: (userId, p) => {
-    const a = get().attendances.find((x) => x.userId === userId && !x.clockOutAt);
-    if (!a) return;
-    const last = a.route[a.route.length - 1];
-    if (last && haversineM(last, p) < TRACK_MIN_STEP_M) return;
-    const t = Date.now();
-    set({
-      attendances: get().attendances.map((x) => (x.id === a.id ? { ...x, route: [...x.route, { ...p, t }] } : x)),
-    });
-    supabase
-      .from('route_points')
-      .insert({ attendance_id: a.id, user_id: userId, lat: p.lat, lng: p.lng, recorded_at: new Date(t).toISOString() })
-      .then(({ error }) => {
-        if (error) console.warn('addRoutePoint failed:', error.message);
-      });
-  },
 }));
+
+// Points recorded by the location task while the app is running show up on
+// the open attendance right away (headless, there is no session in the store).
+onPointsRecorded((userId, points) => {
+  if (useStore.getState().sessionUserId !== userId) return;
+  applyRoutePoints(useStore.setState, useStore.getState, points);
+});
 
 // Keep the offline snapshot current: debounced save whenever a cached slice
 // changes (a clock-in made after the last full sync must survive a cold start

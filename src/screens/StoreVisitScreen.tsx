@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StickyFooter } from '../components/ui';
@@ -41,6 +41,29 @@ export default function StoreVisitScreen() {
   const visit = useStore((s) => s.visits.find((v) => v.id === visitId));
   const stores = useStore((s) => s.stores);
   const finishVisit = useStore((s) => s.finishVisit);
+  const stockTakingRows = useStore((s) => s.stockTakingRows);
+  const offtakeRows = useStore((s) => s.offtakeRows);
+  const ntgGwps = useStore((s) => s.ntgGwps);
+  const shareOfShelfRows = useStore((s) => s.shareOfShelfRows);
+  const paidVisibilityRows = useStore((s) => s.paidVisibilityRows);
+  const priceMonitoringRows = useStore((s) => s.priceMonitoringRows);
+  const surveyResponses = useStore((s) => s.surveyResponses);
+
+  /** Modules with at least one report for this visit. */
+  const filled = useMemo(() => {
+    const has = (rows: Array<{ visitId: string | null }>) => rows.some((r) => r.visitId === visitId);
+    return new Set(
+      [
+        has(stockTakingRows) && 'stock_taking',
+        has(offtakeRows) && 'offtake',
+        has(ntgGwps) && 'ntg_gwp',
+        has(shareOfShelfRows) && 'share_of_shelf',
+        has(paidVisibilityRows) && 'paid_visibility',
+        has(priceMonitoringRows) && 'price_monitoring',
+        has(surveyResponses) && 'survey',
+      ].filter(Boolean),
+    );
+  }, [visitId, stockTakingRows, offtakeRows, ntgGwps, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, surveyResponses]);
 
   const store = stores.find((m) => m.id === visit?.storeId);
   const [now, setNow] = useState(Date.now());
@@ -135,6 +158,7 @@ export default function StoreVisitScreen() {
                   onPress={() => navigation.navigate(MODULE_ROUTE[m.key], { visitId: visit.id, storeId: visit.storeId })}
                   title={m.label}
                   subtitle={`${m.group} · ${m.cadence}`}
+                  trailing={filled.has(m.key) ? <Badge label="Terisi" color={C.ok} /> : undefined}
                 />
               ))}
             </View>

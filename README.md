@@ -56,11 +56,12 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0012`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0013`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
-   `0012_live_positions.sql` (TL/ARCO live team map) are required.
+   `0012_live_positions.sql` (TL/ARCO live team map) and
+   `0013_route_buffer_and_report_dedup.sql` (late/offline GPS points accepted, one report per visit per SKU) are required.
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
    ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and
@@ -132,6 +133,15 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   only when the device actually reaches the internet (`isInternetReachable`, not just "connected") **and** nothing
   is queued ahead of it — otherwise it queues behind earlier ops so they reach the server in order; a request
   that fails at the network level is queued rather than lost. The tab header shows how many writes still wait.
+- ✅ **GPS route survives no signal and a killed app.** Location fixes go to an on-device buffer
+  (`src/utils/routeBuffer.ts`) with their real fix time — every fix of a batch, not just the last — and are
+  uploaded by `src/utils/routeSync.ts` whenever possible (idempotent, migration 0013). The background task reads
+  whose session to record from a persisted tracking context, not the app store, so it keeps recording when
+  Android restarts it headless. Points of a clock-in still in the offline queue wait for it to sync.
+- ✅ **One report per visit per SKU** (category for Share of Shelf, type for Paid Visibility): already-reported
+  items are listed and can't be submitted again — enforced in the app and by a server trigger (0013), so a
+  repeated Offtake submission can no longer double units sold. *Correcting* a submitted report is still not
+  possible (reports are insert-only by design) — needs a decision on who may correct and how it's audited.
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
@@ -222,7 +232,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0012`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0013`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -253,7 +263,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 30 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 32 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)
