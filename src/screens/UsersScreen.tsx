@@ -256,7 +256,7 @@ export default function UsersScreen() {
           }}
         />
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-          <Btn small variant="outline" title="Impor Massal (CSV)" onPress={() => navigation.navigate('Import')} />
+          <Btn small variant="outline" title="Impor Massal (CSV)" onPress={() => navigation.navigate('Import', { mode: 'users' })} />
           <Btn small variant="outline" title={showAddTeam ? 'Tutup Tim' : `Kelola Tim (${teams.length})`} onPress={() => setShowAddTeam((v) => !v)} />
           <Btn small variant="outline" title="Log Aktivitas" onPress={() => navigation.navigate('AuditLog')} />
         </View>

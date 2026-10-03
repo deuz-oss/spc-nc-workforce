@@ -384,6 +384,23 @@ async function main() {
     expect(byNc.error, 'an NC edited their own PJP');
   });
 
+  await check('PJP import: a bulk upsert skips plans that already exist and inserts the rest', async () => {
+    // Same call as importSchedules: the trigger normalizes planned_date to the
+    // WIB day before the conflict check, so the first row hits the plan above.
+    const rows = [
+      { id: `${RUN}_pjp_imp_dup`, nc_id: nc.id, store_id: 'st_demo1', planned_date: checkIn.toISOString() },
+      { id: `${RUN}_pjp_imp_new`, nc_id: nc.id, store_id: 'st_demo2', planned_date: checkIn.toISOString() },
+    ];
+    const res = await tl.client
+      .from('schedules')
+      .upsert(rows, { onConflict: 'nc_id,store_id,planned_date', ignoreDuplicates: true })
+      .select('id');
+    for (const r of res.data ?? []) created.schedules.push(r.id);
+    expectOk(res, 'bulk PJP upsert');
+    const ids = (res.data ?? []).map((r) => r.id);
+    expect(ids.length === 1 && ids[0] === `${RUN}_pjp_imp_new`, `inserted ${JSON.stringify(ids)}, expected only the new plan`);
+  });
+
   await check('NC cannot file a report under a different store than the visit', async () => {
     const id = `${RUN}_stk_wrong`;
     // Distinct SKU: the duplicate-report trigger (0013) fires before RLS and must not be what refuses this.

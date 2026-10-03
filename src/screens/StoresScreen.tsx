@@ -30,7 +30,7 @@ export default function StoresScreen() {
           title={`Toko (${scoped.length})`}
           action={
             STORE_MANAGER_ROLES.includes(me.role)
-              ? { label: 'Impor CSV', onPress: () => navigation.navigate('Import') }
+              ? { label: 'Impor CSV', onPress: () => navigation.navigate('Import', { mode: 'stores' }) }
               : undefined
           }
         />

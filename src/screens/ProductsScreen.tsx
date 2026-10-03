@@ -145,7 +145,7 @@ export default function ProductsScreen() {
             action={adding ? undefined : { label: '+ Produk', onPress: () => setAdding(true) }}
           />
           <View style={{ alignSelf: 'flex-start' }}>
-            <Btn small variant="outline" title="Impor CSV" onPress={() => navigation.navigate('Import')} />
+            <Btn small variant="outline" title="Impor CSV" onPress={() => navigation.navigate('Import', { mode: 'products' })} />
           </View>
           {adding && <AddProductForm onDone={() => setAdding(false)} />}
           <Input placeholder="Cari SKU atau nama produk..." value={q} onChangeText={setQ} />

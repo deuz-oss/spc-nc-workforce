@@ -320,6 +320,11 @@ interface StoreState {
    * 0020). Already-planned store/day pairs are skipped. Returns an error message or null. */
   addSchedules(ncId: string, plans: Array<{ storeId: string; plannedDate: number }>): Promise<string | null>;
   deleteSchedule(id: string): Promise<string | null>;
+  /** Bulk PJP plans (Import → Jadwal PJP) for any NCs in scope. Plans that
+   * already exist are skipped server-side; `errors` describes failed chunks. */
+  importSchedules(
+    plans: Array<{ ncId: string; storeId: string; plannedDate: number }>,
+  ): Promise<{ created: number; skipped: number; errors: string[] }>;
   /** Loads one consumer's complete funnel history (the store only holds the
    * recent window) and merges it in. Best-effort; returns an error message or null. */
   fetchConsumerHistory(consumerId: string): Promise<string | null>;
@@ -2429,6 +2434,41 @@ export const useStore = create<StoreState>()((set, get) => ({
       return error.message;
     }
     return null;
+  },
+
+  importSchedules: async (plans) => {
+    const errors: string[] = [];
+    let created = 0;
+    let failed = 0;
+    const CHUNK = 500;
+    for (let i = 0; i < plans.length; i += CHUNK) {
+      const chunk = plans.slice(i, i + CHUNK).map((p) => ({
+        id: uid('pjp_'),
+        ncId: p.ncId,
+        storeId: p.storeId,
+        plannedDate: programDayStart(p.plannedDate),
+      }));
+      // ON CONFLICT DO NOTHING on (nc_id, store_id, planned_date): an existing
+      // plan is skipped instead of failing the chunk; only inserted rows return.
+      const { data, error } = await supabase
+        .from('schedules')
+        .upsert(chunk.map(scheduleRow), { onConflict: 'nc_id,store_id,planned_date', ignoreDuplicates: true })
+        .select('*');
+      if (error) {
+        errors.push(
+          `Baris data ${i + 1}–${i + chunk.length}: ${
+            error.code === '42501' ? 'ada NC di luar tim Anda' : error.message
+          }`,
+        );
+        failed += chunk.length;
+        continue;
+      }
+      created += data?.length ?? 0;
+      let list = get().schedules;
+      for (const row of data ?? []) list = upsertById(list, mapSchedule(row));
+      set({ schedules: list });
+    }
+    return { created, skipped: plans.length - created - failed, errors };
   },
 
   deleteSchedule: async (id) => {

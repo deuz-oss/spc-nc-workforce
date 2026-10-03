@@ -226,8 +226,9 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
 - ✅ **PJP (journey plan)**: TL / ARCO / Super Admin / Admin Data Entry plan which stores each NC visits per day
   (Mon–Sat) on the "Jadwal Kunjungan" screen — per-week view, add/remove stores, copy last week. The server links
   each plan to the NC's check-in that day (`actual_visit_id`, 0020 — not client-settable), so the NC's "Rencana
-  Kunjungan Hari Ini", the team PJP compliance and the Admin Data Entry PJP KPI are real. **Not yet:** CSV import
-  of plans.
+  Kunjungan Hari Ini", the team PJP compliance and the Admin Data Entry PJP KPI are real. Bulk plans come from CSV
+  (Import → Jadwal PJP: NC username, store ID or name [+ city], date or weekday; per-row errors, existing plans
+  skipped — `src/utils/pjpImport.ts`).
 - ✅ **Chat notifications open the chat**: tapping a push (app running, in the background, or not running)
   opens that thread — after sign-in if needed; while the app is open a push shows as a banner unless that thread
   is already on screen (`src/notifications.ts`). Needs the updated `send-push` (it now puts the conversation in
@@ -356,7 +357,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 47 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 48 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change. It and `seed:supabase` only run
   against projects listed in `STAGING_PROJECT_REFS` (`.env`) — the demo passwords are public, so never list production.
 - **DB types:** `src/lib/database.types.ts` is generated from the live schema and types the Supabase client and

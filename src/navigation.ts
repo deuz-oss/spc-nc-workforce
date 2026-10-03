@@ -23,7 +23,8 @@ export type RootStackParamList = {
   Profil: undefined;
   // Stack screens
   StoreDetail: { storeId: string };
-  Import: undefined;
+  /** Opens on that import tab (default: stores). */
+  Import: { mode?: 'stores' | 'users' | 'products' | 'pjp' } | undefined;
   StoreVisit: { visitId: string };
   StockTaking: VisitReportParams;
   Offtake: VisitReportParams;

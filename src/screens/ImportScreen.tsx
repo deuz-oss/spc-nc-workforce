@@ -4,13 +4,17 @@ import { useNavigation } from '@react-navigation/native';
 import * as DocumentPicker from 'expo-document-picker';
 import { Badge, Btn, Card, Chip, Empty, H, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
-import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, STORE_MANAGER_ROLES, USER_MANAGER_ROLES } from '../config';
+import { CATEGORY_LABEL, PJP_MANAGER_ROLES, PRODUCT_MANAGER_ROLES, STORE_MANAGER_ROLES, USER_MANAGER_ROLES } from '../config';
 import { C, F } from '../theme';
-import { useCurrentUser, useStore } from '../store/useStore';
+import { scopeUsers, useCurrentUser, useStore } from '../store/useStore';
 import { Role, Store } from '../types';
 import { parseCsv } from '../utils/csv';
 import { exportCsv } from '../utils/export';
 import { uid } from '../utils/uuid';
+import { programDayKey } from '../utils/period';
+import { weekStart } from '../utils/pjp';
+import { parsePjpCsv, PJP_TEMPLATE } from '../utils/pjpImport';
+import { useAppRoute } from '../navigation';
 
 // --- Store import -----------------------------------------------------------
 
@@ -516,20 +520,206 @@ function ProductImportSection() {
   );
 }
 
+// --- PJP visit plans (Jadwal Kunjungan) ---------------------------------------
+
+const DAY = 86400000;
+
+function PjpImportSection() {
+  const navigation = useNavigation();
+  const me = useCurrentUser()!;
+  const users = useStore((s) => s.users);
+  const teams = useStore((s) => s.teams);
+  const stores = useStore((s) => s.stores);
+  const importSchedules = useStore((s) => s.importSchedules);
+
+  const thisWeek = weekStart(Date.now());
+  const [week, setWeek] = useState(thisWeek + 7 * DAY);
+  const [table, setTable] = useState<string[][] | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
+
+  const ncs = useMemo(() => scopeUsers({ users, teams }, me).filter((u) => u.role === 'nc'), [users, teams, me]);
+  const parsed = useMemo(() => (table ? parsePjpCsv(table, { ncs, stores, week }) : null), [table, ncs, stores, week]);
+  const usesDayColumn = !!table?.[0]?.some((h) => ['hari', 'day'].includes(h.trim().toLowerCase()));
+  const ncName = useMemo(() => new Map(users.map((u) => [u.id, u.name])), [users]);
+  const storeName = useMemo(() => new Map(stores.map((s) => [s.id, s.name])), [stores]);
+
+  const downloadTemplate = () => exportCsv('template_jadwal_pjp', PJP_TEMPLATE);
+
+  const readFile = async () => {
+    try {
+      const res = await DocumentPicker.getDocumentAsync({
+        type: ['text/csv', 'text/comma-separated-values', 'text/plain', 'application/vnd.ms-excel'],
+        copyToCacheDirectory: true,
+      });
+      if (res.canceled) return;
+      const asset: any = res.assets[0];
+      let text = '';
+      if (asset.file instanceof Blob) text = await asset.file.text();
+      else text = await (await fetch(asset.uri)).text();
+      const t = parseCsv(text);
+      if (t.length < 2) {
+        showDialog('File kosong atau tanpa baris data.');
+        return;
+      }
+      setTable(t);
+      setResult(null);
+    } catch {
+      showDialog('Gagal membaca file CSV.');
+    }
+  };
+
+  const doImport = async () => {
+    if (!parsed?.plans.length) return;
+    setImporting(true);
+    try {
+      const res = await importSchedules(parsed.plans);
+      setResult(res);
+      if (res.errors.length === 0) {
+        showDialog(
+          'Impor berhasil',
+          `${res.created} jadwal ditambahkan${res.skipped ? `, ${res.skipped} sudah ada sebelumnya` : ''}.`,
+          [{ label: 'OK', onPress: () => navigation.goBack() }],
+        );
+      }
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  if (!PJP_MANAGER_ROLES.includes(me.role)) {
+    return (
+      <Card>
+        <Muted>Hanya Super Admin, Admin Data Entry, TL, dan ARCO yang dapat mengimpor jadwal PJP.</Muted>
+      </Card>
+    );
+  }
+
+  return (
+    <>
+      <Card>
+        <Muted>
+          Format kolom CSV:{'\n'}
+          <Text style={{ fontFamily: F.bold, color: C.text }}>username, toko, kota, tanggal, hari</Text>
+          {'\n'}username = username NC{me.role === 'tl' || me.role === 'arco' ? ' di tim Anda' : ''}. toko = ID atau nama
+          toko persis; isi kota bila ada toko bernama sama. Isi tanggal (YYYY-MM-DD atau DD/MM/YYYY) atau hari
+          (Senin–Sabtu, pada minggu yang dipilih setelah file dibaca). Jadwal yang sudah ada dilewati.
+        </Muted>
+        <View style={{ gap: 8, marginTop: 10 }}>
+          <Btn small variant="outline" title="Unduh Template CSV" onPress={downloadTemplate} />
+          <Btn small title="Pilih File CSV" onPress={readFile} />
+        </View>
+      </Card>
+
+      {parsed && (
+        <>
+          <Card>
+            <SectionHeader
+              title={`${parsed.plans.length} jadwal siap diimpor`}
+              subtitle={`${parsed.read} baris terbaca${parsed.errors.length ? ` · ${parsed.errors.length} dilewati` : ''}`}
+            />
+            {usesDayColumn && (
+              <View style={{ gap: 6, marginTop: 10 }}>
+                <Muted>Kolom hari mengacu ke minggu yang dimulai:</Muted>
+                <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                  {[0, 1, 2].map((n) => {
+                    const w = thisWeek + n * 7 * DAY;
+                    const label = n === 0 ? 'Minggu ini' : n === 1 ? 'Minggu depan' : '2 minggu lagi';
+                    return <Chip key={n} label={`${label} (${programDayKey(w)})`} active={week === w} onPress={() => setWeek(w)} />;
+                  })}
+                </View>
+              </View>
+            )}
+            <View style={{ marginTop: 10 }}>
+              <Btn
+                title={`Impor ${parsed.plans.length} Jadwal`}
+                onPress={doImport}
+                disabled={importing || parsed.plans.length === 0}
+                loading={importing}
+              />
+            </View>
+          </Card>
+
+          {parsed.errors.length > 0 && (
+            <Card>
+              <H>{parsed.errors.length} baris dilewati (validasi CSV)</H>
+              {parsed.errors.slice(0, 10).map((e) => (
+                <Muted key={e}>{e}</Muted>
+              ))}
+              {parsed.errors.length > 10 && <Muted>...dan {parsed.errors.length - 10} lainnya</Muted>}
+            </Card>
+          )}
+
+          {result && (
+            <Card>
+              <H>Hasil Impor</H>
+              <Muted style={{ marginTop: 4 }}>
+                {result.created} jadwal ditambahkan{result.skipped ? `, ${result.skipped} sudah ada sebelumnya` : ''}.
+              </Muted>
+              {result.errors.map((e) => (
+                <Muted key={e} style={{ color: C.accent }}>
+                  {e}
+                </Muted>
+              ))}
+            </Card>
+          )}
+
+          <Card>
+            <H>Preview</H>
+            {parsed.plans.length === 0 ? (
+              <Empty text="Tidak ada data valid." />
+            ) : (
+              parsed.plans.slice(0, 10).map((p) => (
+                <View
+                  key={`${p.ncId}-${p.storeId}-${p.plannedDate}`}
+                  style={{ paddingVertical: 8, borderBottomWidth: 1, borderColor: C.divider, flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}
+                >
+                  <View style={{ flexShrink: 1 }}>
+                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>
+                      {storeName.get(p.storeId)}
+                    </Text>
+                    <Text style={{ color: C.muted, fontSize: 12 }} numberOfLines={1}>
+                      {ncName.get(p.ncId)}
+                    </Text>
+                  </View>
+                  <Badge label={programDayKey(p.plannedDate)} color={C.info} />
+                </View>
+              ))
+            )}
+            {parsed.plans.length > 10 && <Muted style={{ marginTop: 6 }}>...dan {parsed.plans.length - 10} lainnya</Muted>}
+          </Card>
+        </>
+      )}
+    </>
+  );
+}
+
 // --- Screen shell: switch between import modes ------------------------------
 
+type ImportMode = 'stores' | 'users' | 'products' | 'pjp';
+
 export default function ImportScreen() {
-  const [mode, setMode] = useState<'stores' | 'users' | 'products'>('stores');
+  const route = useAppRoute<'Import'>();
+  const [mode, setMode] = useState<ImportMode>(route.params?.mode ?? 'stores');
 
   return (
     <ScrollView tabIndex={0} role="main" contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}>
-      <SectionHeader title="Impor Data" subtitle="Unggah CSV untuk toko, akun pengguna, atau master produk" />
+      <SectionHeader title="Impor Data" subtitle="Unggah CSV untuk toko, akun pengguna, master produk, atau jadwal PJP" />
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         <Chip label="Toko" active={mode === 'stores'} onPress={() => setMode('stores')} />
         <Chip label="Akun Pengguna (bulk)" active={mode === 'users'} onPress={() => setMode('users')} />
         <Chip label="Master Produk" active={mode === 'products'} onPress={() => setMode('products')} />
+        <Chip label="Jadwal PJP" active={mode === 'pjp'} onPress={() => setMode('pjp')} />
       </View>
-      {mode === 'stores' ? <StoreImportSection /> : mode === 'users' ? <UserImportSection /> : <ProductImportSection />}
+      {mode === 'stores' ? (
+        <StoreImportSection />
+      ) : mode === 'users' ? (
+        <UserImportSection />
+      ) : mode === 'products' ? (
+        <ProductImportSection />
+      ) : (
+        <PjpImportSection />
+      )}
     </ScrollView>
   );
 }

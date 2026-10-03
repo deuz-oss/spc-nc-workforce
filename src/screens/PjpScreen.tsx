@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { Badge, Btn, Card, Empty, Input, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showToast } from '../components/dialog';
 import { HistoryNotice } from '../components/HistoryNotice';
@@ -40,6 +41,7 @@ const STATUS: Record<ScheduleStatus, { label: string; color: string }> = {
 export default function PjpScreen() {
   const me = useCurrentUser()!;
   const route = useAppRoute<'Pjp'>();
+  const navigation = useNavigation();
   const refreshControl = useDataRefresh();
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
@@ -132,6 +134,12 @@ export default function PjpScreen() {
         title="Jadwal Kunjungan (PJP)"
         subtitle={canManage ? 'Rencana toko per hari untuk NC di tim Anda' : 'Rencana kunjungan Anda'}
       />
+
+      {canManage && (
+        <View style={{ alignSelf: 'flex-start' }}>
+          <Btn small variant="outline" title="Impor Jadwal (CSV)" onPress={() => navigation.navigate('Import', { mode: 'pjp' })} />
+        </View>
+      )}
 
       {canManage && (
         <Card style={{ gap: 8 }}>
