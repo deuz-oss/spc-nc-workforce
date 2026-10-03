@@ -8,8 +8,9 @@
  * row it creates is tagged `smoke_<run>` and deleted in a finally block with
  * the service-role key, including when a check fails.
  *
- * It WRITES to the project in .env, so it refuses to run unless you name that
- * project explicitly:
+ * It WRITES to the project in .env, so it refuses to run unless that project is
+ * listed in STAGING_PROJECT_REFS (.env — see scripts/guard.ts) and you name it
+ * explicitly:
  *
  *   npm run smoke -- --project <project-ref>
  *
@@ -20,6 +21,7 @@
 import 'dotenv/config';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { buildSeed } from '../src/store/seed';
+import { assertStagingProject, projectRefOf } from './guard';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const anonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY;
@@ -29,7 +31,8 @@ if (!url || !anonKey || !serviceKey) {
   process.exit(1);
 }
 
-const projectRef = new URL(url).hostname.split('.')[0];
+assertStagingProject(url, 'the smoke test');
+const projectRef = projectRefOf(url);
 const argIdx = process.argv.indexOf('--project');
 if (argIdx === -1 || process.argv[argIdx + 1] !== projectRef) {
   console.error(

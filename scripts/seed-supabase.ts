@@ -8,12 +8,15 @@
  *   npm run seed:supabase
  *
  * Requires .env (see .env.example) with EXPO_PUBLIC_SUPABASE_URL and
- * SUPABASE_SERVICE_ROLE_KEY set. The service-role key bypasses RLS - never
+ * SUPABASE_SERVICE_ROLE_KEY set, and that project listed in
+ * STAGING_PROJECT_REFS — the demo passwords are public, so this never runs
+ * against production (scripts/guard.ts). The service-role key bypasses RLS - never
  * ship it in the app, never commit it.
  */
 import 'dotenv/config';
 import { createClient } from '@supabase/supabase-js';
 import { buildSeed } from '../src/store/seed';
+import { assertStagingProject } from './guard';
 
 const url = process.env.EXPO_PUBLIC_SUPABASE_URL;
 const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -22,6 +25,7 @@ if (!url || !serviceKey) {
   console.error('Missing EXPO_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY. Copy .env.example to .env and fill them in.');
   process.exit(1);
 }
+assertStagingProject(url, 'the demo seed');
 
 const supabase = createClient(url, serviceKey, {
   auth: { autoRefreshToken: false, persistSession: false },

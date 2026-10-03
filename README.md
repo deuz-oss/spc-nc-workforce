@@ -355,7 +355,8 @@ this repo. Production gets its own Supabase project.
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
   `npm run smoke -- --project <project-ref>` — 47 RLS/RPC/edge-function checks as each demo role; see
-  `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
+  `scripts/smoke-rls.ts`. Run it after every migration or edge-function change. It and `seed:supabase` only run
+  against projects listed in `STAGING_PROJECT_REFS` (`.env`) — the demo passwords are public, so never list production.
 - **DB types:** `src/lib/database.types.ts` is generated from the live schema and types the Supabase client and
   the row mappers. After a migration, `npx supabase link --project-ref <ref>` (once) then `npm run gen:types`,
   and commit the result — `tsc` then flags code that no longer matches the schema.
