@@ -1,6 +1,6 @@
 // Supabase Edge Function: sends an Expo push notification to one recipient
-// user by looking up their stored push token (profiles.push_token) with the
-// service-role key. The mobile app never talks to Expo's push API directly
+// user, to every device token registered for them (push_tokens, migration
+// 0015 — readable only with the service-role key). The mobile app never talks to Expo's push API directly
 // (no reason to hold the recipient's token client-side) — it calls this
 // function after successfully inserting a chat message (see
 // src/store/useStore.ts's sendMessage action).
@@ -72,30 +72,39 @@ Deno.serve(async (req) => {
     const { data: sender } = await admin.from('profiles').select('name, active').eq('id', caller.id).single();
     if (!sender?.active) return json({ error: 'Forbidden' }, 403);
 
-    const { data: recipient, error: recErr } = await admin
-      .from('profiles')
-      .select('push_token')
-      .eq('id', body.recipientUserId)
-      .single();
+    const { data: tokens, error: tokErr } = await admin
+      .from('push_tokens')
+      .select('token')
+      .eq('user_id', body.recipientUserId);
 
-    if (recErr || !recipient?.push_token) {
+    if (tokErr || !tokens?.length) {
       // Not an error from the caller's point of view — the recipient may
       // simply never have granted notification permission. Fire-and-forget.
       return json({ sent: false, reason: 'no push token on file for recipient' });
     }
 
+    const to = tokens.map((t) => t.token as string);
     const expoRes = await fetch('https://exp.host/--/api/v2/push/send', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({
-        to: recipient.push_token,
-        title: sender.name,
-        body: String(body.body).slice(0, 200),
-        sound: 'default',
-      }),
+      body: JSON.stringify(
+        to.map((token) => ({
+          to: token,
+          title: sender.name,
+          body: String(body.body).slice(0, 200),
+          sound: 'default',
+        })),
+      ),
     });
     const expoJson = await expoRes.json().catch(() => null);
-    return json({ sent: expoRes.ok, expo: expoJson });
+
+    // Tickets come back in request order. DeviceNotRegistered = app uninstalled
+    // or token rotated: drop the token so it isn't tried (and leaked to) forever.
+    const tickets: Array<{ status?: string; details?: { error?: string } }> = Array.isArray(expoJson?.data) ? expoJson.data : [];
+    const dead = to.filter((_, i) => tickets[i]?.status === 'error' && tickets[i]?.details?.error === 'DeviceNotRegistered');
+    if (dead.length) await admin.from('push_tokens').delete().in('token', dead);
+
+    return json({ sent: expoRes.ok, devices: to.length, removed: dead.length });
   } catch (err) {
     return json({ error: err instanceof Error ? err.message : 'Unknown error' }, 500);
   }

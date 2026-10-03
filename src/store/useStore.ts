@@ -7,6 +7,7 @@ import { isAuthRetryableFetchError, type RealtimeChannel } from '@supabase/supab
 import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
 import {
+  CONSENT_VERSION,
   DEFAULT_TEAM_BASE_RADIUS_M,
   HISTORY_DAYS,
   isUnder1Bracket,
@@ -54,6 +55,8 @@ import { uid } from '../utils/uuid';
 import { deleteSnapshot, getLastUser, loadSnapshot, OfflineSnapshot, saveSnapshot, setLastUser } from '../utils/offlineCache';
 import { BufferedPoint, onPointsRecorded, readBufferedPoints } from '../utils/routeBuffer';
 import { flushRouteBuffer } from '../utils/routeSync';
+import { funnelStepError } from '../utils/funnel';
+import { isValidWa, normalizeWa } from '../utils/wa';
 import { drainQueue, isNetworkError, OP_LABEL, QueueReason, queueReason, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
@@ -241,8 +244,12 @@ interface StoreState {
 
   /** NTG & GWP consumer funnel (PRD §5.4) — online-required, like upsertStore (richer/less frequent than clock/check writes). */
   upsertConsumer(c: Consumer): Promise<string | null>;
-  /** Appends one funnel-stage row (history is append-only). */
+  /** Appends one funnel-stage row (history is append-only, forward-only). */
   addNtgGwp(n: NtgGwp): Promise<string | null>;
+  /** Data subject deletion request (UU PDP): blanks the consumer's personal data
+   * server-side (erase_consumer RPC, 0015); funnel counts stay. Creator NC,
+   * super_admin or PM. Returns an error message or null. */
+  eraseConsumer(id: string): Promise<string | null>;
 
   // --- Phase 3/5: bi-weekly/periodic modules (PRD §5.2, §5.5, §5.6, §5.7/§6) ---
   // Share of Shelf/Paid Visibility (required photo) and Price Monitoring
@@ -508,6 +515,9 @@ function mapConsumer(c: any): Consumer {
     quizResult: c.quiz_result ?? undefined,
     createdByNcId: c.created_by_nc_id,
     createdAt: new Date(c.created_at).getTime(),
+    consentAt: optTime(c.consent_at),
+    consentVersion: c.consent_version ?? undefined,
+    erasedAt: optTime(c.erased_at),
   };
 }
 
@@ -1422,7 +1432,10 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
       if (payload.eventType === 'DELETE') {
         set({ users: get().users.filter((u) => u.id !== (payload.old as any).id) });
       } else {
-        set({ users: upsertById(get().users, mapProfile(payload.new)) });
+        // profiles no longer carries the phone (profile_contacts, 0015) — keep the known one.
+        const u = mapProfile(payload.new);
+        const known = get().users.find((x) => x.id === u.id);
+        set({ users: upsertById(get().users, { ...u, phone: u.phone ?? known?.phone }) });
       }
     })
     .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, (payload) => {
@@ -1595,7 +1608,11 @@ interface TimeFilter {
   keepNull?: string;
 }
 
-async function fetchAll(table: string, filter?: TimeFilter): Promise<{ data: any[]; error: { message: string; code?: string } | null }> {
+async function fetchAll(
+  table: string,
+  filter?: TimeFilter,
+  orderBy = 'id',
+): Promise<{ data: any[]; error: { message: string; code?: string } | null }> {
   const out: any[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     let q = supabase.from(table).select('*');
@@ -1605,7 +1622,7 @@ async function fetchAll(table: string, filter?: TimeFilter): Promise<{ data: any
         : q.gte(filter.col, filter.since);
     }
     if (filter?.before) q = q.lt(filter.col, filter.before);
-    const { data, error } = await q.order('id', { ascending: true }).range(from, from + PAGE_SIZE - 1);
+    const { data, error } = await q.order(orderBy, { ascending: true }).range(from, from + PAGE_SIZE - 1);
     if (error) return { data: out, error };
     out.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) return { data: out, error: null };
@@ -1712,6 +1729,21 @@ async function fetchSnapshot(since: number): Promise<{ rows: Record<string, any[
   return { rows, error: results.find((r) => r.error)?.error ?? null };
 }
 
+/**
+ * Staff phone numbers live in profile_contacts (migration 0015), readable only
+ * by the person, super_admin/PM and their TL/ARCO — not by the client role.
+ * Merged into `users` for display; a failure just leaves phones out.
+ */
+async function withContacts(users: User[]): Promise<User[]> {
+  const { data, error } = await fetchAll('profile_contacts', undefined, 'user_id');
+  if (error) {
+    console.warn('profile_contacts load failed (non-fatal):', error.message);
+    return users;
+  }
+  const phoneById = new Map(data.map((c: any) => [c.user_id as string, (c.phone as string | null) ?? undefined]));
+  return users.map((u) => (phoneById.has(u.id) ? { ...u, phone: phoneById.get(u.id) } : u));
+}
+
 /** Fetches the caller's profile + every scoped row (RLS-filtered) and hydrates the store. */
 async function hydrateAll(
   set: (partial: Partial<StoreState>) => void,
@@ -1746,6 +1778,7 @@ async function hydrateAll(
   const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: since, offlineSnapshotAt: null };
   for (const t of SNAPSHOT_TABLES) (patch as any)[t.key] = rows[t.table].map(t.map);
   patch.attendances = rows.attendances.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? []));
+  patch.users = await withContacts(patch.users ?? []);
   set(patch);
   lastRefreshAt = Date.now();
   void setLastUser(userId);
@@ -1890,6 +1923,9 @@ async function callAdminUsers(body: Record<string, unknown>): Promise<{ data?: a
  * login/init. Needs app.json's extra.eas.projectId, which `eas init` writes;
  * until then registration is skipped with a warning, not surfaced to the user —
  * push is additive to in-app chat, never a requirement to use it. */
+/** This device's Expo push token, once registered — cleared server-side at logout. */
+let myPushToken: string | null = null;
+
 async function registerPushToken(): Promise<void> {
   try {
     const { status: existing } = await Notifications.getPermissionsAsync();
@@ -1906,6 +1942,8 @@ async function registerPushToken(): Promise<void> {
       return;
     }
     const { data: token } = await Notifications.getExpoPushTokenAsync({ projectId });
+    myPushToken = token;
+    // Re-assigns this device's token to the signed-in user (push_tokens, 0015).
     const { error } = await supabase.rpc('set_my_push_token', { p_token: token });
     if (error) console.warn('registerPushToken: failed to save token:', error.message);
   } catch (err) {
@@ -2139,6 +2177,14 @@ export const useStore = create<StoreState>()((set, get) => ({
     resumeUserId = null;
     clearQueueRetry();
     teardownRealtime();
+    // Stop this phone receiving the user's chat pushes once they've signed out
+    // (best-effort: offline, set_my_push_token re-assigns it at the next login).
+    if (myPushToken) {
+      const token = myPushToken;
+      myPushToken = null;
+      const { error } = await supabase.rpc('clear_my_push_token', { p_token: token });
+      if (error) console.warn('clear_my_push_token failed (non-fatal):', error.message);
+    }
     await supabase.auth.signOut();
     // The persisted queue stays on disk under this user's key and resumes on
     // their next login; only the in-memory copy is cleared. The offline
@@ -2535,11 +2581,26 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   upsertConsumer: async (c) => {
     const before = get().consumers.find((x) => x.id === c.id);
+    // Same rules as consumers_server_checks (0015) — checked here first for a
+    // clear message without a round-trip (the server also sees other NCs' rows).
+    if (!c.erasedAt && (!before || before.waContact !== c.waContact)) {
+      if (!isValidWa(c.waContact)) {
+        showDialog('Nomor WhatsApp Tidak Valid', 'Gunakan nomor HP Indonesia, mis. 0812xxxxxxxx.');
+        return 'invalid wa';
+      }
+      const key = normalizeWa(c.waContact);
+      if (get().consumers.some((x) => x.id !== c.id && !x.erasedAt && normalizeWa(x.waContact) === key)) {
+        showDialog('Konsumen Sudah Terdaftar', 'Nomor WhatsApp ini sudah terdaftar sebagai konsumen. Buka data konsumen yang ada.');
+        return 'duplicate wa';
+      }
+    }
     set({ consumers: upsertById(get().consumers, c) });
     const fields = {
       name: c.name,
       wa_contact: c.waContact,
       consent: c.consent,
+      // Recorded by the server only when consent is newly given (0015).
+      consent_version: c.consent ? CONSENT_VERSION : null,
       child_age_bracket: c.childAgeBracket,
       current_brand: c.currentBrand ?? null,
       quiz_result: c.quizResult ?? null,
@@ -2571,6 +2632,15 @@ export const useStore = create<StoreState>()((set, get) => ({
       showVisitPendingDialog();
       return 'visit not synced yet';
     }
+    // Forward-only funnel — mirrors ntg_gwp_progression_check (0015).
+    const stepErr = funnelStepError(
+      get().ntgGwps.filter((g) => g.consumerId === n.consumerId).map((g) => g.stage),
+      n.stage,
+    );
+    if (stepErr) {
+      showDialog('Tahap Funnel Tidak Valid', stepErr);
+      return stepErr;
+    }
     // PRD §6 / PP 33/2012 — also enforced by ntg_gwp_under1_check (0014).
     const consumer = get().consumers.find((c) => c.id === n.consumerId);
     if (n.stage !== 'approached' && consumer && isUnder1Bracket(consumer.childAgeBracket)) {
@@ -2594,6 +2664,24 @@ export const useStore = create<StoreState>()((set, get) => ({
       showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
+    return null;
+  },
+
+  eraseConsumer: async (id) => {
+    const { error } = await supabase.rpc('erase_consumer', { p_consumer_id: id });
+    if (error) {
+      showDialog('Gagal Menghapus', serverRuleMessage(error) ?? 'Tidak dapat menghapus data konsumen. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    const now = Date.now();
+    set({
+      consumers: get().consumers.map((c) =>
+        c.id === id
+          ? { ...c, name: '(data dihapus)', waContact: '', currentBrand: undefined, quizResult: undefined, childAgeBracket: '', consent: false, erasedAt: now }
+          : c,
+      ),
+      surveyResponses: get().surveyResponses.map((r) => (r.consumerId === id ? { ...r, answers: {} } : r)),
+    });
     return null;
   },
 
@@ -3013,6 +3101,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     // Keep the locally-held GPS route on each attendance (refreshData doesn't refetch route_points).
     const routes = new Map(get().attendances.map((a) => [a.id, a.route]));
     patch.attendances = (patch.attendances ?? []).map((a) => ({ ...a, route: routes.get(a.id) ?? a.route }));
+    patch.users = await withContacts(patch.users ?? []);
     set(patch);
     lastRefreshAt = Date.now();
     return null;

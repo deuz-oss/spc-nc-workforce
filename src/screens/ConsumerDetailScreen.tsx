@@ -6,6 +6,7 @@ import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFo
 import { showDialog } from '../components/dialog';
 import {
   CHILD_AGE_BRACKETS,
+  CONSENT_TEXT,
   isUnder1Bracket,
   NTG_GWP_STAGES,
   NTG_GWP_STAGE_LABEL,
@@ -15,6 +16,8 @@ import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Consumer, NtgGwpStage } from '../types';
 import { uid } from '../utils/uuid';
+import { funnelStepError } from '../utils/funnel';
+import { isValidWa } from '../utils/wa';
 import { fmtDateTime } from '../utils/format';
 
 export default function ConsumerDetailScreen() {
@@ -61,6 +64,32 @@ export default function ConsumerDetailScreen() {
   // PRD §6 / PP 33/2012: an under-1 consumer stays at "approached" (also enforced server-side, 0014).
   const under1 = isUnder1Bracket(childAgeBracket);
   const legacyBracket = !!childAgeBracket && !CHILD_AGE_BRACKETS.some((b) => b.key === childAgeBracket);
+  const historyStages = history.map((h) => h.stage);
+  /** Forward-only funnel (0015): the current stage (no change) or a step the server would accept. */
+  const stageSelectable = (s: NtgGwpStage) =>
+    canAdvanceStage &&
+    !(under1 && s !== 'approached') &&
+    ((!isCreate && s === currentStage) || funnelStepError(historyStages, s) == null);
+  const eraseConsumer = useStore((s) => s.eraseConsumer);
+  const canErase = !!existing && !existing.erasedAt && (existing.createdByNcId === me.id || me.role === 'super_admin' || me.role === 'pm');
+
+  const confirmErase = () =>
+    showDialog(
+      'Hapus Data Konsumen?',
+      'Atas permintaan konsumen (UU PDP): nama, kontak WA, usia anak, brand dan jawaban quiz dihapus permanen. Riwayat tahap funnel tetap tersimpan tanpa data pribadi. Tindakan ini tidak bisa dibatalkan.',
+      [
+        { label: 'Batal' },
+        {
+          label: 'Hapus Data',
+          destructive: true,
+          onPress: async () => {
+            if (!(await eraseConsumer(existing!.id))) {
+              showDialog('Data Konsumen Dihapus', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+            }
+          },
+        },
+      ],
+    );
 
   const todaysStoreOfftake = useMemo(() => {
     if (!storeId) return [];
@@ -121,6 +150,16 @@ export default function ConsumerDetailScreen() {
     }
   };
 
+  if (existing?.erasedAt) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24 }}>
+        <Muted style={{ textAlign: 'center' }}>
+          Data pribadi konsumen ini sudah dihapus atas permintaan ({fmtDateTime(existing.erasedAt)}).
+        </Muted>
+      </View>
+    );
+  }
+
   if (!isCreate && !existing) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -151,10 +190,15 @@ export default function ConsumerDetailScreen() {
           >
             <Ionicons name={consent ? 'checkbox' : 'square-outline'} size={24} color={consent ? C.primaryDark : C.faint} />
             <Text style={{ flex: 1, fontFamily: F.semi, fontSize: 13, color: C.text }}>
-              Konsumen menyetujui data pribadinya (nama, kontak WA, hasil konsultasi) digunakan untuk program
-              konsultasi nutrisi ini, sesuai UU PDP.
+              {CONSENT_TEXT}
             </Text>
           </TouchableOpacity>
+          {existing?.consentAt && (
+            <Muted style={{ marginTop: 8 }}>
+              Consent tercatat {fmtDateTime(existing.consentAt)}
+              {existing.consentVersion ? ` · teks versi ${existing.consentVersion}` : ''}
+            </Muted>
+          )}
         </Card>
 
         {consent && (
@@ -166,6 +210,9 @@ export default function ConsumerDetailScreen() {
               <View style={{ height: 10 }} />
               <Field label="Kontak WhatsApp">
                 <Input value={waContact} onChangeText={setWaContact} editable={!readOnly} placeholder="08xxxxxxxxxx" keyboardType="phone-pad" />
+                {!readOnly && waContact.trim() !== '' && !isValidWa(waContact) && (
+                  <Muted style={{ marginTop: 4, color: C.accent }}>Nomor HP Indonesia, mis. 0812xxxxxxxx.</Muted>
+                )}
               </Field>
               <View style={{ height: 10 }} />
               <Field label="Usia Anak (bracket — bukan tanggal lahir, PRD §6)">
@@ -220,7 +267,7 @@ export default function ConsumerDetailScreen() {
                     key={s}
                     label={NTG_GWP_STAGE_LABEL[s]}
                     active={stage === s}
-                    onPress={canAdvanceStage && i >= currentStageIdx && !(under1 && s !== 'approached') ? () => setStage(s) : undefined}
+                    onPress={stageSelectable(s) ? () => setStage(s) : undefined}
                     color={i < currentStageIdx ? C.ok : C.primary}
                   />
                 ))}
@@ -252,6 +299,16 @@ export default function ConsumerDetailScreen() {
                 </View>
               )}
             </Card>
+
+            {canErase && (
+              <Card>
+                <H>Hapus Data Konsumen</H>
+                <Muted style={{ marginTop: 2 }}>Untuk permintaan penghapusan data dari konsumen (UU PDP).</Muted>
+                <View style={{ marginTop: 8, alignSelf: 'flex-start' }}>
+                  <Btn small variant="danger" title="Hapus Data Pribadi" onPress={confirmErase} />
+                </View>
+              </Card>
+            )}
 
             {history.length > 0 && (
               <Card>

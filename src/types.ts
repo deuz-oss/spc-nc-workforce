@@ -240,6 +240,12 @@ export interface Consumer {
    * any other NC's consumer rows — see the migration's comment. */
   createdByNcId: string;
   createdAt: number;
+  /** Consent record, stamped by the server (migration 0015) — when, and which
+   * version of CONSENT_TEXT (config.ts) the consumer agreed to. */
+  consentAt?: number;
+  consentVersion?: string;
+  /** Set once the consumer's personal data was erased on request (erase_consumer, 0015). */
+  erasedAt?: number;
 }
 
 // --- Product master (Phase 2) — SKU picklist source for Stock Taking /

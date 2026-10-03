@@ -38,8 +38,15 @@ export function parseCsv(text: string): string[][] {
   return rows.filter((r) => !(r.length === 1 && r[0].trim() === ''));
 }
 
+/** Text a spreadsheet would run as a formula (CSV/formula injection). Exports
+ * carry user-typed values — store and consumer names, notes — so a cell like
+ * `=HYPERLINK(...)` or `@SUM(...)` must reach Excel as plain text. */
+const FORMULA_START = /^[=+\-@\t\r]/;
+
 function esc(v: unknown): string {
-  const s = v == null ? '' : String(v);
+  let s = v == null ? '' : String(v);
+  // Only strings: numbers (negative ones included) stay numbers.
+  if (typeof v === 'string' && FORMULA_START.test(s)) s = `'${s}`;
   if (/[",;\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
   return s;
 }

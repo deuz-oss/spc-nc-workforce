@@ -49,3 +49,13 @@ describe('toCsv', () => {
     assert.deepEqual(parseCsv(toCsv(rows)), rows);
   });
 });
+
+describe('toCsv formula injection', () => {
+  it('neutralizes text that a spreadsheet would run as a formula', () => {
+    assert.equal(toCsv([['=HYPERLINK("http://x")', '+1', '-cmd', '@SUM(A1)']]), `"'=HYPERLINK(""http://x"")",'+1,'-cmd,'@SUM(A1)`);
+  });
+
+  it('leaves numbers, including negative ones, and ordinary text alone', () => {
+    assert.equal(toCsv([[-5, 3.5, 'Apotek Sehat', 'a-b']]), '-5,3.5,Apotek Sehat,a-b');
+  });
+});

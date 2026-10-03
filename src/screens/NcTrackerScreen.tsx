@@ -166,7 +166,8 @@ export default function NcTrackerScreen() {
         <StatCard title="SOS %" value={sosPct != null ? `${sosPct}%` : '-'} />
       </View>
 
-      <RouteCard ncId={ncId} initialAttendanceId={route.params?.attendanceId} />
+      {/* GPS trails aren't shared with the client role (route_points RLS, 0015). */}
+      {!hidePii && <RouteCard ncId={ncId} initialAttendanceId={route.params?.attendanceId} />}
 
       <Card>
         <SectionHeader title="Share of Shelf" subtitle="Facing counts + foto bukti" />
@@ -213,7 +214,9 @@ export default function NcTrackerScreen() {
       </Card>
 
       {hidePii && (
-        <Muted>Layar ini tidak menampilkan data pribadi konsumen — hanya data kunjungan dan facing count.</Muted>
+        <Muted>
+          Layar ini tidak menampilkan data pribadi konsumen maupun rute GPS NC — hanya data kunjungan dan facing count.
+        </Muted>
       )}
     </ScrollView>
   );

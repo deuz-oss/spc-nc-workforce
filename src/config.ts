@@ -149,6 +149,13 @@ export function isUnder1Bracket(key: string | null | undefined): boolean {
   return CHILD_AGE_BRACKETS.some((b) => b.key === key && b.under1);
 }
 
+/** Consumer data-consent text shown before any personal data is recorded (UU PDP).
+ * Changing the wording means bumping CONSENT_VERSION — every consumer row stores
+ * the version it was agreed under (consumers.consent_version, migration 0015). */
+export const CONSENT_VERSION = 'v1-2026-10';
+export const CONSENT_TEXT =
+  'Konsumen menyetujui data pribadinya (nama, kontak WA, hasil konsultasi) digunakan untuk program konsultasi nutrisi ini, sesuai UU PDP. Konsumen dapat meminta datanya dihapus kapan saja melalui NC.';
+
 export const UNDER1_TITLE = 'Anak di Bawah 1 Tahun';
 export const UNDER1_MESSAGE =
   'Untuk anak di bawah 1 tahun hanya boleh edukasi ASI/MPASI — tahap NTG & GWP tidak boleh dimajukan dan tidak ada follow-up produk.';

@@ -23,7 +23,11 @@ export default function ConsumersScreen() {
   const ntgGwps = useStore((s) => s.ntgGwps);
   const [q, setQ] = useState('');
 
-  const scoped = useMemo(() => consumerScope({ consumers, users, teams }, me), [consumers, users, teams, me]);
+  // Consumers erased on request (UU PDP, erase_consumer) no longer appear in the list.
+  const scoped = useMemo(
+    () => consumerScope({ consumers, users, teams }, me).filter((c) => !c.erasedAt),
+    [consumers, users, teams, me],
+  );
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
     if (!needle) return scoped;

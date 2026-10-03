@@ -84,6 +84,8 @@ const created = {
   visits: [] as string[],
   stockTaking: [] as string[],
   ntgGwp: [] as string[],
+  surveyResponses: [] as string[],
+  pushTokens: [] as string[],
   consumers: [] as string[],
   conversations: [] as string[],
   targets: [] as string[],
@@ -104,6 +106,11 @@ async function cleanup() {
   await del('conversations', created.conversations); // messages cascade
   await del('stock_taking', created.stockTaking);
   await del('ntg_gwp', created.ntgGwp);
+  await del('survey_responses', created.surveyResponses);
+  if (created.pushTokens.length) {
+    const { error } = await admin.from('push_tokens').delete().in('token', created.pushTokens);
+    if (error) console.warn(`  cleanup push_tokens: ${error.message}`);
+  }
   await del('visits', created.visits);
   await del('attendances', created.attendances); // route_points cascade
   await del('consumers', created.consumers);
@@ -484,6 +491,82 @@ async function main() {
   await check('an unrelated NC cannot read the consumer', async () => {
     if (!nc2) throw new Skip('second NC unavailable');
     expect(!(await seesConsumer(nc2.client)), 'another NC can read this consumer');
+  });
+
+  // ===== 3b. Funnel, consent, erasure, client-role limits (0015) ==============
+
+  const inVisitAt = new Date(checkIn.getTime() + 5 * 60000).toISOString(); // inside the (closed) smoke visit
+  await check('NTG funnel only moves forward; GWP needs a confirmed NTG (0015)', async () => {
+    const step = async (stage: string, n: number) => {
+      const id = `${RUN}_ntg_f${n}`;
+      const res = await nc.client.from('ntg_gwp').insert({ id, consumer_id: consumerId, visit_id: visitId, stage, created_at: inVisitAt });
+      if (!res.error) created.ntgGwp.push(id);
+      return res;
+    };
+    expectOk(await step('approached', 1), 'approached');
+    expect((await step('gwp_given', 2)).error, 'GWP recorded before NTG was confirmed — run migration 0015');
+    expect((await step('approached', 3)).error, 'stage repeated');
+    expectOk(await step('ntg_confirmed', 4), 'ntg_confirmed');
+    expect((await step('quiz_completed', 5)).error, 'funnel moved backwards');
+  });
+
+  await check('consent is server-stamped and required; a WhatsApp number registers once (0015)', async () => {
+    const { data: c } = await admin.from('consumers').select('consent_at, consent_by').eq('id', consumerId).single();
+    expect(c?.consent_at && c.consent_by === nc.id, `consent not recorded by the server (${JSON.stringify(c)})`);
+    const dup = await nc.client.from('consumers').insert({
+      id: `${RUN}_cons_dup`, name: 'Smoke Dup', wa_contact: '+62 800-0000-0000', consent: true, child_age_bracket: '1-2tahun', created_by_nc_id: nc.id,
+    });
+    if (!dup.error) created.consumers.push(`${RUN}_cons_dup`);
+    expect(dup.error, 'the same WhatsApp number (other format) was registered twice');
+    const noConsent = await nc.client.from('consumers').insert({
+      id: `${RUN}_cons_nc`, name: 'Smoke No Consent', wa_contact: '081100000003', consent: false, child_age_bracket: '1-2tahun', created_by_nc_id: nc.id,
+    });
+    if (!noConsent.error) created.consumers.push(`${RUN}_cons_nc`);
+    expect(noConsent.error, 'consumer saved without consent');
+  });
+
+  await check('Reckitt reads no staff phones, GPS trails, live positions or consumer quiz answers (0015)', async () => {
+    const contacts = await reckitt.client.from('profile_contacts').select('user_id');
+    expect(!contacts.data?.length, `reckitt_client can read ${contacts.data?.length} staff phone numbers`);
+    const phones = await reckitt.client.from('profiles').select('phone').not('phone', 'is', null);
+    expect(!phones.data?.length, 'profiles.phone still holds phone numbers');
+    const trail = await reckitt.client.from('route_points').select('id').eq('attendance_id', attId);
+    expect(!trail.data?.length, 'reckitt_client can read an NC GPS trail');
+    const live = await reckitt.client.rpc('live_positions');
+    expect(!(live.data as any[] | null)?.length, 'reckitt_client gets live positions');
+
+    const respId = `${RUN}_resp`;
+    expectOk(
+      await nc.client.from('survey_responses').insert({
+        id: respId, survey_id: 'sv_nutrition_quiz_v1', visit_id: visitId, consumer_id: consumerId, answers: { age_bracket: '1-2tahun' },
+      }),
+      'quiz response insert',
+    );
+    created.surveyResponses.push(respId);
+    expect(!(await reckitt.client.from('survey_responses').select('id').eq('id', respId)).data?.length, 'reckitt_client reads a consumer-linked quiz answer');
+    expect((await pm.client.from('survey_responses').select('id').eq('id', respId)).data?.length === 1, 'PM cannot read the quiz answer');
+  });
+
+  await check('push tokens: unreadable by clients; a device token follows the last user signed in (0015)', async () => {
+    const token = `ExponentPushToken[smoke-${RUN}]`;
+    created.pushTokens.push(token);
+    expectOk(await nc.client.rpc('set_my_push_token', { p_token: token }), 'NC registers token');
+    expect(!(await tl.client.from('push_tokens').select('token')).data?.length, 'push tokens are readable by another user');
+    expectOk(await tl.client.rpc('set_my_push_token', { p_token: token }), 'TL signs in on the same device');
+    const { data: row } = await admin.from('push_tokens').select('user_id').eq('token', token).single();
+    expect(row?.user_id === tl.id, 'the device token still belongs to the previous user');
+    expectOk(await tl.client.rpc('clear_my_push_token', { p_token: token }), 'logout clears the token');
+    const { count } = await admin.from('push_tokens').select('token', { count: 'exact', head: true }).eq('token', token);
+    expect(count === 0, 'token survived logout');
+  });
+
+  await check('erase_consumer blanks personal data; another NC cannot erase (0015)', async () => {
+    if (nc2) expect((await nc2.client.rpc('erase_consumer', { p_consumer_id: consumerId })).error, "another NC erased this NC's consumer");
+    expectOk(await nc.client.rpc('erase_consumer', { p_consumer_id: consumerId }), 'erase_consumer');
+    const { data: c } = await admin.from('consumers').select('name, wa_contact, erased_at').eq('id', consumerId).single();
+    expect(c?.erased_at && c.wa_contact === '' && c.name !== 'Smoke Consumer', `personal data kept (${JSON.stringify(c)})`);
+    const { data: r } = await admin.from('survey_responses').select('answers').eq('id', `${RUN}_resp`).single();
+    expect(r && Object.keys(r.answers ?? {}).length === 0, 'quiz answers kept after erasure');
   });
 
   // ===== 4. Chat ==============================================================
