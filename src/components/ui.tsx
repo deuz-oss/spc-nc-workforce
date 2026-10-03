@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, ELEV, F, R, SP, T } from '../theme';
 
 export function Card({ children, style }: { children: React.ReactNode; style?: object }) {
@@ -387,7 +388,13 @@ export function GeoValidBadge({
 }
 
 /** Footer tombol yang menempel di bawah layar (CHECK IN / CHECK OUT dsb). */
+/** Bottom padding for scroll content under a StickyFooter — its button plus the
+ * home-indicator inset of edge-to-edge phones (~34 dp). */
+export const STICKY_FOOTER_SPACE = 140;
+
 export function StickyFooter({ children }: { children: React.ReactNode }) {
+  // Clear the home indicator / gesture bar on edge-to-edge phones.
+  const insets = useSafeAreaInsets();
   return (
     <View
       style={{
@@ -401,7 +408,9 @@ export function StickyFooter({ children }: { children: React.ReactNode }) {
         alignItems: 'center',
       }}
     >
-      <View style={{ padding: SP.lg, paddingTop: 10, gap: SP.sm, maxWidth: 900, width: '100%' }}>{children}</View>
+      <View style={{ padding: SP.lg, paddingTop: 10, paddingBottom: SP.lg + insets.bottom, gap: SP.sm, maxWidth: 900, width: '100%' }}>
+        {children}
+      </View>
     </View>
   );
 }

@@ -3,7 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader } from '../components/ui';
+import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { CHILD_AGE_BRACKETS, NUTRITION_QUIZ_SURVEY_ID } from '../config';
 import { C, F } from '../theme';
@@ -200,7 +200,7 @@ export default function NutritionQuizScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 110, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Quick Nutrition Check" subtitle={`Untuk ${consumer.name} (PRD §6)`} />
 

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
@@ -15,9 +15,10 @@ import {
   TARGET_MANAGER_ROLES,
 } from '../config';
 import { C, F } from '../theme';
-import { useCurrentUser, useStore } from '../store/useStore';
-import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
-import { getRange, monthKey } from '../utils/period';
+import { scopeUsers, useCurrentUser, useStore } from '../store/useStore';
+import { attritionSignal, computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
+import { getRange, inRange, monthKey, monthRange, programDayKey } from '../utils/period';
+import { buildReportItems, groupReports, reviewKey } from '../utils/validation';
 import { fmtDurShort, fmtKm } from '../utils/format';
 import {
   Coords,
@@ -125,6 +126,101 @@ function NcStatsCard() {
   );
 }
 
+/**
+ * TL/ARCO landing summary of their scope (PRD §8): who's working today, whose
+ * daily reports are in, what's waiting in the exception queue, who's at risk,
+ * and offtake against the monthly target — the same rules as the Validasi tab
+ * (utils/validation.ts, utils/kpi.ts), so the numbers match it.
+ */
+function TeamSummaryCard() {
+  const me = useCurrentUser()!;
+  const navigation = useNavigation();
+  const users = useStore((s) => s.users);
+  const teams = useStore((s) => s.teams);
+  const attendances = useStore((s) => s.attendances);
+  const visits = useStore((s) => s.visits);
+  const stockTakingRows = useStore((s) => s.stockTakingRows);
+  const offtakeRows = useStore((s) => s.offtakeRows);
+  const shareOfShelfRows = useStore((s) => s.shareOfShelfRows);
+  const paidVisibilityRows = useStore((s) => s.paidVisibilityRows);
+  const priceMonitoringRows = useStore((s) => s.priceMonitoringRows);
+  const ntgGwps = useStore((s) => s.ntgGwps);
+  const reportReviews = useStore((s) => s.reportReviews);
+  const targets = useStore((s) => s.targets);
+
+  const stats = useMemo(() => {
+    const ncs = scopeUsers({ users, teams }, me).filter((u) => u.role === 'nc');
+    const ncIds = new Set(ncs.map((u) => u.id));
+    const today = programDayKey(Date.now());
+    const workingToday = new Set(
+      attendances.filter((a) => ncIds.has(a.userId) && (!a.clockOutAt || programDayKey(a.clockInAt) === today)).map((a) => a.userId),
+    ).size;
+    const reportsComplete = ncs.filter((nc) => {
+      const st = todaysReportStatus(nc.id, visits, stockTakingRows, offtakeRows, ntgGwps);
+      return st.stockTaking && st.offtake && st.ntgGwp;
+    }).length;
+    const atRisk = ncs.filter((nc) => attritionSignal(nc.id, attendances, visits, stockTakingRows, offtakeRows, ntgGwps).atRisk).length;
+    const visitsById = new Map(visits.map((v) => [v.id, v]));
+    const groups = groupReports(
+      buildReportItems({
+        visitsById,
+        ncIds,
+        range: getRange('weekly'),
+        stockTaking: stockTakingRows,
+        offtake: offtakeRows,
+        shareOfShelf: shareOfShelfRows,
+        paidVisibility: paidVisibilityRows,
+        priceMonitoring: priceMonitoringRows,
+      }),
+      new Map(reportReviews.map((r) => [reviewKey(r.reportType, r.reportId), r])),
+      visitsById,
+    );
+    const month = monthKey();
+    const mtd = monthRange(month);
+    const offtakeMonth = offtakeRows
+      .filter((o) => ncIds.has(visitsById.get(o.visitId)?.ncId ?? '') && inRange(o.createdAt, mtd))
+      .reduce((t, o) => t + o.unitsSold, 0);
+    const target = targets
+      .filter((t) => t.periodKey === month && t.ncId && ncIds.has(t.ncId))
+      .reduce((t, x) => t + (x.offtakeTarget ?? 0), 0);
+    return {
+      ncCount: ncs.length,
+      workingToday,
+      reportsComplete,
+      atRisk,
+      exceptions: groups.filter((g) => g.isException).length,
+      offtakeMonth,
+      target,
+    };
+  }, [me, users, teams, attendances, visits, stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, ntgGwps, reportReviews, targets]);
+
+  return (
+    <Card>
+      <SectionHeader
+        title={me.role === 'arco' ? 'Tim di Bawah Koordinasi Anda' : 'Tim Saya'}
+        subtitle={`${stats.ncCount} NC`}
+        action={{ label: 'Buka Validasi', onPress: () => navigation.navigate('Validasi') }}
+      />
+      <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
+        <StatCard title="Bekerja Hari Ini" value={`${stats.workingToday}/${stats.ncCount}`} sub="clock-in hari ini" />
+        <StatCard title="Laporan Harian Lengkap" value={`${stats.reportsComplete}/${stats.ncCount}`} sub="Stock, Offtake, NTG" />
+        <StatCard
+          title="Perlu Ditinjau"
+          value={String(stats.exceptions)}
+          sub="pengecualian minggu ini"
+          color={stats.exceptions ? C.warn : undefined}
+        />
+        <StatCard title="NC Berisiko" value={String(stats.atRisk)} sub="absen / tak lapor ≥3 dari 7 hari" color={stats.atRisk ? C.warn : undefined} />
+        <StatCard
+          title="Offtake Bulan Ini"
+          value={String(stats.offtakeMonth)}
+          sub={stats.target ? `target ${stats.target} (${Math.round((100 * stats.offtakeMonth) / stats.target)}%)` : 'target belum diset'}
+        />
+      </View>
+    </Card>
+  );
+}
+
 /** Phase 2 (PRD §16) — same-day glance at the 3 core daily modules for an NC. */
 function TodaysReportCard() {
   const me = useCurrentUser()!;
@@ -213,17 +309,7 @@ export default function DashboardScreen() {
         </Card>
       )}
 
-      {(me.role === 'tl' || me.role === 'arco') && (
-        <Card>
-          <SectionHeader
-            title="Tim Saya"
-            action={{ label: 'Buka Validasi', onPress: () => navigation.navigate('Validasi') }}
-          />
-          <Muted style={{ marginTop: 4 }}>
-            Console validasi same-day, peta live tim, dan coaching log (PRD §8) ada di tab "Validasi".
-          </Muted>
-        </Card>
-      )}
+      {(me.role === 'tl' || me.role === 'arco') && <TeamSummaryCard />}
 
       {CERT_MANAGER_ROLES.includes(me.role) && (
         <Card>

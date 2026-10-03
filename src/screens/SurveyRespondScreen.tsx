@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { useStore } from '../store/useStore';
 import { uid } from '../utils/uuid';
@@ -57,7 +57,7 @@ export default function SurveyRespondScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 110, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title={survey.title} subtitle={survey.campaignTag} />
         {survey.questions.map((q, i) => (

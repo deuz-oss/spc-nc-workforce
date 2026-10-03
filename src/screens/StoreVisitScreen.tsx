@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StickyFooter } from '../components/ui';
+import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { VISIT_VALID_RADIUS_M } from '../config';
 import { C, T } from '../theme';
@@ -123,7 +123,7 @@ export default function StoreVisitScreen() {
         contentContainerStyle={{
           padding: 16,
           gap: 12,
-          paddingBottom: editable ? 110 : 24,
+          paddingBottom: editable ? STICKY_FOOTER_SPACE : 24,
           maxWidth: 900,
           width: '100%',
           alignSelf: 'center',

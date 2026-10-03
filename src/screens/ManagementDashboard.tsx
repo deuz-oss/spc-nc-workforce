@@ -5,6 +5,7 @@ import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionH
 import { showDialog } from '../components/dialog';
 import { useDataRefresh } from '../components/useDataRefresh';
 import { HistoryNotice } from '../components/HistoryNotice';
+import { ShowMore } from '../components/ShowMore';
 import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
 import { ManagementSummary, useCurrentUser, useStore } from '../store/useStore';
@@ -483,9 +484,12 @@ export default function ManagementDashboard() {
           {ncTrackerList.length === 0 ? (
             <Empty text="Tidak ada NC pada filter ini." />
           ) : (
-            ncTrackerList.map((nc) => (
-              <ListRow key={nc.id} title={nc.name} subtitle={nc.city ?? '-'} onPress={() => navigation.navigate('NcTracker', { ncId: nc.id })} />
-            ))
+            <ShowMore
+              items={ncTrackerList}
+              render={(nc) => (
+                <ListRow key={nc.id} title={nc.name} subtitle={nc.city ?? '-'} onPress={() => navigation.navigate('NcTracker', { ncId: nc.id })} />
+              )}
+            />
           )}
         </View>
       </Card>

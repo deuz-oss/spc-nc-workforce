@@ -3,7 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import {
   CHILD_AGE_BRACKETS,
@@ -172,7 +172,7 @@ export default function ConsumerDetailScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: !readOnly ? 110 : 24, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: !readOnly ? STICKY_FOOTER_SPACE : 24, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader
           title={isCreate ? 'Konsumen Baru' : name || 'Detail Konsumen'}

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { C, F } from '../theme';
@@ -87,7 +87,7 @@ export default function OfftakeScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Offtake" subtitle="Harian · unit terjual per SKU (PRD §5.3)" />
 

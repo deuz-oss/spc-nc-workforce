@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Badge, Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Badge, Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
@@ -85,7 +85,7 @@ export default function StockTakingScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Stock Taking" subtitle="Harian · quantity on hand per SKU (PRD §5.1)" />
 

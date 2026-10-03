@@ -16,7 +16,7 @@ import { createBottomTabNavigator, BottomTabBarProps, BottomTabHeaderProps } fro
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Header, getHeaderTitle } from '@react-navigation/elements';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_NAME, ROLE_LABEL } from './src/config';
 import { C, F, T } from './src/theme';
@@ -158,6 +158,7 @@ function ResponsiveTabBar({
   me,
 }: BottomTabBarProps & { isTablet: boolean; isDesktop: boolean; me: User }) {
   const routes = state.routes;
+  const insets = useSafeAreaInsets();
 
   if (!isTablet) {
     return (
@@ -170,7 +171,8 @@ function ResponsiveTabBar({
           borderColor: C.border,
           backgroundColor: C.card,
           paddingTop: 6,
-          paddingBottom: 8,
+          // Clear the home indicator / gesture bar on edge-to-edge phones.
+          paddingBottom: 8 + insets.bottom,
         }}
       >
         {routes.map((route, i) => {

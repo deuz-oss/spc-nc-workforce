@@ -13,55 +13,24 @@ import {
   StatusBadge,
 } from '../components/ui';
 import { LiveTeamMap } from '../components/LiveTeamMap';
-import { showDialog } from '../components/dialog';
 import { useDataRefresh } from '../components/useDataRefresh';
 import { REPORT_TYPE_LABEL } from '../config';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
 import { getRange, inRange, monthKey, monthRange, PERIODS, PeriodKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
-import { photoStoragePath } from '../utils/photoRef';
 import { openReportPhoto } from '../utils/storage';
-import { ReportType } from '../types';
+import { buildReportItems, groupReports, ReportGroup, reviewKey } from '../utils/validation';
+import { ShowMore } from '../components/ShowMore';
+import { C } from '../theme';
 
 /**
  * TL/ARCO validation console (PRD §8), exception-based per the PRD review
  * note added to §8: 12 TLs cover 195 NCs (~16:1), so requiring a manual touch
  * on every report isn't operationally achievable — only anomalies/flags need
- * action, everything else auto-approves. Phase 4a (PRD §16).
+ * action, everything else auto-approves. One card per report (all SKU lines of
+ * a module in one visit), reviewed as a whole — see utils/validation.ts.
  */
-
-interface ReportItem {
-  type: ReportType;
-  id: string;
-  visitId: string;
-  ncId: string;
-  storeId: string;
-  createdAt: number;
-  isOutlier?: boolean;
-  /** Server receive time (0014) — far after createdAt means a late sync. */
-  receivedAt?: number;
-  /** Evidence photo, when the module has one and it's been uploaded (a
-   * still-offline local file:// path isn't viewable from a reviewer's device). */
-  photoUrl?: string;
-}
-
-/** A report reaching the server this long after it was made is worth a look:
- * a long offline stretch, or a phone whose clock was set back to backdate it. */
-const LATE_SYNC_MS = 12 * 3600000;
-
-/** Why a not-yet-reviewed report needs a manual look, or null if it auto-approves. */
-function autoFlagReason(item: ReportItem, visitGeoValid: boolean | undefined): string | null {
-  if (item.isOutlier) return 'Outlier: >3x rata-rata 7 hari NC ini';
-  if (visitGeoValid === false) return 'Kunjungan tidak geo-valid (di luar radius toko, toko tanpa pin, atau lokasi palsu)';
-  if (item.receivedAt != null && item.receivedAt - item.createdAt > LATE_SYNC_MS) {
-    return `Tersinkron ${Math.round((item.receivedAt - item.createdAt) / 3600000)} jam setelah dibuat — cek jam HP / alasan offline`;
-  }
-  return null;
-}
-
-/** Only photos that reached Storage are viewable by a reviewer — an offline-queued local file isn't. */
-const remotePhoto = (ref?: string) => (photoStoragePath(ref) ? ref : undefined);
 
 export default function ValidationQueueScreen() {
   const navigation = useNavigation();
@@ -80,7 +49,7 @@ export default function ValidationQueueScreen() {
   const ntgGwps = useStore((s) => s.ntgGwps);
   const reportReviews = useStore((s) => s.reportReviews);
   const targets = useStore((s) => s.targets);
-  const reviewReport = useStore((s) => s.reviewReport);
+  const reviewReports = useStore((s) => s.reviewReports);
 
   const [periodKey, setPeriodKey] = useState<PeriodKey>('weekly');
   const [flaggingKey, setFlaggingKey] = useState<string | null>(null);
@@ -99,43 +68,32 @@ export default function ValidationQueueScreen() {
   const ncIds = useMemo(() => new Set(ncUsers.map((u) => u.id)), [ncUsers]);
   const visitsById = useMemo(() => new Map(visits.map((v) => [v.id, v])), [visits]);
 
-  const items: ReportItem[] = useMemo(() => {
-    const inScope = (visitId: string) => {
-      const v = visitsById.get(visitId);
-      return !!v && ncIds.has(v.ncId) && inRange(v.checkInAt, range);
-    };
-    const out: ReportItem[] = [];
-    for (const r of stockTakingRows) if (inScope(r.visitId)) out.push({ type: 'stock_taking', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of offtakeRows) if (inScope(r.visitId)) out.push({ type: 'offtake', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, isOutlier: r.isOutlier });
-    for (const r of shareOfShelfRows) if (inScope(r.visitId)) out.push({ type: 'share_of_shelf', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of paidVisibilityRows) if (inScope(r.visitId)) out.push({ type: 'paid_visibility', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
-    for (const r of priceMonitoringRows) if (inScope(r.visitId)) out.push({ type: 'price_monitoring', id: r.id, visitId: r.visitId, ncId: visitsById.get(r.visitId)!.ncId, storeId: r.storeId, createdAt: r.createdAt, receivedAt: r.receivedAt, photoUrl: remotePhoto(r.photoUrl) });
-    return out.sort((a, b) => b.createdAt - a.createdAt);
-  }, [stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, visitsById, ncIds, range]);
-
-  const reviewByKey = useMemo(() => {
-    const m = new Map<string, (typeof reportReviews)[number]>();
-    for (const r of reportReviews) m.set(`${r.reportType}:${r.reportId}`, r);
-    return m;
-  }, [reportReviews]);
-
-  const exceptions = useMemo(
+  const items = useMemo(
     () =>
-      items.filter((item) => {
-        const review = reviewByKey.get(`${item.type}:${item.id}`);
-        if (review?.status === 'approved') return false;
-        if (review?.status === 'flagged') return true;
-        return autoFlagReason(item, visitsById.get(item.visitId)?.geoValid) != null;
+      buildReportItems({
+        visitsById,
+        ncIds,
+        range,
+        stockTaking: stockTakingRows,
+        offtake: offtakeRows,
+        shareOfShelf: shareOfShelfRows,
+        paidVisibility: paidVisibilityRows,
+        priceMonitoring: priceMonitoringRows,
       }),
-    [items, reviewByKey, visitsById],
+    [stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, visitsById, ncIds, range],
   );
-  const normalCount = items.length - exceptions.length;
-  const shown = view === 'exceptions' ? exceptions : items;
+  const reviewByKey = useMemo(() => new Map(reportReviews.map((r) => [reviewKey(r.reportType, r.reportId), r])), [reportReviews]);
+  const groups = useMemo(() => groupReports(items, reviewByKey, visitsById), [items, reviewByKey, visitsById]);
+  const exceptions = useMemo(() => groups.filter((g) => g.isException), [groups]);
+  const normalCount = groups.length - exceptions.length;
+  const shown = view === 'exceptions' ? exceptions : groups;
+  const usersById = useMemo(() => new Map(users.map((u) => [u.id, u])), [users]);
+  const storesById = useMemo(() => new Map(stores.map((st) => [st.id, st])), [stores]);
 
-  const act = async (item: ReportItem, status: 'approved' | 'flagged', note?: string) => {
-    const key = `${item.type}:${item.id}`;
-    setBusyKey(key);
-    await reviewReport(item.type, item.id, status, note);
+  /** Approve / flag every line of the report at once. */
+  const act = async (g: ReportGroup, status: 'approved' | 'flagged', note?: string) => {
+    setBusyKey(g.key);
+    await reviewReports(g.items.map((it) => ({ reportType: it.type, reportId: it.id })), status, note);
     setBusyKey(null);
     setFlaggingKey(null);
     setFlagNote('');
@@ -195,66 +153,64 @@ export default function ValidationQueueScreen() {
         />
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
           <Chip label={`Pengecualian (${exceptions.length})`} active={view === 'exceptions'} onPress={() => setView('exceptions')} />
-          <Chip label={`Semua (${items.length})`} active={view === 'all'} onPress={() => setView('all')} />
+          <Chip label={`Semua (${groups.length})`} active={view === 'all'} onPress={() => setView('all')} />
         </View>
         {shown.length === 0 ? (
           <Empty text={view === 'exceptions' ? 'Tidak ada laporan yang perlu ditinjau.' : 'Belum ada laporan pada periode ini.'} />
         ) : (
           <View style={{ gap: 8, marginTop: 10 }}>
-            {shown.map((item) => {
-              const key = `${item.type}:${item.id}`;
-              const nc = users.find((u) => u.id === item.ncId);
-              const store = stores.find((s) => s.id === item.storeId);
-              const review = reviewByKey.get(key);
-              const autoFlag = autoFlagReason(item, visitsById.get(item.visitId)?.geoValid);
-              const status = review?.status === 'flagged'
-                ? { label: 'Ditandai', color: '#B45309', icon: 'alert-circle' as const, reason: review.note || 'Ditandai untuk ditinjau' }
-                : review?.status === 'approved'
-                  ? { label: 'Disetujui', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Disetujui manual' }
-                  : autoFlag
-                    ? { label: item.isOutlier ? 'Outlier' : 'Perlu Dicek', color: '#B45309', icon: 'alert-circle' as const, reason: autoFlag }
-                    : { label: 'Normal', color: '#15803D', icon: 'checkmark-circle' as const, reason: 'Otomatis disetujui' };
-              return (
-                <View key={key} style={{ gap: 6 }}>
-                  <ListRow
-                    title={`${REPORT_TYPE_LABEL[item.type]} · ${nc?.name ?? '-'}`}
-                    subtitle={`${store?.name ?? '-'} · ${fmtDateTime(item.createdAt)}`}
-                    meta={status.reason}
-                    trailing={<StatusBadge label={status.label} color={status.color} icon={status.icon} />}
-                  />
-                  {item.photoUrl && (
-                    <View style={{ paddingHorizontal: 4, alignSelf: 'flex-start' }}>
-                      <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => void openReportPhoto(item.photoUrl)} />
-                    </View>
-                  )}
-                  {flaggingKey === key ? (
-                    <View style={{ gap: 8, paddingHorizontal: 4 }}>
-                      <Input
-                        placeholder="Catatan (wajib untuk flag)"
-                        value={flagNote}
-                        onChangeText={setFlagNote}
-                        multiline
-                      />
-                      <View style={{ flexDirection: 'row', gap: 8 }}>
-                        <Btn
-                          small
-                          title="Kirim Flag"
-                          disabled={!flagNote.trim() || busyKey === key}
-                          loading={busyKey === key}
-                          onPress={() => act(item, 'flagged', flagNote)}
-                        />
-                        <Btn small variant="outline" title="Batal" onPress={() => { setFlaggingKey(null); setFlagNote(''); }} />
+            <ShowMore
+              key={`${view}:${periodKey}`}
+              items={shown}
+              render={(g) => {
+                const nc = usersById.get(g.ncId);
+                const store = storesById.get(g.storeId);
+                const lines = g.items.length > 1 ? ` · ${g.items.length} SKU` : '';
+                const status =
+                  g.status === 'flagged'
+                    ? { label: 'Ditandai', color: C.warn, icon: 'alert-circle' as const, reason: g.note || 'Ditandai untuk ditinjau' }
+                    : g.status === 'approved'
+                      ? { label: 'Disetujui', color: C.ok, icon: 'checkmark-circle' as const, reason: 'Disetujui manual' }
+                      : g.autoFlag
+                        ? { label: 'Perlu Dicek', color: C.warn, icon: 'alert-circle' as const, reason: g.autoFlag }
+                        : { label: 'Normal', color: C.ok, icon: 'checkmark-circle' as const, reason: 'Otomatis disetujui' };
+                return (
+                  <View key={g.key} style={{ gap: 6 }}>
+                    <ListRow
+                      title={`${REPORT_TYPE_LABEL[g.type]}${lines} · ${nc?.name ?? '-'}`}
+                      subtitle={`${store?.name ?? '-'} · ${fmtDateTime(g.createdAt)}`}
+                      meta={status.reason}
+                      trailing={<StatusBadge label={status.label} color={status.color} icon={status.icon} />}
+                    />
+                    {g.photoUrl && (
+                      <View style={{ paddingHorizontal: 4, alignSelf: 'flex-start' }}>
+                        <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => void openReportPhoto(g.photoUrl)} />
                       </View>
-                    </View>
-                  ) : (
-                    <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4 }}>
-                      <Btn small variant="ok" title="Approve" disabled={busyKey === key} loading={busyKey === key} onPress={() => act(item, 'approved')} />
-                      <Btn small variant="outline" title="Flag" onPress={() => { setFlaggingKey(key); setFlagNote(''); }} />
-                    </View>
-                  )}
-                </View>
-              );
-            })}
+                    )}
+                    {flaggingKey === g.key ? (
+                      <View style={{ gap: 8, paddingHorizontal: 4 }}>
+                        <Input placeholder="Catatan (wajib untuk flag)" value={flagNote} onChangeText={setFlagNote} multiline />
+                        <View style={{ flexDirection: 'row', gap: 8 }}>
+                          <Btn
+                            small
+                            title="Kirim Flag"
+                            disabled={!flagNote.trim() || busyKey === g.key}
+                            loading={busyKey === g.key}
+                            onPress={() => act(g, 'flagged', flagNote)}
+                          />
+                          <Btn small variant="outline" title="Batal" onPress={() => { setFlaggingKey(null); setFlagNote(''); }} />
+                        </View>
+                      </View>
+                    ) : (
+                      <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4 }}>
+                        <Btn small variant="ok" title="Approve" disabled={busyKey === g.key} loading={busyKey === g.key} onPress={() => act(g, 'approved')} />
+                        <Btn small variant="outline" title="Flag" onPress={() => { setFlaggingKey(g.key); setFlagNote(''); }} />
+                      </View>
+                    )}
+                  </View>
+                );
+              }}
+            />
           </View>
         )}
         <Muted style={{ marginTop: 12 }}>
@@ -268,26 +224,29 @@ export default function ValidationQueueScreen() {
           {ncUsers.length === 0 ? (
             <Empty text="Belum ada NC di scope Anda." />
           ) : (
-            rollup.map(({ nc, todays, risk, offtakeInRange, offtakeMonth, target }) => (
-              <ListRow
-                key={nc.id}
-                title={nc.name}
-                subtitle={`Laporan hari ini: ${[todays.stockTaking && 'Stock', todays.offtake && 'Offtake', todays.ntgGwp && 'NTG&GWP'].filter(Boolean).join(', ') || 'Belum ada'}`}
-                meta={
-                  `Offtake periode ini: ${offtakeInRange} · ` +
-                  (target
-                    ? `bulan ini ${offtakeMonth}/${target} (${Math.round((100 * offtakeMonth) / target)}%)`
-                    : `bulan ini ${offtakeMonth} (target belum diset)`)
-                }
-                trailing={
-                  risk.atRisk ? (
-                    <StatusBadge label="Perlu Perhatian" color="#B45309" icon="alert-circle" />
-                  ) : (
-                    <StatusBadge label="On Track" color="#15803D" icon="checkmark-circle" />
-                  )
-                }
-              />
-            ))
+            <ShowMore
+              items={rollup}
+              render={({ nc, todays, risk, offtakeInRange, offtakeMonth, target }) => (
+                <ListRow
+                  key={nc.id}
+                  title={nc.name}
+                  subtitle={`Laporan hari ini: ${[todays.stockTaking && 'Stock', todays.offtake && 'Offtake', todays.ntgGwp && 'NTG&GWP'].filter(Boolean).join(', ') || 'Belum ada'}`}
+                  meta={
+                    `Offtake periode ini: ${offtakeInRange} · ` +
+                    (target
+                      ? `bulan ini ${offtakeMonth}/${target} (${Math.round((100 * offtakeMonth) / target)}%)`
+                      : `bulan ini ${offtakeMonth} (target belum diset)`)
+                  }
+                  trailing={
+                    risk.atRisk ? (
+                      <StatusBadge label="Perlu Perhatian" color={C.warn} icon="alert-circle" />
+                    ) : (
+                      <StatusBadge label="Aman" color={C.ok} icon="checkmark-circle" />
+                    )
+                  }
+                />
+              )}
+            />
           )}
         </View>
         <Muted style={{ marginTop: 10 }}>

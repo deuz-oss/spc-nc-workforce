@@ -1,7 +1,7 @@
 import React, { memo, useMemo, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import * as DocumentPicker from 'expo-document-picker';
-import { Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StatCard, StickyFooter } from '../components/ui';
+import { Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StatCard, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { TARGET_MANAGER_ROLES } from '../config';
 import { C, F } from '../theme';
@@ -370,7 +370,7 @@ export default function TargetsScreen() {
         data={visible}
         keyExtractor={(u) => u.id}
         ListHeaderComponent={header}
-        contentContainerStyle={{ padding: 16, paddingBottom: 110, gap: 10, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, paddingBottom: STICKY_FOOTER_SPACE, gap: 10, maxWidth: 900, width: '100%', alignSelf: 'center' }}
         keyboardShouldPersistTaps="handled"
         ListEmptyComponent={<Empty text={ncs.length ? 'Tidak ada NC pada filter ini.' : 'Belum ada NC aktif.'} />}
         renderItem={({ item: nc }) => (

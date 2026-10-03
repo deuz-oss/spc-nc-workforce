@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { CATEGORY_LABEL } from '../config';
@@ -94,7 +94,7 @@ export default function ShareOfShelfScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: 120, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Share of Shelf" subtitle="Bi-weekly · SOS% per channel & kategori (PRD §5.2)" />
 

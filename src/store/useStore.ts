@@ -348,6 +348,12 @@ interface StoreState {
   // --- Phase 4a: TL/ARCO validation console (PRD §8) ---
   /** Approve or flag a report row (exception-based queue — PRD §8 review note). Plain online write, no offline queue (desk-review action, not field-critical). */
   reviewReport(reportType: ReportType, reportId: string, status: ReportReviewStatus, note?: string): Promise<string | null>;
+  /** Reviews several report rows at once (e.g. every SKU line of one Stock Taking) in a single write. */
+  reviewReports(
+    refs: Array<{ reportType: ReportType; reportId: string }>,
+    status: ReportReviewStatus,
+    note?: string,
+  ): Promise<string | null>;
   upsertCoachingLog(log: CoachingLog): Promise<string | null>;
   /** Data Analyst/super_admin only (matches targets RLS write policy, 0001 migration). */
   upsertTarget(t: Target): Promise<string | null>;
@@ -2492,33 +2498,42 @@ export const useStore = create<StoreState>()((set, get) => ({
   // Plain online writes, optimistic + rollback like upsertStore — these are
   // TL/ARCO desk-review actions, not field-critical writes, so no offline queue.
 
-  reviewReport: async (reportType, reportId, status, note) => {
+  reviewReport: (reportType, reportId, status, note) => get().reviewReports([{ reportType, reportId }], status, note),
+
+  reviewReports: async (refs, status, note) => {
     const me = get().users.find((u) => u.id === get().sessionUserId);
     if (!me) return 'Sesi tidak ditemukan.';
-    const existing = get().reportReviews.find((r) => r.reportType === reportType && r.reportId === reportId);
+    if (!refs.length) return null;
     const now = Date.now();
-    const row: ReportReview = {
-      id: existing?.id ?? uid('rr_'),
+    const rows: ReportReview[] = refs.map(({ reportType, reportId }) => ({
+      id: get().reportReviews.find((r) => r.reportType === reportType && r.reportId === reportId)?.id ?? uid('rr_'),
       reportType,
       reportId,
       status,
       reviewedBy: me.id,
       reviewedAt: now,
       note: note?.trim() || undefined,
-    };
+    }));
     const before = get().reportReviews;
-    set({ reportReviews: upsertById(before, row) });
-    const { error } = await supabase.from('report_reviews').upsert({
-      id: row.id,
-      report_type: row.reportType,
-      report_id: row.reportId,
-      status: row.status,
-      reviewed_by: row.reviewedBy,
-      reviewed_at: new Date(row.reviewedAt!).toISOString(),
-      note: row.note,
-    });
+    let next = before;
+    for (const r of rows) next = upsertById(next, r);
+    set({ reportReviews: next });
+    // onConflict on the natural key: a review made earlier but outside the
+    // loaded history window isn't known locally — update it, don't collide.
+    const { error } = await supabase.from('report_reviews').upsert(
+      rows.map((r) => ({
+        id: r.id,
+        report_type: r.reportType,
+        report_id: r.reportId,
+        status: r.status,
+        reviewed_by: r.reviewedBy,
+        reviewed_at: new Date(r.reviewedAt!).toISOString(),
+        note: r.note ?? null,
+      })),
+      { onConflict: 'report_type,report_id' },
+    );
     if (error) {
-      restoreRows(set, get, 'reportReviews', [row.id], before);
+      restoreRows(set, get, 'reportReviews', rows.map((r) => r.id), before);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan status review. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }

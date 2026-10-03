@@ -208,6 +208,13 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
 - ✅ Code health: typed navigation (`src/navigation.ts`), shared `SkuPicker`, mappers out of the store, one
   table-driven realtime handler, per-row rollback of failed optimistic writes, forms ask before dropping SKU rows
   left empty.
+- ✅ **Validation reviews whole reports, not SKU lines**: the Validasi queue shows one card per module per visit
+  (e.g. a 20-SKU Stock Taking is one card) and Approve / Flag applies to all its lines in one write
+  (`reviewReports`). The rules live in `src/utils/validation.ts` (tested) and also feed the TL/ARCO dashboard's
+  team summary (working today, daily reports complete, exceptions, at-risk NCs, offtake vs target). Long lists
+  render in pages (`ShowMore`).
+- ✅ Store assignment has a searchable NC picker (own team / city first); the bottom tab bar and form footers clear
+  the phone's home indicator (safe-area insets).
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
