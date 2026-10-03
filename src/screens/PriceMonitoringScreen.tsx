@@ -5,6 +5,8 @@ import { useAppRoute } from '../navigation';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { C, F } from '../theme';
 import { fmtIDR } from '../utils/format';
@@ -33,6 +35,16 @@ export default function PriceMonitoringScreen() {
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const draft = useMemo(() => ({ rows, photoUri }), [rows, photoUri]);
+  const saved = useDraft(
+    draftKey(visitId, 'price_monitoring'),
+    draft,
+    (d) => {
+      setRows(d.rows);
+      setPhotoUri(d.photoUri);
+    },
+    (d) => !d.rows.length && !d.photoUri,
+  );
 
   const pickedSkus = useMemo(() => new Set(rows.map((r) => r.sku.toLowerCase())), [rows]);
   // One report per visit per SKU (a second one would double the numbers):
@@ -76,6 +88,7 @@ export default function PriceMonitoringScreen() {
         })),
         photoUri ?? undefined,
       );
+      await saved.clear();
       // Saved offline: the store already told the user — no second message.
       if (!queued) showToast('Price Monitoring tersimpan');
       navigation.goBack();
@@ -95,7 +108,15 @@ export default function PriceMonitoringScreen() {
         role="main"
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
-        <SectionHeader title="Price Monitoring" subtitle="Bi-weekly · harga sendiri vs kompetitor (PRD §5.6)" />
+        <SectionHeader title="Price Monitoring" subtitle="Harga produk kita dan kompetitor di toko ini" />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setRows([]);
+            setPhotoUri(null);
+          }}
+        />
 
         {reportedList.length > 0 && (
           <Card>

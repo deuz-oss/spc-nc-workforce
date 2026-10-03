@@ -61,7 +61,10 @@ export function DialogHost() {
   const [liveMessage, setLiveMessage] = useState('');
 
   useEffect(() => {
-    listener = (s) => setQueue((q) => [...q, s]);
+    // A double tap raises the same dialog twice — keep one, or the second
+    // would act on a state the first one already changed.
+    listener = (s) =>
+      setQueue((q) => (q.some((x) => x.title === s.title && x.message === s.message) ? q : [...q, s]));
     return () => {
       listener = null;
     };

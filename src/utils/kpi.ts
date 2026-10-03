@@ -88,6 +88,31 @@ export function computeNcStat(
  * NOT part of the scorecard engine (unscored, no weights) — that's still
  * Phase 4; this only powers a same-day dashboard nudge for the NC.
  */
+/** The daily reports every store visit needs (PRD §5) — what the visit
+ * screen and the Dashboard count as "wajib". */
+export const REQUIRED_VISIT_REPORTS = [
+  { key: 'stock_taking', label: 'Stock Taking' },
+  { key: 'offtake', label: 'Offtake' },
+  { key: 'ntg_gwp', label: 'NTG & GWP' },
+] as const;
+
+export type RequiredReportKey = (typeof REQUIRED_VISIT_REPORTS)[number]['key'];
+
+/** Which of the required reports one visit already has. */
+export function visitRequiredReports(
+  visitId: string,
+  stockTaking: StockTakingRow[],
+  offtake: OfftakeRow[],
+  ntgGwps: NtgGwp[],
+): { key: RequiredReportKey; label: string; done: boolean }[] {
+  const done: Record<RequiredReportKey, boolean> = {
+    stock_taking: stockTaking.some((r) => r.visitId === visitId),
+    offtake: offtake.some((r) => r.visitId === visitId),
+    ntg_gwp: ntgGwps.some((g) => g.visitId === visitId),
+  };
+  return REQUIRED_VISIT_REPORTS.map((r) => ({ key: r.key, label: r.label, done: done[r.key] }));
+}
+
 export interface TodaysReportStatus {
   stockTaking: boolean;
   offtake: boolean;

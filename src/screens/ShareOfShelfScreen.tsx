@@ -5,6 +5,8 @@ import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
 import { CATEGORY_LABEL } from '../config';
 import { C } from '../theme';
 import { ShownError, useStore } from '../store/useStore';
@@ -41,6 +43,19 @@ export default function ShareOfShelfScreen() {
   const [totalFacing, setTotalFacing] = useState('');
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const draft = useMemo(() => ({ channel, category, ownFacing, totalFacing, photoUri }), [channel, category, ownFacing, totalFacing, photoUri]);
+  const saved = useDraft(
+    draftKey(visitId, 'share_of_shelf'),
+    draft,
+    (d) => {
+      setChannel(d.channel);
+      if (!doneCategories.has(d.category)) setCategory(d.category);
+      setOwnFacing(d.ownFacing);
+      setTotalFacing(d.totalFacing);
+      setPhotoUri(d.photoUri);
+    },
+    (d) => !d.ownFacing && !d.totalFacing && !d.photoUri,
+  );
 
   const sosPct = useMemo(() => {
     const own = Number(ownFacing);
@@ -81,6 +96,7 @@ export default function ShareOfShelfScreen() {
         { channel: channel.trim(), category, ownFacingCount: Number(ownFacing), totalFacingCount: Number(totalFacing) },
         photoUri,
       );
+      await saved.clear();
       // Saved offline: the store already told the user — no second message.
       if (!queued) showToast('Share of Shelf tersimpan');
       navigation.goBack();
@@ -101,7 +117,16 @@ export default function ShareOfShelfScreen() {
         role="main"
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
-        <SectionHeader title="Share of Shelf" subtitle="Bi-weekly · SOS% per channel & kategori (PRD §5.2)" />
+        <SectionHeader title="Share of Shelf" subtitle="Porsi rak produk kita dibanding seluruh kategori" />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setOwnFacing('');
+            setTotalFacing('');
+            setPhotoUri(null);
+          }}
+        />
 
         <Card>
           <Field label="Account / Channel">

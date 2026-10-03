@@ -3,38 +3,28 @@ import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { Badge, Btn, Card, Empty, GeoValidBadge, H, Input, ListRow, Muted, SectionHeader, STICKY_FOOTER_SPACE, StickyFooter } from '../components/ui';
-import { CATEGORY_LABEL, STORE_MANAGER_ROLES, VISIT_VALID_RADIUS_M } from '../config';
-import { showDialog } from '../components/dialog';
+import { CATEGORY_LABEL, STORE_MANAGER_ROLES } from '../config';
+import { useCheckIn } from '../components/fieldActions';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { StoreEditForm } from '../components/StoreEditForm';
 import { ShowMore } from '../components/ShowMore';
 import { C } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
-import { haversineM } from '../utils/geo';
-import {
-  LocationPermissionDeniedError,
-  MOCK_LOCATION_MESSAGE,
-  MOCK_LOCATION_TITLE,
-  requestCurrentCoords,
-} from '../utils/location';
 
 export default function StoreDetailScreen() {
   const route = useAppRoute<'StoreDetail'>();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const store = useStore((s) => s.stores.find((m) => m.id === route.params.storeId));
-  const stores = useStore((s) => s.stores);
   const users = useStore((s) => s.users);
   const visits = useStore((s) => s.visits);
-  const attendances = useStore((s) => s.attendances);
   const upsertStore = useStore((s) => s.upsertStore);
-  const startVisit = useStore((s) => s.startVisit);
+  const { checkIn, checkingStoreId } = useCheckIn();
 
   const [assigning, setAssigning] = useState(false);
   const [ncQuery, setNcQuery] = useState('');
   const [editing, setEditing] = useState(false);
-  const [checking, setChecking] = useState(false);
 
   const storeVisits = useMemo(
     () => visits.filter((v) => v.storeId === route.params.storeId).sort((a, b) => b.checkInAt - a.checkInAt),
@@ -63,74 +53,6 @@ export default function StoreDetailScreen() {
   const openVisit = storeVisits.find((v) => !v.checkOutAt && v.ncId === me.id);
   const nc = users.find((u) => u.id === store.assignedNcId);
   const isManager = STORE_MANAGER_ROLES.includes(me.role);
-
-  const beginVisit = async () => {
-    if (openVisit) {
-      navigation.navigate('StoreVisit', { visitId: openVisit.id });
-      return;
-    }
-    const activeAttendance = attendances.find((a) => a.userId === me.id && !a.clockOutAt);
-    if (!activeAttendance) {
-      showDialog('Belum Clock-in', 'Clock-in terlebih dahulu di tab Dashboard sebelum check-in ke toko.');
-      return;
-    }
-    // One store at a time — reports and CFT are attributed per visit.
-    const openElsewhere = visits.find((v) => v.ncId === me.id && !v.checkOutAt && v.storeId !== store.id);
-    if (openElsewhere) {
-      const other = stores.find((s) => s.id === openElsewhere.storeId);
-      showDialog(
-        'Masih Check-in di Toko Lain',
-        `Selesaikan kunjungan di ${other?.name ?? 'toko sebelumnya'} (check-out) sebelum check-in ke toko ini.`,
-        [
-          { label: 'Batal' },
-          { label: 'Buka Kunjungan', onPress: () => navigation.navigate('StoreVisit', { visitId: openElsewhere.id }) },
-        ],
-      );
-      return;
-    }
-    setChecking(true);
-    let lat: number, lng: number, mocked: boolean;
-    try {
-      ({ lat, lng, mocked } = await requestCurrentCoords());
-    } catch (e) {
-      setChecking(false);
-      if (e instanceof LocationPermissionDeniedError) {
-        showDialog('Izin lokasi diperlukan', 'Aktifkan izin lokasi untuk check-in di toko.');
-      } else {
-        showDialog('Gagal', 'Tidak dapat mengambil lokasi. Coba lagi.');
-      }
-      return;
-    }
-    if (mocked) {
-      setChecking(false);
-      showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
-      return;
-    }
-    let dist: number | null = null;
-    if (store.lat != null && store.lng != null) {
-      dist = Math.round(haversineM({ lat: store.lat, lng: store.lng }, { lat, lng }));
-      if (dist > VISIT_VALID_RADIUS_M) {
-        setChecking(false);
-        showDialog(
-          'Di Luar Radius',
-          `Posisi Anda ${dist}m dari pin toko (maks. ${VISIT_VALID_RADIUS_M}m). Dekati lokasi toko untuk bisa check-in.`,
-        );
-        return;
-      }
-    }
-    try {
-      // A store without a GPS pin can't be geofence-verified — record the
-      // visit, but never as geo-valid (it would otherwise count toward the
-      // PRD §7 valid-visit KPI with zero location evidence).
-      const id = await startVisit(store.id, me.id, { lat, lng }, dist, dist != null);
-      navigation.navigate('StoreVisit', { visitId: id });
-    } catch (e) {
-      // Connectivity problems are queued offline, never thrown — this is a server rejection.
-      showDialog('Gagal Check-in', e instanceof Error ? e.message : 'Coba lagi.');
-    } finally {
-      setChecking(false);
-    }
-  };
 
   return (
     <View style={{ flex: 1 }}>
@@ -253,10 +175,10 @@ export default function StoreDetailScreen() {
       {me.role === 'nc' && (
         <StickyFooter>
           <Btn
-            title={openVisit ? 'Lanjutkan Kunjungan (check-in aktif)' : `CHECK IN di ${store.name}`}
-            onPress={beginVisit}
-            disabled={checking}
-            loading={checking}
+            title={openVisit ? 'Lanjutkan Kunjungan' : checkingStoreId === store.id ? 'Mengambil lokasi…' : 'CHECK IN'}
+            onPress={() => void checkIn(store)}
+            disabled={checkingStoreId != null}
+            loading={checkingStoreId === store.id}
           />
         </StickyFooter>
       )}

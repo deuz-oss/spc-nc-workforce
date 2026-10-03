@@ -5,6 +5,8 @@ import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showToast } from '../components/dialog';
 import { useStore } from '../store/useStore';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
 import { uid } from '../utils/uuid';
 
 /** Generic Survey response flow (PRD §5.7) — renders whatever question set a
@@ -22,6 +24,7 @@ export default function SurveyRespondScreen() {
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const saved = useDraft(draftKey(visitId, `survey:${surveyId}`), answers, setAnswers, (a) => !Object.values(a).some((v) => v.trim() !== ''));
 
   if (!survey) {
     return (
@@ -46,6 +49,7 @@ export default function SurveyRespondScreen() {
         createdAt: Date.now(),
       });
       if (err) return; // store action already showed a dialog
+      await saved.clear();
       showToast('Jawaban tersimpan');
       navigation.goBack();
     } finally {
@@ -61,6 +65,13 @@ export default function SurveyRespondScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title={survey.title} subtitle={survey.campaignTag} />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setAnswers({});
+          }}
+        />
         {survey.questions.map((q, i) => (
           <Card key={q.id}>
             <H>{`${i + 1}. ${q.text}`}</H>

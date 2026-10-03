@@ -1,9 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Badge, Btn, Card, H, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
-import { showDialog, showToast } from '../components/dialog';
+import { Btn, Card, H, ListRow, Muted, SectionHeader, StatCard, StatusBadge, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
+import { useCheckIn, useClockActions } from '../components/fieldActions';
+import { useNow } from '../components/useNow';
 import { useDataRefresh } from '../components/useDataRefresh';
 import ManagementDashboard from './ManagementDashboard';
 import {
@@ -15,81 +16,172 @@ import {
   SURVEY_BUILDER_ROLES,
   TARGET_MANAGER_ROLES,
 } from '../config';
-import { C, F } from '../theme';
+import { C, F, T } from '../theme';
 import { scopeUsers, useCurrentUser, useStore } from '../store/useStore';
-import { attritionSignal, computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
+import { attritionSignal, computeNcStat, statusOf, todaysReportStatus, visitRequiredReports } from '../utils/kpi';
 import { getRange, inRange, monthKey, monthRange, programDayKey } from '../utils/period';
 import { buildReportItems, groupReports, reviewKey } from '../utils/validation';
 import { planCompliance, scheduleStatus } from '../utils/pjp';
-import { fmtDurShort, fmtKm } from '../utils/format';
-import {
-  Coords,
-  LocationPermissionDeniedError,
-  MOCK_LOCATION_MESSAGE,
-  MOCK_LOCATION_TITLE,
-  requestCurrentCoords,
-} from '../utils/location';
+import { fmtDurShort, fmtKm, fmtTime } from '../utils/format';
 
-/** Clock in/out entry point for field roles (NC/TL/ARCO) — geofence check happens
- * against the NC's assigned team city center for now; a per-team geofence pin
- * (analogous to store pins) can be added once team home-base data exists. */
-function ClockCard() {
+/** One required-report line: icon + text, so "done" never depends on color alone. */
+function ReportTick({ label, done }: { label: string; done: boolean }) {
+  return (
+    <View
+      style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}
+      accessible
+      accessibilityLabel={`${label}: ${done ? 'sudah diisi' : 'belum diisi'}`}
+    >
+      <Ionicons name={done ? 'checkmark-circle' : 'ellipse-outline'} size={20} color={done ? C.okStrong : C.muted} />
+      <Text style={[T.body, { fontFamily: done ? F.semi : F.reg }]}>
+        {label}
+        {done ? '' : ' — belum'}
+      </Text>
+    </View>
+  );
+}
+
+/**
+ * The NC's day as one next step: clock in → check in at the next planned store
+ * → finish that visit's reports → clock out. The card says where they are; the
+ * one primary action sits at the bottom of the screen (thumb zone).
+ */
+function useNcNextAction() {
   const me = useCurrentUser()!;
-  const attendances = useStore((s) => s.attendances);
-  const clockIn = useStore((s) => s.clockIn);
-  const [busy, setBusy] = useState(false);
-  const active = attendances.find((a) => a.userId === me.id && !a.clockOutAt);
+  const navigation = useNavigation();
+  const schedules = useStore((s) => s.schedules);
+  const visits = useStore((s) => s.visits);
+  const stores = useStore((s) => s.stores);
+  const stockTakingRows = useStore((s) => s.stockTakingRows);
+  const offtakeRows = useStore((s) => s.offtakeRows);
+  const ntgGwps = useStore((s) => s.ntgGwps);
+  const clock = useClockActions();
+  const { checkIn, checkingStoreId } = useCheckIn();
+  const now = useNow();
 
-  if (active) {
+  const today = programDayKey(now);
+  const plans = schedules.filter((s) => s.ncId === me.id && programDayKey(s.plannedDate) === today);
+  const pending = plans.filter((s) => scheduleStatus(s, visits) !== 'visited');
+  const nextStore = pending.map((p) => stores.find((x) => x.id === p.storeId)).find(Boolean);
+  const visitStore = clock.openVisit ? stores.find((x) => x.id === clock.openVisit!.storeId) : undefined;
+  const required = clock.openVisit ? visitRequiredReports(clock.openVisit.id, stockTakingRows, offtakeRows, ntgGwps) : [];
+
+  type Action = { title: string; onPress: () => void; variant?: 'primary' | 'danger'; loading?: boolean };
+  let primary: Action;
+  let secondary: Action[] = [];
+  let heading: string;
+  let body: React.ReactNode;
+
+  if (!clock.active) {
+    heading = 'Mulai hari kerja';
+    body = <Muted>Clock in untuk mulai merekam rute dan bisa check-in ke toko.</Muted>;
+    primary = {
+      title: clock.busy === 'in' ? 'Mengambil lokasi…' : 'CLOCK IN',
+      onPress: () => void clock.clockIn(),
+      loading: clock.busy === 'in',
+    };
+  } else if (clock.openVisit) {
+    const filled = required.filter((r) => r.done).length;
+    heading = `Sedang di ${visitStore?.name ?? 'toko'}`;
+    body = (
+      <View style={{ gap: 6 }}>
+        <Muted>{`Laporan wajib kunjungan ini: ${filled} dari ${required.length} terisi`}</Muted>
+        {required.map((r) => (
+          <ReportTick key={r.key} label={r.label} done={r.done} />
+        ))}
+      </View>
+    );
+    primary = { title: 'Lanjutkan Kunjungan', onPress: () => navigation.navigate('StoreVisit', { visitId: clock.openVisit!.id }) };
+  } else if (nextStore) {
+    const checking = checkingStoreId === nextStore.id;
+    heading = 'Toko berikutnya';
+    body = (
+      <View style={{ gap: 2 }}>
+        <Text style={T.h2}>{nextStore.name}</Text>
+        <Muted>{[nextStore.address, nextStore.city].filter(Boolean).join(', ')}</Muted>
+        <Muted style={{ marginTop: 4 }}>{`${plans.length - pending.length} dari ${plans.length} toko jadwal hari ini sudah dikunjungi`}</Muted>
+      </View>
+    );
+    primary = {
+      title: checking ? 'Mengambil lokasi…' : 'CHECK IN',
+      onPress: () => void checkIn(nextStore),
+      loading: checking,
+    };
+    secondary = [
+      { title: 'Pilih Toko Lain', onPress: () => navigation.navigate('Toko') },
+      { title: 'Clock Out', onPress: clock.clockOut, loading: clock.busy === 'out' },
+    ];
+  } else {
+    const allDone = plans.length > 0;
+    heading = allDone ? 'Jadwal hari ini selesai' : 'Pilih toko untuk check-in';
+    body = (
+      <Muted>
+        {allDone
+          ? `Semua ${plans.length} toko jadwal hari ini sudah dikunjungi. Clock out bila hari kerja selesai.`
+          : 'Tidak ada jadwal toko hari ini. Pilih toko dari daftar Toko.'}
+      </Muted>
+    );
+    const pick: Action = { title: 'Pilih Toko', onPress: () => navigation.navigate('Toko') };
+    const out: Action = {
+      title: clock.busy === 'out' ? 'Menyimpan…' : 'CLOCK OUT',
+      onPress: clock.clockOut,
+      variant: 'danger',
+      loading: clock.busy === 'out',
+    };
+    primary = allDone ? out : pick;
+    secondary = allDone ? [{ ...pick, title: 'Pilih Toko Lain' }] : [{ ...out, title: 'Clock Out', variant: undefined }];
+  }
+
+  return { heading, body, primary, secondary, plans, checkIn, checkingStoreId, canCheckIn: !!clock.active && !clock.openVisit };
+}
+
+function NextActionCard({ heading, body, secondary }: Pick<ReturnType<typeof useNcNextAction>, 'heading' | 'body' | 'secondary'>) {
+  return (
+    <Card style={{ gap: 10, borderLeftWidth: 4, borderLeftColor: C.gold }}>
+      <Text style={T.caption}>Langkah berikutnya</Text>
+      <Text style={T.h1}>{heading}</Text>
+      {body}
+      {secondary.length > 0 && (
+        <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+          {secondary.map((a) => (
+            <View key={a.title} style={{ flexGrow: 1 }}>
+              <Btn variant="outline" title={a.title} onPress={a.onPress} loading={a.loading} disabled={a.loading} />
+            </View>
+          ))}
+        </View>
+      )}
+    </Card>
+  );
+}
+
+/** TL/ARCO: clock in/out lives on the Dashboard (they have no Absensi tab). */
+function ClockCard() {
+  const clock = useClockActions();
+  if (clock.active) {
     return (
-      <Card>
-        <H>Sesi Absensi Aktif</H>
-        <Muted style={{ marginTop: 4 }}>
-          Clock-in sejak {new Date(active.clockInAt).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}.
-          Buka tab Absensi untuk clock-out.
-        </Muted>
+      <Card style={{ gap: 8 }}>
+        <H>Sesi kerja aktif</H>
+        <Muted>{`Clock in sejak ${fmtTime(clock.active.clockInAt)}.`}</Muted>
+        <Btn
+          variant="outline"
+          title={clock.busy === 'out' ? 'Menyimpan…' : 'Clock Out'}
+          onPress={clock.clockOut}
+          loading={clock.busy === 'out'}
+          disabled={clock.busy != null}
+        />
       </Card>
     );
   }
-
-  const doClockIn = async () => {
-    setBusy(true);
-    try {
-      let pos: Coords;
-      try {
-        pos = await requestCurrentCoords();
-      } catch (e) {
-        if (e instanceof LocationPermissionDeniedError) {
-          showDialog('Izin lokasi diperlukan', 'Aktifkan izin lokasi untuk clock-in.');
-        } else {
-          showDialog('Gagal Clock In', 'Tidak dapat mengambil lokasi. Coba lagi.');
-        }
-        return;
-      }
-      if (pos.mocked) {
-        showDialog(MOCK_LOCATION_TITLE, MOCK_LOCATION_MESSAGE);
-        return;
-      }
-      // Outside the team's home-base radius is allowed but flagged (geo_fence_ok,
-      // computed by the server — migration 0014).
-      const queued = await clockIn(pos);
-      if (!queued) showToast('Clock in berhasil');
-    } catch (e) {
-      // Connectivity problems never land here (they go to the offline queue) —
-      // this is the server rejecting the clock-in.
-      showDialog('Gagal Clock In', e instanceof Error ? e.message : 'Coba lagi.');
-    } finally {
-      setBusy(false);
-    }
-  };
-
   return (
-    <Card>
-      <H>Mulai Hari Kerja</H>
-      <Muted style={{ marginTop: 4 }}>Clock-in untuk mulai merekam rute dan mengaktifkan check-in toko.</Muted>
-      <View style={{ marginTop: 10 }}>
-        <Btn title="CLOCK IN" onPress={doClockIn} disabled={busy} loading={busy} />
-      </View>
+    <Card style={{ gap: 8 }}>
+      <H>Mulai hari kerja</H>
+      <Muted>Clock in untuk mulai merekam rute.</Muted>
+      <Btn
+        title={clock.busy === 'in' ? 'Mengambil lokasi…' : 'CLOCK IN'}
+        onPress={() => void clock.clockIn()}
+        disabled={clock.busy != null}
+        loading={clock.busy === 'in'}
+      />
     </Card>
   );
 }
@@ -150,11 +242,12 @@ function TeamSummaryCard() {
   const reportReviews = useStore((s) => s.reportReviews);
   const targets = useStore((s) => s.targets);
   const schedules = useStore((s) => s.schedules);
+  const now = useNow();
 
   const stats = useMemo(() => {
     const ncs = scopeUsers({ users, teams }, me).filter((u) => u.role === 'nc');
     const ncIds = new Set(ncs.map((u) => u.id));
-    const today = programDayKey(Date.now());
+    const today = programDayKey(now);
     const workingToday = new Set(
       attendances.filter((a) => ncIds.has(a.userId) && (!a.clockOutAt || programDayKey(a.clockInAt) === today)).map((a) => a.userId),
     ).size;
@@ -196,7 +289,7 @@ function TeamSummaryCard() {
       offtakeMonth,
       target,
     };
-  }, [me, users, teams, attendances, visits, stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, ntgGwps, reportReviews, targets, schedules]);
+  }, [now, me, users, teams, attendances, visits, stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, ntgGwps, reportReviews, targets, schedules]);
 
   return (
     <Card>
@@ -230,37 +323,47 @@ function TeamSummaryCard() {
   );
 }
 
-/** The NC's PJP for today: which stores, and which are already visited. */
-function TodayPlanCard() {
-  const me = useCurrentUser()!;
+/** The NC's PJP for today: which stores, which are visited, check-in from the row. */
+function TodayPlanCard({
+  plans,
+  checkIn,
+  checkingStoreId,
+  canCheckIn,
+}: Pick<ReturnType<typeof useNcNextAction>, 'plans' | 'checkIn' | 'checkingStoreId' | 'canCheckIn'>) {
   const navigation = useNavigation();
-  const schedules = useStore((s) => s.schedules);
   const visits = useStore((s) => s.visits);
   const stores = useStore((s) => s.stores);
-  const today = programDayKey(Date.now());
-  const plans = schedules.filter((s) => s.ncId === me.id && programDayKey(s.plannedDate) === today);
   const visited = plans.filter((s) => scheduleStatus(s, visits) === 'visited').length;
 
   return (
     <Card>
       <SectionHeader
-        title="Rencana Kunjungan Hari Ini"
-        subtitle={plans.length ? `${visited}/${plans.length} toko dikunjungi` : 'PJP'}
-        action={{ label: 'Minggu ini', onPress: () => navigation.navigate('Pjp') }}
+        title="Jadwal hari ini"
+        subtitle={plans.length ? `${visited} dari ${plans.length} toko dikunjungi` : undefined}
+        action={{ label: 'Jadwal minggu ini', onPress: () => navigation.navigate('Pjp') }}
       />
       {plans.length === 0 ? (
-        <Muted style={{ marginTop: 6 }}>Tidak ada toko dijadwalkan untuk hari ini.</Muted>
+        <Muted style={{ marginTop: 6 }}>Tidak ada toko dijadwalkan hari ini.</Muted>
       ) : (
         <View style={{ gap: 8, marginTop: 10 }}>
           {plans.map((s) => {
             const store = stores.find((x) => x.id === s.storeId);
             const done = scheduleStatus(s, visits) === 'visited';
+            const checking = checkingStoreId === s.storeId;
             return (
               <ListRow
                 key={s.id}
                 title={store?.name ?? s.storeId}
                 subtitle={store?.address || store?.city}
-                trailing={<Badge label={done ? 'Dikunjungi' : 'Belum'} color={done ? C.ok : C.info} />}
+                trailing={
+                  done ? (
+                    <StatusBadge label="Dikunjungi" color={C.okStrong} icon="checkmark-circle" />
+                  ) : canCheckIn && store ? (
+                    <Btn small title={checking ? 'Lokasi…' : 'Check-in'} loading={checking} disabled={checkingStoreId != null} onPress={() => void checkIn(store)} />
+                  ) : (
+                    <StatusBadge label="Belum" color={C.infoStrong} icon="time-outline" />
+                  )
+                }
                 onPress={store ? () => navigation.navigate('StoreDetail', { storeId: store.id }) : undefined}
               />
             );
@@ -271,51 +374,35 @@ function TodayPlanCard() {
   );
 }
 
-/** Phase 2 (PRD §16) — same-day glance at the 3 core daily modules for an NC. */
-function TodaysReportCard() {
+/** NC home: next step first, today's plan, then the month — primary action in the thumb zone. */
+function NcDashboard() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation();
-  const visits = useStore((s) => s.visits);
-  const stockTakingRows = useStore((s) => s.stockTakingRows);
-  const offtakeRows = useStore((s) => s.offtakeRows);
-  const ntgGwps = useStore((s) => s.ntgGwps);
-  const status = todaysReportStatus(me.id, visits, stockTakingRows, offtakeRows, ntgGwps);
-  const visit = status.activeVisitId ? visits.find((v) => v.id === status.activeVisitId) : undefined;
-
-  const rows: Array<{ label: string; done: boolean }> = [
-    { label: 'Stock Taking', done: status.stockTaking },
-    { label: 'Offtake', done: status.offtake },
-    { label: 'NTG & GWP', done: status.ntgGwp },
-  ];
+  const refreshControl = useDataRefresh();
+  const next = useNcNextAction();
 
   return (
-    <Card>
-      <SectionHeader title="Laporan Hari Ini" subtitle="Stock Taking, Offtake, NTG & GWP (harian — PRD §5)" />
-      <View style={{ gap: 8, marginTop: 10 }}>
-        {rows.map((r) => (
-          <View key={r.label} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Ionicons
-              name={r.done ? 'checkmark-circle' : 'ellipse-outline'}
-              size={18}
-              color={r.done ? C.ok : C.faint}
-            />
-            <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }}>{r.label}</Text>
-          </View>
-        ))}
-      </View>
-      {visit ? (
-        <View style={{ marginTop: 10 }}>
-          <Btn
-            small
-            variant="outline"
-            title="Buka Kunjungan Aktif"
-            onPress={() => navigation.navigate('StoreVisit', { visitId: visit.id })}
-          />
-        </View>
-      ) : (
-        <Muted style={{ marginTop: 8 }}>Check-in ke toko untuk mulai mengisi laporan.</Muted>
-      )}
-    </Card>
+    <View style={{ flex: 1 }}>
+      <ScrollView
+        tabIndex={0}
+        role="main"
+        refreshControl={refreshControl}
+        contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
+      >
+        <SectionHeader title={`Halo, ${me.name}`} subtitle={ROLE_LABEL[me.role]} />
+        <NextActionCard heading={next.heading} body={next.body} secondary={next.secondary} />
+        <TodayPlanCard plans={next.plans} checkIn={next.checkIn} checkingStoreId={next.checkingStoreId} canCheckIn={next.canCheckIn} />
+        <NcStatsCard />
+      </ScrollView>
+      <StickyFooter>
+        <Btn
+          title={next.primary.title}
+          onPress={next.primary.onPress}
+          variant={next.primary.variant ?? 'primary'}
+          loading={next.primary.loading}
+          disabled={next.primary.loading}
+        />
+      </StickyFooter>
+    </View>
   );
 }
 
@@ -334,6 +421,7 @@ export default function DashboardScreen() {
   if (MANAGEMENT_DASHBOARD_ROLES.includes(me.role)) {
     return <ManagementDashboard />;
   }
+  if (me.role === 'nc') return <NcDashboard />;
 
   return (
     <ScrollView
@@ -344,10 +432,7 @@ export default function DashboardScreen() {
     >
       <SectionHeader title={`Halo, ${me.name}`} subtitle={ROLE_LABEL[me.role]} />
 
-      {(me.role === 'nc' || me.role === 'tl' || me.role === 'arco') && <ClockCard />}
-      {me.role === 'nc' && <NcStatsCard />}
-      {me.role === 'nc' && <TodayPlanCard />}
-      {me.role === 'nc' && <TodaysReportCard />}
+      {(me.role === 'tl' || me.role === 'arco') && <ClockCard />}
 
       {me.role === 'super_admin' && (
         <Card>

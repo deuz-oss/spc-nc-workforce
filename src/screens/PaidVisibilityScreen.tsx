@@ -6,6 +6,8 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, Chip, H, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
 import { COMPLIANCE_CHECKLIST_ITEMS, VISIBILITY_TYPES } from '../config';
 import { C, F } from '../theme';
 import { ShownError, useStore } from '../store/useStore';
@@ -31,6 +33,17 @@ export default function PaidVisibilityScreen() {
   const [checklist, setChecklist] = useState<Record<string, boolean>>({});
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const draft = useMemo(() => ({ visibilityType, checklist, photoUri }), [visibilityType, checklist, photoUri]);
+  const saved = useDraft(
+    draftKey(visitId, 'paid_visibility'),
+    draft,
+    (d) => {
+      if (d.visibilityType && !doneTypes.has(d.visibilityType)) setVisibilityType(d.visibilityType);
+      setChecklist(d.checklist);
+      setPhotoUri(d.photoUri);
+    },
+    (d) => !d.visibilityType && !d.photoUri && !Object.values(d.checklist).some(Boolean),
+  );
 
   const toggleItem = (key: string) => setChecklist((c) => ({ ...c, [key]: !c[key] }));
 
@@ -50,6 +63,7 @@ export default function PaidVisibilityScreen() {
     setBusy(true);
     try {
       const { queued } = await submitPaidVisibility(visitId, storeId, { visibilityType, complianceChecklist: checklist }, photoUri);
+      await saved.clear();
       // Saved offline: the store already told the user — no second message.
       if (!queued) showToast('Paid Visibility tersimpan');
       navigation.goBack();
@@ -69,7 +83,16 @@ export default function PaidVisibilityScreen() {
         role="main"
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
-        <SectionHeader title="Paid Visibility" subtitle="Bi-weekly · asset tracking (PRD §5.5)" />
+        <SectionHeader title="Paid Visibility" subtitle="Cek materi promosi berbayar yang terpasang di toko" />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setVisibilityType(null);
+            setChecklist({});
+            setPhotoUri(null);
+          }}
+        />
 
         <Card>
           <H>Jenis Visibility</H>

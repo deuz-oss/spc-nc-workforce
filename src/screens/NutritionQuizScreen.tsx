@@ -1,10 +1,12 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showToast } from '../components/dialog';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
 import { CHILD_AGE_BRACKETS, NUTRITION_QUIZ_SURVEY_ID } from '../config';
 import { C, F } from '../theme';
 import { useStore } from '../store/useStore';
@@ -108,6 +110,20 @@ export default function NutritionQuizScreen() {
   const [segmentTag, setSegmentTag] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  // A quiz interrupted mid-way (call, app killed) resumes at the same question.
+  const progress = useMemo(() => ({ step, consent, ageBracket, answers }), [step, consent, ageBracket, answers]);
+  const saved = useDraft(
+    draftKey(visitId, `quiz:${consumerId}`),
+    progress,
+    (d) => {
+      setStep(d.step);
+      setConsent(d.consent);
+      setAgeBracket(d.ageBracket);
+      setAnswers(d.answers);
+    },
+    (d) => (d.step === 'consent' && !d.consent) || d.step === 'done' || d.step === 'done_under1',
+  );
+
   if (!consumer) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -144,6 +160,7 @@ export default function NutritionQuizScreen() {
       await upsertConsumer({ ...consumer, childAgeBracket: ageBracket ?? consumer.childAgeBracket });
       // Deliberately NOT calling addNtgGwp here — under-1-year branch must
       // not advance the funnel stage or trigger any NC follow-up (PRD §6).
+      await saved.clear();
       setStep('done_under1');
     } finally {
       setBusy(false);
@@ -169,6 +186,7 @@ export default function NutritionQuizScreen() {
         quizResult: tag,
       });
       if (cErr) return;
+      await saved.clear();
       setSegmentTag(tag);
       setStep('done');
     } finally {
@@ -201,7 +219,17 @@ export default function NutritionQuizScreen() {
         role="main"
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
-        <SectionHeader title="Quick Nutrition Check" subtitle={`Untuk ${consumer.name} (PRD §6)`} />
+        <SectionHeader title="Quick Nutrition Check" subtitle={`Untuk ${consumer.name}`} />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setStep('consent');
+            setConsent(false);
+            setAgeBracket(null);
+            setAnswers({});
+          }}
+        />
 
         {step === 'consent' && (
           <Card>
@@ -226,7 +254,7 @@ export default function NutritionQuizScreen() {
         {step === 'age' && (
           <Card>
             <H>Usia Anak</H>
-            <Muted style={{ marginTop: 2 }}>Bracket usia saja — bukan tanggal lahir (PRD §6).</Muted>
+            <Muted style={{ marginTop: 2 }}>Pilih kelompok usia saja — jangan tanyakan tanggal lahir.</Muted>
             <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
               {CHILD_AGE_BRACKETS.map((b) => (
                 <Chip key={b.key} label={b.label} active={ageBracket === b.key} onPress={() => setAgeBracket(b.key)} />

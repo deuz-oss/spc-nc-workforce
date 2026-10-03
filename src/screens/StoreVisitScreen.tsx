@@ -1,9 +1,12 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StatusBadge, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
+import { showDialog, showToast } from '../components/dialog';
+import { clearVisitDrafts } from '../components/useDraft';
+import { useNow } from '../components/useNow';
 import { VISIT_VALID_RADIUS_M } from '../config';
 import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -14,14 +17,14 @@ import { fmtDateTime, fmtDurClock } from '../utils/format';
  * MODULE_ROUTE. The Nutrition Quiz (§6) isn't listed separately here: it's
  * reached from a consumer's NTG & GWP funnel (ConsumerDetailScreen), not from
  * this generic report list. */
-const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence: string }> = [
-  { key: 'stock_taking', label: 'Stock Taking', group: 'Sales & Stock', cadence: 'Harian' },
-  { key: 'offtake', label: 'Offtake', group: 'Sales & Stock', cadence: 'Harian' },
-  { key: 'ntg_gwp', label: 'NTG & GWP', group: 'Sales & Stock', cadence: 'Harian' },
-  { key: 'share_of_shelf', label: 'Share of Shelf', group: 'Sales & Stock', cadence: 'Bi-weekly' },
-  { key: 'paid_visibility', label: 'Paid Visibility', group: 'Asset Tracking', cadence: 'Bi-weekly' },
-  { key: 'price_monitoring', label: 'Price Monitoring', group: 'Weekly/periodic Task', cadence: 'Bi-weekly' },
-  { key: 'survey', label: 'Survey', group: 'Weekly/periodic Task', cadence: 'Ad hoc' },
+const REPORT_MODULES: { key: string; label: string; hint: string; required: boolean }[] = [
+  { key: 'stock_taking', label: 'Stock Taking', hint: 'Jumlah stok per produk', required: true },
+  { key: 'offtake', label: 'Offtake', hint: 'Unit terjual per produk', required: true },
+  { key: 'ntg_gwp', label: 'NTG & GWP', hint: 'Konsumen yang ditemui', required: true },
+  { key: 'share_of_shelf', label: 'Share of Shelf', hint: '2 minggu sekali · hitung facing + foto rak', required: false },
+  { key: 'paid_visibility', label: 'Paid Visibility', hint: '2 minggu sekali · cek materi promosi + foto', required: false },
+  { key: 'price_monitoring', label: 'Price Monitoring', hint: '2 minggu sekali · harga kita vs kompetitor', required: false },
+  { key: 'survey', label: 'Survey', hint: 'Bila ada survey yang sedang berjalan', required: false },
 ];
 
 type ModuleRoute = 'StockTaking' | 'Offtake' | 'Consumers' | 'ShareOfShelf' | 'PaidVisibility' | 'PriceMonitoring' | 'SurveyList';
@@ -35,6 +38,16 @@ const MODULE_ROUTE: Record<string, ModuleRoute> = {
   price_monitoring: 'PriceMonitoring',
   survey: 'SurveyList',
 };
+
+/** Running visit time — re-renders itself every second, not the whole screen. */
+function VisitTimer({ since }: { since: number }) {
+  const now = useNow(1000);
+  return (
+    <Text style={[T.timer, { marginTop: 4 }]} accessibilityLabel={`Durasi kunjungan ${fmtDurClock(now - since)}`}>
+      {fmtDurClock(now - since)}
+    </Text>
+  );
+}
 
 export default function StoreVisitScreen() {
   const route = useAppRoute<'StoreVisit'>();
@@ -54,7 +67,7 @@ export default function StoreVisitScreen() {
 
   /** Modules with at least one report for this visit. */
   const filled = useMemo(() => {
-    const has = (rows: Array<{ visitId: string | null }>) => rows.some((r) => r.visitId === visitId);
+    const has = (rows: { visitId: string | null }[]) => rows.some((r) => r.visitId === visitId);
     return new Set(
       [
         has(stockTakingRows) && 'stock_taking',
@@ -69,14 +82,8 @@ export default function StoreVisitScreen() {
   }, [visitId, stockTakingRows, offtakeRows, ntgGwps, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, surveyResponses]);
 
   const store = stores.find((m) => m.id === visit?.storeId);
-  const [now, setNow] = useState(Date.now());
+  const now = useNow();
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (!visit || visit.checkOutAt) return;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [visit && visit.id, visit && visit.checkOutAt]);
 
   if (!visit)
     return (
@@ -90,19 +97,27 @@ export default function StoreVisitScreen() {
   const editable = !done && isOwner;
   const isStale = !done && now - visit.checkInAt > 12 * 3600000;
 
+  const missing = REPORT_MODULES.filter((m) => m.required && !filled.has(m.key)).map((m) => m.label);
+
   const checkOut = () => {
     showDialog(
-      'Selesaikan Kunjungan?',
-      'Pastikan laporan (Stock Taking, Offtake, dll) untuk kunjungan ini sudah diisi. Check-out menutup sesi kunjungan toko.',
+      missing.length ? 'Laporan Wajib Belum Lengkap' : 'Selesaikan Kunjungan?',
+      missing.length
+        ? `Belum diisi: ${missing.join(', ')}. Setelah check-out, laporan untuk kunjungan ini tidak bisa ditambah lagi.`
+        : 'Semua laporan wajib sudah diisi. Check-out menutup kunjungan di toko ini.',
       [
-        { label: 'Batal' },
+        { label: missing.length ? 'Isi Dulu' : 'Batal' },
         {
-          label: 'Check-out',
+          label: missing.length ? 'Tetap Check-out' : 'Check-out',
+          destructive: missing.length > 0,
           onPress: async () => {
             setBusy(true);
             try {
               await finishVisit(visit.id);
-              navigation.goBack();
+              void clearVisitDrafts(visit.id);
+              showToast('Check-out berhasil');
+              // Back to the day's overview: next store or clock-out.
+              navigation.navigate('Main', { screen: 'Dashboard' });
             } catch (e) {
               // Connectivity problems are queued offline, never thrown — this is a server rejection.
               showDialog('Gagal Check-out', e instanceof Error ? e.message : 'Coba lagi.');
@@ -139,7 +154,7 @@ export default function StoreVisitScreen() {
           </View>
           <Muted style={{ marginTop: 4 }}>Check-in: {fmtDateTime(visit.checkInAt)}</Muted>
           <Muted>Check-out: {fmtDateTime(visit.checkOutAt)}</Muted>
-          {!done && !isStale && <Text style={[T.timer, { marginTop: 4 }]}>{fmtDurClock(now - visit.checkInAt)}</Text>}
+          {!done && !isStale && <VisitTimer since={visit.checkInAt} />}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <GeoValidBadge
               ok={visit.geoValid}
@@ -153,28 +168,43 @@ export default function StoreVisitScreen() {
             insert — other roles review reports from the Validasi tab instead.
             Only while the visit is open: the server refuses reports made after
             check-out (report_server_checks, 0014). */}
-        {editable && (
-          <Card>
-            <H>Laporan Kunjungan</H>
-            <Muted style={{ marginTop: 2 }}>
-              Isi laporan sesuai kategori tugas selama kunjungan ini berlangsung.
-            </Muted>
-            <View style={{ gap: 8, marginTop: 10 }}>
-              {REPORT_MODULES.map((m) => (
-                <ListRow
-                  key={m.key}
-                  onPress={() =>
-                    // Every module route takes the same { visitId, storeId } params.
-                    navigation.navigate(MODULE_ROUTE[m.key] as 'StockTaking', { visitId: visit.id, storeId: visit.storeId })
-                  }
-                  title={m.label}
-                  subtitle={`${m.group} · ${m.cadence}`}
-                  trailing={filled.has(m.key) ? <Badge label="Terisi" color={C.ok} /> : undefined}
-                />
-              ))}
-            </View>
-          </Card>
-        )}
+        {editable &&
+          [true, false].map((required) => {
+            const mods = REPORT_MODULES.filter((m) => m.required === required);
+            const count = mods.filter((m) => filled.has(m.key)).length;
+            return (
+              <Card key={String(required)}>
+                <H>{required ? `Laporan wajib (${count} dari ${mods.length})` : 'Laporan lainnya'}</H>
+                <Muted style={{ marginTop: 2 }}>
+                  {required ? 'Isi ketiganya sebelum check-out.' : 'Isi bila jadwalnya tiba atau diminta TL.'}
+                </Muted>
+                <View style={{ gap: 8, marginTop: 10 }}>
+                  {mods.map((m) => {
+                    const isFilled = filled.has(m.key);
+                    return (
+                      <ListRow
+                        key={m.key}
+                        onPress={() =>
+                          // Every module route takes the same { visitId, storeId } params.
+                          navigation.navigate(MODULE_ROUTE[m.key] as 'StockTaking', { visitId: visit.id, storeId: visit.storeId })
+                        }
+                        title={m.label}
+                        subtitle={m.hint}
+                        emphasis={required && !isFilled ? { color: C.warnStrong, label: 'Belum diisi' } : undefined}
+                        trailing={
+                          isFilled ? (
+                            <StatusBadge label="Terisi" color={C.okStrong} icon="checkmark-circle" />
+                          ) : (
+                            <Ionicons name="chevron-forward" size={20} color={C.muted} />
+                          )
+                        }
+                      />
+                    );
+                  })}
+                </View>
+              </Card>
+            );
+          })}
 
         {done && (
           <Card>
@@ -188,7 +218,7 @@ export default function StoreVisitScreen() {
 
       {editable && (
         <StickyFooter>
-          <Btn title="CHECK OUT" variant="ok" onPress={checkOut} disabled={busy} loading={busy} />
+          <Btn title={busy ? 'Menyimpan…' : 'CHECK OUT'} variant="ok" onPress={checkOut} disabled={busy} loading={busy} />
         </StickyFooter>
       )}
     </View>

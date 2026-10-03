@@ -53,7 +53,18 @@ export const C = {
   infoBg: '#DBEAFE',
   dangerBg: '#FEE2E2',
   surfaceAlt: '#EFF6FF', // kartu terpilih / baris aktif
+  warnBorder: '#FCD34D', // garis tepi dekoratif pada latar warnBg
+
+  // Status penting yang dibaca di bawah cahaya toko yang terang: >= 7:1 pada
+  // putih dan semua latar tint di atas (okBg/warnBg/infoBg/dangerBg/surfaceAlt).
+  okStrong: '#14532D',
+  warnStrong: '#78350F',
+  infoStrong: '#0C4A6E',
+  dangerStrong: '#7F1D1D',
 };
+
+/** Target sentuh minimum (dp) — tombol, chip, baris yang bisa diketuk. */
+export const TOUCH = 48;
 
 /** Warna status skorkartu (On Track / Perlu Perhatian / Di Bawah Target) — lihat PRD §9 */
 export const STATUS_COLOR = {
@@ -87,6 +98,8 @@ export const T = {
     color: C.muted,
   } as const,
   label: { fontSize: 12.5, lineHeight: 16, fontFamily: F.semi, color: C.text } as const,
+  /** status bar & status lines read at a glance (strip, required-report ticks) */
+  status: { fontSize: 13, lineHeight: 18, fontFamily: F.bold, color: C.text } as const,
   /** angka besar di KPI/metric card — mono tabular agar sejajar saat berubah */
   metric: {
     fontSize: 26,

@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { Text, TouchableOpacity, View } from 'react-native';
 import { Btn, Card, Field, Input, Muted } from './ui';
 import { showDialog } from './dialog';
-import { C, F } from '../theme';
+import { C, T, TOUCH } from '../theme';
 import { useStore } from '../store/useStore';
 
 /**
@@ -55,40 +55,41 @@ export function SkuPicker({
 
   return (
     <Card>
-      <Field label="Cari SKU dari master produk">
-        <Input placeholder="Cari kode SKU atau nama produk..." value={query} onChangeText={setQuery} />
+      <Field label="Pilih produk">
+        <Input placeholder="Cari nama atau kode produk..." value={query} onChangeText={setQuery} accessibilityLabel="Cari produk" />
       </Field>
-      {query.trim().length > 0 && (
-        <View style={{ marginTop: 8, gap: 6 }}>
-          {suggestions.length === 0 ? (
-            <Muted>Tidak ditemukan di master produk.</Muted>
-          ) : (
-            suggestions.map((p) => (
-              <TouchableOpacity
-                key={p.id}
-                onPress={() => add(p.sku, p.name, false)}
-                accessibilityRole="button"
-                style={{
-                  flexDirection: 'row',
-                  justifyContent: 'space-between',
-                  paddingVertical: 8,
-                  paddingHorizontal: 10,
-                  borderRadius: 10,
-                  borderWidth: 1,
-                  borderColor: C.border,
-                }}
-              >
-                <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }}>{p.name}</Text>
-                <Text style={{ fontFamily: F.reg, fontSize: 12, color: C.muted }}>{p.sku}</Text>
-              </TouchableOpacity>
-            ))
-          )}
-        </View>
-      )}
+      <View style={{ marginTop: 8, gap: 6 }}>
+        {suggestions.length === 0 ? (
+          <Muted>{query.trim() ? 'Tidak ditemukan di master produk.' : 'Semua produk sudah dipilih atau dilaporkan.'}</Muted>
+        ) : (
+          suggestions.map((p) => (
+            <TouchableOpacity
+              key={p.id}
+              onPress={() => add(p.sku, p.name, false)}
+              accessibilityRole="button"
+              accessibilityLabel={`Tambah ${p.name}`}
+              style={{
+                flexDirection: 'row',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                minHeight: TOUCH,
+                paddingVertical: 8,
+                paddingHorizontal: 10,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: C.border,
+              }}
+            >
+              <Text style={[T.h3, { flexShrink: 1 }]}>{p.name}</Text>
+              <Text style={T.small}>{p.sku}</Text>
+            </TouchableOpacity>
+          ))
+        )}
+      </View>
       <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'flex-end' }}>
         <View style={{ flex: 1 }}>
-          <Field label="SKU tidak terdaftar di master produk">
-            <Input placeholder="Ketik kode SKU manual..." value={manualSku} onChangeText={setManualSku} />
+          <Field label="Produk tidak ada di daftar?">
+            <Input placeholder="Ketik kode produk" value={manualSku} onChangeText={setManualSku} autoCapitalize="characters" />
           </Field>
         </View>
         <Btn small variant="outline" title="Tambah" onPress={addManual} />

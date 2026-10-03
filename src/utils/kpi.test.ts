@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { attritionSignal, computeNcStat, reportStatusForDay, statusOf } from './kpi';
+import { attritionSignal, computeNcStat, reportStatusForDay, statusOf, visitRequiredReports } from './kpi';
 import { detectStops, haversineM, polylineKm } from './geo';
 import type { Attendance, StockTakingRow, Visit } from '../types';
 
@@ -152,5 +152,16 @@ describe('computeNcStat with a forgotten clock-out', () => {
     const open: Attendance = { ...attendance('open', clockIn, 0), clockOutAt: null };
     const stat = computeNcStat('nc1', 'NC', [open], [], { from: clockIn - HOUR, to: Date.now() + HOUR });
     assert.equal(stat.workMs, 16 * HOUR);
+  });
+});
+
+describe('visitRequiredReports', () => {
+  it('marks each required report done only for rows of that visit', () => {
+    const st = [{ visitId: 'v1' }, { visitId: 'v2' }] as unknown as StockTakingRow[];
+    const r = visitRequiredReports('v1', st, [], [{ visitId: 'v1' }] as never);
+    assert.deepEqual(
+      r.map((x) => [x.key, x.done]),
+      [['stock_taking', true], ['offtake', false], ['ntg_gwp', true]],
+    );
   });
 });

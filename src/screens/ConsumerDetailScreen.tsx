@@ -5,6 +5,9 @@ import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
+import { DraftNotice } from '../components/DraftNotice';
+import { draftKey, useDraft } from '../components/useDraft';
+import { useNow } from '../components/useNow';
 import {
   CHILD_AGE_BRACKETS,
   CONSENT_TEXT,
@@ -61,6 +64,30 @@ export default function ConsumerDetailScreen() {
   const [gwpQty, setGwpQty] = useState('');
   const [offtakeId, setOfftakeId] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  const now = useNow();
+
+  // Entered data survives back / app restart; "empty" = nothing changed from what the screen opened with.
+  const form = useMemo(
+    () => ({ name, waContact, consent, childAgeBracket, currentBrand, stage, gwpItem, gwpQty, offtakeId }),
+    [name, waContact, consent, childAgeBracket, currentBrand, stage, gwpItem, gwpQty, offtakeId],
+  );
+  const [initialForm] = useState(form);
+  const saved = useDraft(
+    me.role === 'nc' ? (consumerId ? draftKey(undefined, `consumer:${consumerId}`) : draftKey(visitId, 'consumer_new')) : null,
+    form,
+    (d) => {
+      setName(d.name);
+      setWaContact(d.waContact);
+      setConsent(d.consent);
+      setChildAgeBracket(d.childAgeBracket);
+      setCurrentBrand(d.currentBrand);
+      setStage(d.stage);
+      setGwpItem(d.gwpItem);
+      setGwpQty(d.gwpQty);
+      setOfftakeId(d.offtakeId);
+    },
+    (d) => JSON.stringify(d) === JSON.stringify(initialForm),
+  );
 
   const isCreate = !consumerId;
   const ownedByMe = isCreate || existing?.createdByNcId === me.id;
@@ -102,9 +129,9 @@ export default function ConsumerDetailScreen() {
 
   const todaysStoreOfftake = useMemo(() => {
     if (!storeId) return [];
-    const today = programDayKey(Date.now());
+    const today = programDayKey(now);
     return offtakeRows.filter((o) => o.storeId === storeId && programDayKey(o.createdAt) === today);
-  }, [offtakeRows, storeId]);
+  }, [offtakeRows, storeId, now]);
 
   const submit = async () => {
     if (readOnly) return;
@@ -148,6 +175,7 @@ export default function ConsumerDetailScreen() {
           : null;
       // One transaction: the consumer never ends up saved without its step.
       if (await saveConsumerWithStep(consumer, step)) return; // dialog already shown
+      await saved.clear();
 
       showToast(isCreate ? 'Konsumen tersimpan' : 'Perubahan tersimpan');
       navigation.goBack();
@@ -183,7 +211,22 @@ export default function ConsumerDetailScreen() {
       >
         <SectionHeader
           title={isCreate ? 'Konsumen Baru' : name || 'Detail Konsumen'}
-          subtitle="NTG & GWP (PRD §5.4) — consent sebelum pertanyaan apa pun, per UU PDP"
+          subtitle="Minta persetujuan konsumen dulu sebelum mencatat data apa pun"
+        />
+        <DraftNotice
+          savedAt={saved.restoredAt}
+          onDiscard={() => {
+            void saved.discard();
+            setName(initialForm.name);
+            setWaContact(initialForm.waContact);
+            setConsent(initialForm.consent);
+            setChildAgeBracket(initialForm.childAgeBracket);
+            setCurrentBrand(initialForm.currentBrand);
+            setStage(initialForm.stage);
+            setGwpItem(initialForm.gwpItem);
+            setGwpQty(initialForm.gwpQty);
+            setOfftakeId(initialForm.offtakeId);
+          }}
         />
 
         <Card>
@@ -233,7 +276,7 @@ export default function ConsumerDetailScreen() {
                   ))}
                 </View>
                 {legacyBracket && (
-                  <Muted style={{ marginTop: 6 }}>Tercatat sebelumnya: "{childAgeBracket}" — pilih salah satu bracket di atas.</Muted>
+                  <Muted style={{ marginTop: 6 }}>{`Tercatat sebelumnya: “${childAgeBracket}” — pilih salah satu kelompok usia di atas.`}</Muted>
                 )}
               </Field>
               <View style={{ height: 10 }} />

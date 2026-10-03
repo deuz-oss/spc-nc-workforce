@@ -46,6 +46,8 @@
     "@types/react": "~19.2.2",
     "@types/react-native-web": "^0.19.2",
     "dotenv": "^18.0.1",
+    "eslint": "^9.39.5",
+    "eslint-config-expo": "~57.0.2",
     "tsx": "^4.23.13",
     "typescript": "~6.0.3"
   },
@@ -57,6 +59,7 @@
     "seed:supabase": "tsx scripts/seed-supabase.ts",
     "smoke": "tsx scripts/smoke-rls.ts",
     "gen:types": "npx supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
+    "lint": "eslint .",
     "test": "tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.ts\"",
     "build:dev": "npx eas-cli build --profile development --platform android",
     "build:preview": "npx eas-cli build --profile preview --platform android",
