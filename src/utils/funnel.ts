@@ -28,7 +28,7 @@ export function funnelStepError(history: NtgGwpStage[], next: NtgGwpStage): stri
 
 /** The furthest of `stages` along the funnel, or undefined if there are none
  * (e.g. the recent rows plus the consumer row's current_stage). */
-export function highestStage(stages: Array<NtgGwpStage | null | undefined>): NtgGwpStage | undefined {
+export function highestStage(stages: (NtgGwpStage | null | undefined)[]): NtgGwpStage | undefined {
   let best: NtgGwpStage | undefined;
   for (const s of stages) if (s && (!best || ORDER.indexOf(s) > ORDER.indexOf(best))) best = s;
   return best;

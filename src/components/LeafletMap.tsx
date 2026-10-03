@@ -42,7 +42,7 @@ export function LeafletMap({
   center,
   zoom = 14,
 }: {
-  polyline?: Array<{ lat: number; lng: number }>;
+  polyline?: { lat: number; lng: number }[];
   markers?: MapMarker[];
   height?: number;
   center?: { lat: number; lng: number };

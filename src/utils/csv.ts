@@ -51,6 +51,6 @@ function esc(v: unknown): string {
   return s;
 }
 
-export function toCsv(rows: Array<Array<string | number | null | undefined>>): string {
+export function toCsv(rows: (string | number | null | undefined)[][]): string {
   return rows.map((r) => r.map(esc).join(',')).join('\r\n');
 }

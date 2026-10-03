@@ -12,6 +12,8 @@ import { C, T, TOUCH } from '../theme';
 import { useStore } from '../store/useStore';
 import { SurveyQuestion } from '../types';
 import { uid } from '../utils/uuid';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 /**
  * Nutrition Quiz (PRD §6) — ~9 questions completed by the mom, linked to an
@@ -109,6 +111,7 @@ export default function NutritionQuizScreen() {
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [segmentTag, setSegmentTag] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
 
   // A quiz interrupted mid-way (call, app killed) resumes at the same question.
   const progress = useMemo(() => ({ step, consent, ageBracket, answers }), [step, consent, ageBracket, answers]);
@@ -238,6 +241,7 @@ export default function NutritionQuizScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title="Quick Nutrition Check" subtitle={`Untuk ${consumer.name}`} />
+        <OnlineOnlyNote text="Offline — quiz bisa diisi, tetapi hasilnya baru bisa disimpan saat ada koneksi." />
         <DraftNotice
           savedAt={saved.restoredAt}
           onDiscard={() => {
@@ -343,7 +347,7 @@ export default function NutritionQuizScreen() {
               <Btn
                 title='Tandai NTG & GWP: "Nutrition Quiz Selesai"'
                 onPress={markQuizCompleted}
-                disabled={busy}
+                disabled={busy || !online}
                 loading={busy}
               />
               <Btn variant="outline" title="Tutup Tanpa Update Tahap" onPress={() => navigation.goBack()} />
@@ -361,7 +365,13 @@ export default function NutritionQuizScreen() {
               </View>
             )}
             <View style={{ flex: 2 }}>
-              <Btn title={footer.title} onPress={footer.next} disabled={footer.disabled || busy} loading={busy} />
+              <Btn
+                title={footer.title}
+                onPress={footer.next}
+                // The last step saves to the server; the questions before it don't.
+                disabled={footer.disabled || busy || (!online && (step === 'under1' || step === lastQ))}
+                loading={busy}
+              />
             </View>
           </View>
         </StickyFooter>

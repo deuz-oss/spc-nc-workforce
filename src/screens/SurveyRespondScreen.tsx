@@ -8,6 +8,8 @@ import { useStore } from '../store/useStore';
 import { DraftNotice } from '../components/DraftNotice';
 import { draftKey, useDraft } from '../components/useDraft';
 import { uid } from '../utils/uuid';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 /** Generic Survey response flow (PRD §5.7) — renders whatever question set a
  * Data Analyst configured. Not used for the Nutrition Quiz (§6), which has
@@ -24,6 +26,7 @@ export default function SurveyRespondScreen() {
 
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
   const saved = useDraft(draftKey(visitId, `survey:${surveyId}`), answers, setAnswers, (a) => !Object.values(a).some((v) => v.trim() !== ''));
 
   if (!survey) {
@@ -65,6 +68,7 @@ export default function SurveyRespondScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: STICKY_FOOTER_SPACE, maxWidth: 900, width: '100%', alignSelf: 'center' }}
       >
         <SectionHeader title={survey.title} subtitle={survey.campaignTag} />
+        <OnlineOnlyNote text="Offline — jawaban survey baru bisa dikirim saat ada koneksi. Isian Anda tetap tersimpan di HP." />
         <DraftNotice
           savedAt={saved.restoredAt}
           onDiscard={() => {
@@ -102,7 +106,7 @@ export default function SurveyRespondScreen() {
         ))}
       </ScrollView>
       <StickyFooter>
-        <Btn title={`Kirim Jawaban (${answered}/${survey.questions.length})`} onPress={submit} disabled={!canSubmit} loading={busy} />
+        <Btn title={`Kirim Jawaban (${answered}/${survey.questions.length})`} onPress={submit} disabled={!canSubmit || !online} loading={busy} />
       </StickyFooter>
     </View>
   );

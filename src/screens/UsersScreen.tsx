@@ -14,12 +14,15 @@ import {
   MOCK_LOCATION_TITLE,
   requestCurrentCoords,
 } from '../utils/location';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
+import { useOnline } from '../components/useOnline';
 
 const ROLE_OPTIONS: Role[] = [
   'nc', 'tl', 'arco', 'pm', 'lead_trainer', 'trainer', 'data_analyst', 'admin_data_entry', 'reckitt_client', 'super_admin',
 ];
 
 function AddUserForm({ onDone }: { onDone: () => void }) {
+  const online = useOnline();
   const addUser = useStore((s) => s.addUser);
   const teams = useStore((s) => s.teams);
   const [name, setName] = useState('');
@@ -65,7 +68,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
         </Field>
       )}
       {err && <Text style={[T.label, { color: C.dangerStrong }]}>{err}</Text>}
-      <Btn title="Simpan" onPress={submit} disabled={busy} loading={busy} />
+      <Btn title="Simpan" onPress={submit} disabled={busy || !online} loading={busy} />
     </Card>
   );
 }
@@ -74,6 +77,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
 const TEAM_ROLES: Role[] = ['nc', 'tl'];
 
 function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
+  const online = useOnline();
   const teams = useStore((s) => s.teams);
   const updateUser = useStore((s) => s.updateUser);
   const setUserPassword = useStore((s) => s.setUserPassword);
@@ -124,7 +128,7 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
       </Field>
       {err && <Text style={[T.label, { color: C.dangerStrong }]}>{err}</Text>}
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Btn title="Simpan" onPress={save} disabled={busy} loading={busy} />
+        <Btn title="Simpan" onPress={save} disabled={busy || !online} loading={busy} />
         <Btn variant="outline" title="Batal" onPress={onDone} />
       </View>
     </Card>
@@ -133,6 +137,7 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
 
 /** Create a team, or edit one when `team` is given (super_admin). */
 function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
+  const online = useOnline();
   const users = useStore((s) => s.users);
   const addTeam = useStore((s) => s.addTeam);
   const updateTeam = useStore((s) => s.updateTeam);
@@ -226,7 +231,7 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
         tidak dicek geofence.
       </Muted>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Btn title="Simpan Tim" disabled={!city.trim() || busy} loading={busy} onPress={save} />
+        <Btn title="Simpan Tim" disabled={!city.trim() || busy || !online} loading={busy} onPress={save} />
         <Btn variant="outline" title="Batal" onPress={onDone} />
       </View>
     </Card>
@@ -255,6 +260,7 @@ export default function UsersScreen() {
             onPress: () => setShowAdd((v) => !v),
           }}
         />
+        <OnlineOnlyNote text="Offline — perubahan akun dan tim baru bisa disimpan saat ada koneksi." />
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Btn small variant="outline" title="Impor Massal (CSV)" onPress={() => navigation.navigate('Import', { mode: 'users' })} />
           <Btn small variant="outline" title={showAddTeam ? 'Tutup Tim' : `Kelola Tim (${teams.length})`} onPress={() => setShowAddTeam((v) => !v)} />

@@ -23,6 +23,7 @@ import {
 import { toCsv } from '../utils/csv';
 import { fmtDateTime } from '../utils/format';
 import { exportCsv } from '../utils/export';
+import { useOnline } from '../components/useOnline';
 
 /** Short "d/M" label for trend bar axes — fmtDate's "23 Sep 2026" is too wide for a 26px bar column. */
 function dayLabel(ts: number): string {
@@ -43,7 +44,7 @@ function dayLabel(ts: number): string {
  * point of rendering, not at the point of navigation.
  */
 
-function TrendBars({ title, data }: { title: string; data: Array<{ label: string; value: number }> }) {
+function TrendBars({ title, data }: { title: string; data: { label: string; value: number }[] }) {
   const max = Math.max(1, ...data.map((d) => d.value));
   return (
     <View style={{ gap: 8 }}>
@@ -76,14 +77,14 @@ function TrendBars({ title, data }: { title: string; data: Array<{ label: string
   );
 }
 
-function dayBuckets(range: { from: number; to: number }, maxBuckets = 31): Array<{ from: number; to: number; label: string }> {
+function dayBuckets(range: { from: number; to: number }, maxBuckets = 31): { from: number; to: number; label: string }[] {
   const DAY = 86400000;
   const spanDays = Math.round((range.to - range.from) / DAY);
   const totalDays = Math.max(1, Math.min(maxBuckets, spanDays));
   // Ranges longer than maxBuckets (e.g. "Semua", whose range starts at epoch 0)
   // show the most recent days, not the first days of the range (1 Jan 1970).
   const start = spanDays > maxBuckets ? range.to - maxBuckets * DAY : range.from;
-  const out: Array<{ from: number; to: number; label: string }> = [];
+  const out: { from: number; to: number; label: string }[] = [];
   for (let i = 0; i < totalDays; i++) {
     const from = start + i * DAY;
     out.push({ from, to: from + DAY, label: dayLabel(from) });
@@ -107,6 +108,7 @@ export default function ManagementDashboard() {
   const scorecards = useStore((s) => s.scorecards);
   const computeScorecards = useStore((s) => s.computeScorecards);
   const [computingScorecards, setComputingScorecards] = useState(false);
+  const online = useOnline();
 
   const [periodKey, setPeriodKey] = useState<PeriodKey>('monthly');
   const [city, setCity] = useState<string | null>(null);
@@ -185,6 +187,7 @@ export default function ManagementDashboard() {
       cancelled = true;
       clearTimeout(t);
     };
+    // summaryKey stands for range + storeIds (a fresh array each render).
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [summaryKey, fetchManagementSummary]);
   const server = summary?.key === summaryKey ? summary.data : null;
@@ -278,7 +281,7 @@ export default function ManagementDashboard() {
   };
 
   const doExport = async () => {
-    const rows: Array<Array<string | number>> = [
+    const rows: (string | number)[][] = [
       ['Metrik', 'Nilai'],
       ['Periode', PERIODS.find((p) => p.key === periodKey)?.label ?? periodKey],
       ['Total Facing', totalFacing],
@@ -480,7 +483,7 @@ export default function ManagementDashboard() {
               title="Hitung Skorkartu"
               variant="outline"
               onPress={doComputeScorecards}
-              disabled={computingScorecards}
+              disabled={computingScorecards || !online}
               loading={computingScorecards}
             />
           </View>

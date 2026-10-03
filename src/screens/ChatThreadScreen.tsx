@@ -46,7 +46,8 @@ export default function ChatThreadScreen() {
 
   useEffect(() => {
     markMessagesRead(conversationId);
-  }, [conversationId, thread.length]);
+    // thread.length: mark again when a new message arrives while the thread is open.
+  }, [conversationId, thread.length, markMessagesRead]);
 
   const send = async () => {
     const body = text.trim();

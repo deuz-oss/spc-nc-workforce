@@ -16,6 +16,8 @@ import { weekStart } from '../utils/pjp';
 import { parsePjpCsv, PJP_TEMPLATE } from '../utils/pjpImport';
 import { useAppRoute } from '../navigation';
 import { useNow } from '../components/useNow';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
+import { useOnline } from '../components/useOnline';
 
 // --- Store import -----------------------------------------------------------
 
@@ -43,6 +45,7 @@ function pick(row: Record<string, string>, keys: string[]): string {
 }
 
 function StoreImportSection() {
+  const online = useOnline();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const users = useStore((s) => s.users);
@@ -187,7 +190,7 @@ function StoreImportSection() {
               </View>
             )}
             <View style={{ marginTop: 10 }}>
-              <Btn title={`Impor ${rows.length} Toko`} onPress={doImport} disabled={importing} loading={importing} />
+              <Btn title={`Impor ${rows.length} Toko`} onPress={doImport} disabled={importing || !online} loading={importing} />
             </View>
           </Card>
 
@@ -246,6 +249,7 @@ const VALID_ROLES: Role[] = [
 ];
 
 function UserImportSection() {
+  const online = useOnline();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const addUsersBulk = useStore((s) => s.addUsersBulk);
@@ -350,7 +354,7 @@ function UserImportSection() {
         <Card>
           <SectionHeader level="card" title={`${rows.length} akun terbaca`} />
           <View style={{ marginTop: 10 }}>
-            <Btn title={`Buat ${rows.length} Akun`} onPress={doImport} disabled={importing} loading={importing} />
+            <Btn title={`Buat ${rows.length} Akun`} onPress={doImport} disabled={importing || !online} loading={importing} />
           </View>
         </Card>
       )}
@@ -395,6 +399,7 @@ ENF-A-400,Enfagrow A+ 400g,Premium
 ENF-A-900,Enfagrow A+ 900g,Premium`;
 
 function ProductImportSection() {
+  const online = useOnline();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const addProductsBulk = useStore((s) => s.addProductsBulk);
@@ -488,7 +493,7 @@ function ProductImportSection() {
         <Card>
           <SectionHeader level="card" title={`${rows.length} produk terbaca`} />
           <View style={{ marginTop: 10 }}>
-            <Btn title={`Impor ${rows.length} Produk`} onPress={doImport} disabled={importing} loading={importing} />
+            <Btn title={`Impor ${rows.length} Produk`} onPress={doImport} disabled={importing || !online} loading={importing} />
           </View>
         </Card>
       )}
@@ -525,6 +530,7 @@ function ProductImportSection() {
 const DAY = 86400000;
 
 function PjpImportSection() {
+  const online = useOnline();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const users = useStore((s) => s.users);
@@ -635,7 +641,7 @@ function PjpImportSection() {
               <Btn
                 title={`Impor ${parsed.plans.length} Jadwal`}
                 onPress={doImport}
-                disabled={importing || parsed.plans.length === 0}
+                disabled={importing || !online || parsed.plans.length === 0}
                 loading={importing}
               />
             </View>
@@ -706,6 +712,7 @@ export default function ImportScreen() {
   return (
     <ScrollView tabIndex={0} role="main" contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}>
       <SectionHeader title="Impor Data" subtitle="Unggah CSV untuk toko, akun pengguna, master produk, atau jadwal PJP" />
+      <OnlineOnlyNote text="Offline — impor baru bisa dijalankan saat ada koneksi." />
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         <Chip label="Toko" active={mode === 'stores'} onPress={() => setMode('stores')} />
         <Chip label="Akun Pengguna (bulk)" active={mode === 'users'} onPress={() => setMode('users')} />

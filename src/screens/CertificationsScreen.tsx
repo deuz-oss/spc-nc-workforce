@@ -11,6 +11,8 @@ import { fmtDate, MONTHS_ID } from '../utils/format';
 import { monthKey, shiftMonth } from '../utils/period';
 import { uid } from '../utils/uuid';
 import { useNow } from '../components/useNow';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 /**
  * Training certification results (PRD §9, Lead Trainer KPIs). Entry is per
@@ -45,6 +47,7 @@ export default function CertificationsScreen() {
   // --- session entry state ---
   const [certType, setCertType] = useState(CERT_TYPES[0].key);
   const now = useNow();
+  const online = useOnline();
   const [dateText, setDateText] = useState(() => toSessionDateText(Date.now()));
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -145,6 +148,7 @@ export default function CertificationsScreen() {
         keyboardShouldPersistTaps="handled"
       >
         <SectionHeader title="Sertifikasi" subtitle="Catat hasil sesi sertifikasi NC dan TL" />
+        <OnlineOnlyNote text="Offline — hasil sertifikasi baru bisa disimpan saat ada koneksi." />
 
         {canEdit && (
           <Card style={{ gap: 10 }}>
@@ -258,7 +262,7 @@ export default function CertificationsScreen() {
                   trailing={
                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                       <Badge label={c.passed ? 'Lulus' : 'Tidak Lulus'} color={c.passed ? C.ok : C.accent} />
-                      {canEdit && <Btn small variant="outline" title="Hapus" onPress={() => confirmDelete(c)} />}
+                      {canEdit && <Btn small variant="outline" title="Hapus" onPress={() => confirmDelete(c)} disabled={!online} />}
                     </View>
                   }
                 />
@@ -276,7 +280,7 @@ export default function CertificationsScreen() {
           <Btn
             title={markedIds.length ? `Simpan ${markedIds.length} Hasil` : 'Tandai peserta untuk disimpan'}
             onPress={save}
-            disabled={!markedIds.length || busy || sessionDate == null}
+            disabled={!markedIds.length || busy || !online || sessionDate == null}
             loading={busy}
           />
         </StickyFooter>

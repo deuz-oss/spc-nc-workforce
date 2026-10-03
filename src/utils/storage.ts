@@ -51,6 +51,26 @@ export async function uploadReportMedia(
 }
 
 /**
+ * A short-lived signed URL for a report's evidence photo, or null when there is
+ * none to show (not uploaded yet, or the viewer may not see that visit — the
+ * same report_media_select RLS as openReportPhoto). Used for in-app previews;
+ * cached for most of its lifetime so a scrolled list doesn't re-sign each photo.
+ */
+const signedCache = new Map<string, { url: string; until: number }>();
+
+export async function getReportPhotoUrl(ref: string | null | undefined): Promise<string | null> {
+  const path = photoStoragePath(ref);
+  if (!path) return null;
+  const hit = signedCache.get(path);
+  if (hit && hit.until > Date.now()) return hit.url;
+  const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(path, SIGNED_URL_TTL_S);
+  if (error || !data?.signedUrl) return null;
+  // Refresh well before Storage expires it.
+  signedCache.set(path, { url: data.signedUrl, until: Date.now() + (SIGNED_URL_TTL_S - 300) * 1000 });
+  return data.signedUrl;
+}
+
+/**
  * Opens a report's evidence photo via a short-lived signed URL. Storage only
  * signs it when report_media_select RLS lets the viewer see that visit (own
  * visit, TL/ARCO scope, monitor roles), so an unrelated user gets an error, not

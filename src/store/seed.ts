@@ -31,7 +31,7 @@ export interface SeedSurvey {
 export interface SeedResult {
   teams: Team[];
   users: SeedUser[];
-  stores: Array<Omit<Store, 'assignedNcId'> & { assignedNcUsername: string | null }>;
+  stores: (Omit<Store, 'assignedNcId'> & { assignedNcUsername: string | null })[];
   surveys: SeedSurvey[];
 }
 

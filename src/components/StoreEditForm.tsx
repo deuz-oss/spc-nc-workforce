@@ -13,6 +13,7 @@ import {
   MOCK_LOCATION_TITLE,
   requestCurrentCoords,
 } from '../utils/location';
+import { useOnline } from './useOnline';
 
 /**
  * Edit a store's master data, including its GPS pin (PRD §5 geofence). A store
@@ -22,6 +23,7 @@ import {
  * TL/ARCO: their own team's stores).
  */
 export function StoreEditForm({ store, onDone }: { store: Store; onDone: () => void }) {
+  const online = useOnline();
   const upsertStore = useStore((s) => s.upsertStore);
   const [name, setName] = useState(store.name);
   const [address, setAddress] = useState(store.address);
@@ -134,7 +136,7 @@ export function StoreEditForm({ store, onDone }: { store: Store; onDone: () => v
       </View>
       <Muted>Gunakan tombol di atas hanya saat berada di dalam/di depan toko.</Muted>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Btn title="Simpan" onPress={save} disabled={busy} loading={busy} />
+        <Btn title="Simpan" onPress={save} disabled={busy || !online} loading={busy} />
         <Btn variant="outline" title="Batal" onPress={onDone} />
       </View>
     </Card>

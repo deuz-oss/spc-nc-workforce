@@ -14,7 +14,7 @@ describe('parseLatLng', () => {
   });
 
   it('rejects half-filled, non-numeric and out-of-range pins', () => {
-    const bad: Array<[string, string]> = [
+    const bad: [string, string][] = [
       ['-6.2', ''],
       ['', '106.8'],
       ['abc', '106.8'],

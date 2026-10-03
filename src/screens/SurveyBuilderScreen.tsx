@@ -8,6 +8,8 @@ import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { SurveyQuestion } from '../types';
 import { uid } from '../utils/uuid';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
+import { useOnline } from '../components/useOnline';
 
 interface DraftQuestion extends SurveyQuestion {
   optionsText: string; // raw comma-separated input for multiple_choice
@@ -17,6 +19,7 @@ interface DraftQuestion extends SurveyQuestion {
  * multiple choice or free text, no conditional branching (that's what makes
  * the Nutrition Quiz its own dedicated screen rather than a config here). */
 export default function SurveyBuilderScreen() {
+  const online = useOnline();
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const allSurveys = useStore((s) => s.surveys);
@@ -107,6 +110,7 @@ export default function SurveyBuilderScreen() {
           subtitle="Pertanyaan pilihan ganda atau isian bebas untuk NC"
           action={creating ? undefined : { label: '+ Survey Baru', onPress: () => setCreating(true) }}
         />
+        <OnlineOnlyNote text="Offline — survey baru bisa disimpan saat ada koneksi." />
 
         {!creating && (
           <Card>
@@ -175,7 +179,7 @@ export default function SurveyBuilderScreen() {
 
       {creating && (
         <StickyFooter>
-          <Btn title="Simpan Survey" onPress={save} disabled={!canSave || busy} loading={busy} />
+          <Btn title="Simpan Survey" onPress={save} disabled={!canSave || busy || !online} loading={busy} />
         </StickyFooter>
       )}
     </View>

@@ -7,6 +7,8 @@ import { PRODUCT_MANAGER_ROLES } from '../config';
 import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Product } from '../types';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
+import { useOnline } from '../components/useOnline';
 
 /**
  * Product master (PRD §5.1 SKU picklist) for super_admin / admin_data_entry /
@@ -18,6 +20,7 @@ import { Product } from '../types';
  */
 
 function ProductEditRow({ product, onDone }: { product: Product; onDone: () => void }) {
+  const online = useOnline();
   const upsertProduct = useStore((s) => s.upsertProduct);
   const [name, setName] = useState(product.name);
   const [category, setCategory] = useState(product.category ?? '');
@@ -43,7 +46,7 @@ function ProductEditRow({ product, onDone }: { product: Product; onDone: () => v
         <Input value={category} onChangeText={setCategory} />
       </Field>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Btn small title="Simpan" onPress={save} disabled={busy} loading={busy} />
+        <Btn small title="Simpan" onPress={save} disabled={busy || !online} loading={busy} />
         <Btn small variant="outline" title="Batal" onPress={onDone} />
       </View>
     </View>
@@ -51,6 +54,7 @@ function ProductEditRow({ product, onDone }: { product: Product; onDone: () => v
 }
 
 function AddProductForm({ onDone }: { onDone: () => void }) {
+  const online = useOnline();
   const addProductsBulk = useStore((s) => s.addProductsBulk);
   const [sku, setSku] = useState('');
   const [name, setName] = useState('');
@@ -81,7 +85,7 @@ function AddProductForm({ onDone }: { onDone: () => void }) {
         <Input value={category} onChangeText={setCategory} />
       </Field>
       <View style={{ flexDirection: 'row', gap: 8 }}>
-        <Btn title="Simpan" onPress={save} disabled={busy || !sku.trim() || !name.trim()} loading={busy} />
+        <Btn title="Simpan" onPress={save} disabled={busy || !online || !sku.trim() || !name.trim()} loading={busy} />
         <Btn variant="outline" title="Batal" onPress={onDone} />
       </View>
     </Card>
@@ -89,6 +93,7 @@ function AddProductForm({ onDone }: { onDone: () => void }) {
 }
 
 export default function ProductsScreen() {
+  const online = useOnline();
   const me = useCurrentUser()!;
   const navigation = useNavigation();
   const products = useStore((s) => s.products);
@@ -144,6 +149,7 @@ export default function ProductsScreen() {
             subtitle="SKU untuk pilihan Stock Taking, Offtake & Price Monitoring"
             action={adding ? undefined : { label: '+ Produk', onPress: () => setAdding(true) }}
           />
+          <OnlineOnlyNote text="Offline — perubahan master produk baru bisa disimpan saat ada koneksi." />
           <View style={{ alignSelf: 'flex-start' }}>
             <Btn small variant="outline" title="Impor CSV" onPress={() => navigation.navigate('Import', { mode: 'products' })} />
           </View>
@@ -176,7 +182,7 @@ export default function ProductsScreen() {
           ) : (
             <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
               <Btn small variant="outline" title="Ubah" onPress={() => setEditingId(p.id)} />
-              <Btn small variant="outline" title={p.active ? 'Nonaktifkan' : 'Aktifkan'} onPress={() => toggleActive(p)} />
+              <Btn small variant="outline" title={p.active ? 'Nonaktifkan' : 'Aktifkan'} onPress={() => toggleActive(p)} disabled={!online} />
             </View>
           )}
         </Card>

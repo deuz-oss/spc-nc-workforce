@@ -6,9 +6,12 @@ import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { CoachingLog } from '../types';
 import { uid } from '../utils/uuid';
 import { fmtDateTime } from '../utils/format';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
+import { useOnline } from '../components/useOnline';
 
 /** Coaching visit log (PRD §8): free-text + date, linked to an NC. Phase 4a (PRD §16). */
 export default function CoachingLogScreen() {
+  const online = useOnline();
   const me = useCurrentUser()!;
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
@@ -50,6 +53,7 @@ export default function CoachingLogScreen() {
       contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 900, width: '100%', alignSelf: 'center' }}
     >
       <SectionHeader title="Coaching Visit Log" subtitle="Catatan kunjungan coaching untuk NC di tim Anda" />
+      <OnlineOnlyNote text="Offline — catatan coaching baru bisa disimpan saat ada koneksi." />
 
       <Card style={{ gap: 10 }}>
         <Field label="NC">
@@ -68,7 +72,7 @@ export default function CoachingLogScreen() {
         <Field label="Catatan Coaching">
           <Input placeholder="Apa yang dibahas/dilatih hari ini?" value={note} onChangeText={setNote} multiline numberOfLines={4} />
         </Field>
-        <Btn title="Simpan Catatan" onPress={submit} disabled={busy} loading={busy} />
+        <Btn title="Simpan Catatan" onPress={submit} disabled={busy || !online} loading={busy} />
       </Card>
 
       <Card>

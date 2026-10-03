@@ -61,12 +61,12 @@ export function copyWeekPlan(
   ncId: string,
   fromStart: number,
   toStart: number,
-): Array<{ storeId: string; plannedDate: number }> {
+): { storeId: string; plannedDate: number }[] {
   const inWeek = (s: Schedule, start: number) => s.ncId === ncId && s.plannedDate >= start && s.plannedDate < start + 7 * DAY;
   const existing = new Set(
     schedules.filter((s) => inWeek(s, toStart)).map((s) => `${s.storeId}|${programDayKey(s.plannedDate)}`),
   );
-  const out: Array<{ storeId: string; plannedDate: number }> = [];
+  const out: { storeId: string; plannedDate: number }[] = [];
   for (const s of schedules) {
     if (!inWeek(s, fromStart)) continue;
     const plannedDate = programDayStart(s.plannedDate) - fromStart + toStart;

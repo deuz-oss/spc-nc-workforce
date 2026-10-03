@@ -24,6 +24,8 @@ import { funnelStepError, highestStage } from '../utils/funnel';
 import { isValidWa } from '../utils/wa';
 import { programDayKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 export default function ConsumerDetailScreen() {
   const route = useAppRoute<'ConsumerDetail'>();
@@ -67,6 +69,7 @@ export default function ConsumerDetailScreen() {
   /** Set by the first save attempt — required-field errors show from then on, not while typing. */
   const [tried, setTried] = useState(false);
   const now = useNow();
+  const online = useOnline();
 
   // Entered data survives back / app restart; "empty" = nothing changed from what the screen opened with.
   const form = useMemo(
@@ -218,6 +221,7 @@ export default function ConsumerDetailScreen() {
           title={isCreate ? 'Konsumen Baru' : name || 'Detail Konsumen'}
           subtitle="Minta persetujuan konsumen dulu sebelum mencatat data apa pun"
         />
+        <OnlineOnlyNote text="Offline — data konsumen baru bisa disimpan saat ada koneksi. Isian Anda tetap tersimpan di HP." />
         <DraftNotice
           savedAt={saved.restoredAt}
           onDiscard={() => {
@@ -369,7 +373,7 @@ export default function ConsumerDetailScreen() {
                 <H>Hapus Data Konsumen</H>
                 <Muted style={{ marginTop: 2 }}>Untuk permintaan penghapusan data dari konsumen (UU PDP).</Muted>
                 <View style={{ marginTop: 8, alignSelf: 'flex-start' }}>
-                  <Btn small variant="danger" title="Hapus Data Pribadi" onPress={confirmErase} />
+                  <Btn small variant="danger" title="Hapus Data Pribadi" onPress={confirmErase} disabled={!online} />
                 </View>
               </Card>
             )}
@@ -393,7 +397,7 @@ export default function ConsumerDetailScreen() {
 
       {!readOnly && consent && (
         <StickyFooter>
-          <Btn title={isCreate ? 'Simpan Konsumen Baru' : 'Simpan Perubahan'} onPress={submit} disabled={busy} loading={busy} />
+          <Btn title={isCreate ? 'Simpan Konsumen Baru' : 'Simpan Perubahan'} onPress={submit} disabled={busy || !online} loading={busy} />
         </StickyFooter>
       )}
     </View>

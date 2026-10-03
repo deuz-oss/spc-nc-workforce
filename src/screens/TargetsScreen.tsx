@@ -12,6 +12,8 @@ import { exportCsv } from '../utils/export';
 import { fmtNum, MONTHS_ID } from '../utils/format';
 import { monthKey, shiftMonth } from '../utils/period';
 import { uid } from '../utils/uuid';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 /**
  * Monthly per-NC targets (PRD §9/§12): offtake target (units) + GWP
@@ -126,6 +128,7 @@ export default function TargetsScreen() {
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
 
   const teamName = useMemo(() => new Map(teams.map((t) => [t.id, t.name])), [teams]);
   const ncs = useMemo(
@@ -141,14 +144,17 @@ export default function TargetsScreen() {
   );
 
   /** Per-NC (store-less) targets for a period, keyed by NC id. */
-  const targetsFor = (key: string) => {
-    const m = new Map<string, Target>();
-    for (const t of targets) if (t.periodKey === key && t.ncId && !t.storeId) m.set(t.ncId, t);
-    return m;
-  };
-  const existing = useMemo(() => targetsFor(period), [targets, period]);
+  const targetsFor = React.useCallback(
+    (key: string) => {
+      const m = new Map<string, Target>();
+      for (const t of targets) if (t.periodKey === key && t.ncId && !t.storeId) m.set(t.ncId, t);
+      return m;
+    },
+    [targets],
+  );
+  const existing = useMemo(() => targetsFor(period), [targetsFor, period]);
 
-  const valueOf = (ncId: string): Draft => drafts[ncId] ?? toDraft(existing.get(ncId));
+  const valueOf = React.useCallback((ncId: string): Draft => drafts[ncId] ?? toDraft(existing.get(ncId)), [drafts, existing]);
   const dirtyIds = useMemo(
     () => Object.keys(drafts).filter((id) => !sameDraft(drafts[id], toDraft(existing.get(id)))),
     [drafts, existing],
@@ -181,8 +187,7 @@ export default function TargetsScreen() {
       gwp += Number(v.gwp) || 0;
     }
     return { withTarget, offtake, gwp };
-    // valueOf reads drafts + existing
-  }, [ncs, drafts, existing]);
+  }, [ncs, valueOf]);
 
   if (!TARGET_MANAGER_ROLES.includes(me.role)) {
     return (
@@ -321,6 +326,7 @@ export default function TargetsScreen() {
   const header = (
     <View style={{ gap: 12, paddingBottom: 12 }}>
       <SectionHeader title="Target Bulanan NC" subtitle="Target offtake dan alokasi GWP per NC" />
+      <OnlineOnlyNote text="Offline — target baru bisa disimpan saat ada koneksi." />
 
       <Card style={{ gap: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
@@ -387,7 +393,7 @@ export default function TargetsScreen() {
         <Btn
           title={dirtyIds.length ? `Simpan ${dirtyIds.length} Perubahan` : 'Tidak Ada Perubahan'}
           onPress={save}
-          disabled={!dirtyIds.length || busy}
+          disabled={!dirtyIds.length || busy || !online}
           loading={busy}
         />
       </StickyFooter>

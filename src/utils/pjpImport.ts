@@ -25,8 +25,8 @@ const DAY_NAMES: Record<string, number> = { senin: 1, selasa: 2, rabu: 3, kamis:
 
 export interface PjpImportContext {
   /** NCs the importer may plan for (already scoped to their team(s)). */
-  ncs: Array<{ id: string; username: string }>;
-  stores: Array<{ id: string; name: string; city: string }>;
+  ncs: { id: string; username: string }[];
+  stores: { id: string; name: string; city: string }[];
   /** WIB Monday of the week `hari` rows fall in. */
   week: number;
   now?: number;

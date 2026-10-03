@@ -91,7 +91,7 @@ export const NTG_GWP_STAGE_LABEL: Record<NtgGwpStage, string> = {
 
 /** Visibility placement types for Paid Visibility (PRD §5.5 "from a config list") — not specified by the
  * client brief; this is a reasonable default set of common in-store paid placements. */
-export const VISIBILITY_TYPES: Array<{ key: string; label: string }> = [
+export const VISIBILITY_TYPES: { key: string; label: string }[] = [
   { key: 'shelf_talker', label: 'Shelf Talker' },
   { key: 'endcap', label: 'Endcap Display' },
   { key: 'banner', label: 'Banner / Standing Banner' },
@@ -102,7 +102,7 @@ export const VISIBILITY_TYPES: Array<{ key: string; label: string }> = [
 
 /** Compliance checklist items for Paid Visibility (PRD §5.5) — also not specified by the client brief;
  * a reasonable default set. Stored as PaidVisibilityRow.complianceChecklist (key -> checked). */
-export const COMPLIANCE_CHECKLIST_ITEMS: Array<{ key: string; label: string }> = [
+export const COMPLIANCE_CHECKLIST_ITEMS: { key: string; label: string }[] = [
   { key: 'terpasang_benar', label: 'Terpasang dengan benar' },
   { key: 'kondisi_baik', label: 'Kondisi baik (tidak rusak/kotor)' },
   { key: 'lokasi_sesuai', label: 'Lokasi sesuai kontrak/brief' },
@@ -124,7 +124,7 @@ export const CERT_MANAGER_ROLES: Role[] = ['lead_trainer', 'trainer', 'super_adm
  * Lead Trainer's "tl_coach_certification" KPI from cert_type = 'tl_coach'; every type
  * counts toward "certification_pass_rate". The NC type list is a reasonable default
  * pending the client's training curriculum (not specified in the PRD). */
-export const CERT_TYPES: Array<{ key: string; label: string; subjectRole: Role }> = [
+export const CERT_TYPES: { key: string; label: string; subjectRole: Role }[] = [
   { key: 'nc_onboarding', label: 'Onboarding NC', subjectRole: 'nc' },
   { key: 'nc_refresher', label: 'Refresher / Re-sertifikasi NC', subjectRole: 'nc' },
   { key: 'tl_coach', label: 'TL-Coach', subjectRole: 'tl' },

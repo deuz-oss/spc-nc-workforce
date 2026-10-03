@@ -78,7 +78,7 @@ export function getRange(key: PeriodKey, month?: string, now: number = Date.now(
   return { from: 0, to: now + DAY };
 }
 
-export const PERIODS: Array<{ key: PeriodKey; label: string }> = [
+export const PERIODS: { key: PeriodKey; label: string }[] = [
   { key: 'daily', label: 'Harian' },
   { key: 'weekly', label: 'Mingguan' },
   { key: 'monthly', label: 'Bulanan' },

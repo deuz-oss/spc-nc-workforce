@@ -50,7 +50,7 @@ const admin = createClient(url, serviceKey, noSession);
 // --- tiny test harness -------------------------------------------------------
 
 type Outcome = 'PASS' | 'FAIL' | 'SKIP';
-const results: Array<{ name: string; outcome: Outcome; detail?: string }> = [];
+const results: { name: string; outcome: Outcome; detail?: string }[] = [];
 
 class Skip extends Error {}
 

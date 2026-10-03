@@ -13,6 +13,8 @@ import { PJP_MANAGER_ROLES } from '../config';
 import { MONTHS_SHORT, programDayKey, programParts } from '../utils/period';
 import { copyWeekPlan, planCompliance, scheduleStatus, ScheduleStatus, weekDays, weekStart } from '../utils/pjp';
 import { useNow } from '../components/useNow';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -63,6 +65,7 @@ export default function PjpScreen() {
   const [addingDay, setAddingDay] = useState<number | null>(null);
   const [storeQuery, setStoreQuery] = useState('');
   const [busy, setBusy] = useState(false);
+  const online = useOnline();
 
   const nc = ncs.find((u) => u.id === ncId) ?? null;
   const now = useNow();
@@ -136,6 +139,7 @@ export default function PjpScreen() {
         title="Jadwal Kunjungan (PJP)"
         subtitle={canManage ? 'Rencana toko per hari untuk NC di tim Anda' : 'Rencana kunjungan Anda'}
       />
+      <OnlineOnlyNote text="Offline — jadwal bisa dilihat, tetapi perubahan baru bisa disimpan saat ada koneksi." />
 
       {canManage && (
         <View style={{ alignSelf: 'flex-start' }}>
@@ -194,7 +198,7 @@ export default function PjpScreen() {
             )}
             {canManage && (
               <View style={{ alignSelf: 'flex-start' }}>
-                <Btn small variant="outline" title="Salin Jadwal Minggu Lalu" onPress={copyLastWeek} disabled={busy} />
+                <Btn small variant="outline" title="Salin Jadwal Minggu Lalu" onPress={copyLastWeek} disabled={busy || !online} />
               </View>
             )}
             <HistoryNotice needsFrom={week} />
@@ -227,7 +231,7 @@ export default function PjpScreen() {
                         />
                         {canManage && st.label !== STATUS.visited.label && (
                           <View style={{ alignSelf: 'flex-end' }}>
-                            <Btn small variant="outline" title="Hapus" onPress={() => void deleteSchedule(s.id)} />
+                            <Btn small variant="outline" title="Hapus" onPress={() => void deleteSchedule(s.id)} disabled={!online} />
                           </View>
                         )}
                       </View>
@@ -246,7 +250,7 @@ export default function PjpScreen() {
                             key={st.id}
                             title={st.name}
                             subtitle={`${st.city}${st.assignedNcId === nc.id ? ' · toko NC ini' : ''}`}
-                            onPress={busy ? undefined : () => void addStore(st.id)}
+                            onPress={busy || !online ? undefined : () => void addStore(st.id)}
                           />
                         ))
                       )}

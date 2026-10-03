@@ -21,7 +21,7 @@ import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
 import { getRange, inRange, monthKey, monthRange, PERIODS, PeriodKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
-import { openReportPhoto } from '../utils/storage';
+import { ReportPhotoThumb } from '../components/ReportPhotoThumb';
 import { buildReportItems, groupReports, ReportGroup, reviewKey } from '../utils/validation';
 import { ShowMore } from '../components/ShowMore';
 import { C, T } from '../theme';
@@ -214,8 +214,8 @@ export default function ValidationQueueScreen() {
                         trailing={<StatusBadge label={status.label} color={status.color} icon={status.icon} />}
                       />
                       {g.photoUrl && (
-                        <View style={{ paddingHorizontal: 4, alignSelf: 'flex-start' }}>
-                          <Btn small variant="outline" title="Lihat Foto Bukti" onPress={() => void openReportPhoto(g.photoUrl)} />
+                        <View style={{ paddingHorizontal: 4 }}>
+                          <ReportPhotoThumb photoRef={g.photoUrl} label={`${REPORT_TYPE_LABEL[g.type]} ${store?.name ?? ''}`} />
                         </View>
                       )}
                       {flaggingKey === g.key ? (

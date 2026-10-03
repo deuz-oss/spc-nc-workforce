@@ -11,6 +11,8 @@ import { ShowMore } from '../components/ShowMore';
 import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
+import { useOnline } from '../components/useOnline';
+import { OnlineOnlyNote } from '../components/OnlineOnlyNote';
 
 export default function StoreDetailScreen() {
   const route = useAppRoute<'StoreDetail'>();
@@ -21,6 +23,7 @@ export default function StoreDetailScreen() {
   const visits = useStore((s) => s.visits);
   const upsertStore = useStore((s) => s.upsertStore);
   const { checkIn, checkingStoreId } = useCheckIn();
+  const online = useOnline();
 
   const [assigning, setAssigning] = useState(false);
   const [ncQuery, setNcQuery] = useState('');
@@ -92,11 +95,12 @@ export default function StoreDetailScreen() {
           )}
           {isManager && !editing && (
             <View style={{ marginTop: 8, alignSelf: 'flex-start' }}>
-              <Btn small variant="outline" title="Ubah Data Toko" onPress={() => setEditing(true)} />
+              <Btn small variant="outline" title="Ubah Data Toko" onPress={() => setEditing(true)} disabled={!online} />
             </View>
           )}
         </Card>
 
+        {isManager && <OnlineOnlyNote text="Offline — perubahan data toko dan penugasan NC baru bisa disimpan saat ada koneksi." />}
         {isManager && editing && <StoreEditForm store={store} onDone={() => setEditing(false)} />}
 
         {isManager && (
@@ -140,7 +144,7 @@ export default function StoreDetailScreen() {
               </View>
             ) : (
               <View style={{ marginTop: 8 }}>
-                <Btn small title="Pilih NC" variant="outline" onPress={() => setAssigning(true)} />
+                <Btn small title="Pilih NC" variant="outline" onPress={() => setAssigning(true)} disabled={!online} />
               </View>
             )}
           </Card>

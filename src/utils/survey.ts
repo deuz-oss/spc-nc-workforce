@@ -6,7 +6,7 @@ export interface ChoiceSummary {
   text: string;
   answered: number;
   /** One entry per configured option (in order), plus any answer not among them. */
-  options: Array<{ option: string; count: number; pct: number }>;
+  options: { option: string; count: number; pct: number }[];
 }
 
 export interface TextSummary {
@@ -15,7 +15,7 @@ export interface TextSummary {
   text: string;
   answered: number;
   /** Non-empty answers, newest first. */
-  answers: Array<{ answer: string; createdAt: number; responseId: string }>;
+  answers: { answer: string; createdAt: number; responseId: string }[];
 }
 
 export type QuestionSummary = ChoiceSummary | TextSummary;
@@ -50,7 +50,7 @@ export function surveyCsvRows(
   survey: Survey,
   responses: SurveyResponse[],
   context: (r: SurveyResponse) => { nc: string; store: string },
-): Array<Array<string>> {
+): string[][] {
   const mine = responses.filter((r) => r.surveyId === survey.id).sort((a, b) => a.createdAt - b.createdAt);
   return [
     ['response_id', 'waktu', 'nc', 'toko', ...survey.questions.map((q) => q.text)],
