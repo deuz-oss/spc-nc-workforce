@@ -56,7 +56,7 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0020`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0021`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
@@ -71,7 +71,8 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
    consumer + funnel step saved atomically) and
    `0018_client_errors_dashboard_summary.sql` (client crash log, server-side management dashboard figures) and
    `0019_consumer_current_stage.sql` (consumer's funnel stage kept on the consumer row) and
-   `0020_pjp_schedules.sql` (PJP visit plans: scoped writes, server-linked visits) are required.
+   `0020_pjp_schedules.sql` (PJP visit plans: scoped writes, server-linked visits) and
+   `0021_fix_duplicate_report_message.sql` (duplicate-report rejection returns its message, not a column error) are required.
    Also in **Authentication → Providers → Email**, set the minimum password length to **8** (matches `MIN_PASSWORD`,
    `src/utils/password.ts` — the self-service password change goes straight to Supabase Auth).
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
@@ -319,7 +320,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0020`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0021`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -392,7 +393,7 @@ src/
                            # LeafletMap, LiveTeamMap, ErrorBoundary
   screens/                 # one file per screen (field reports, validation, dashboards, admin)
 supabase/
-  migrations/0001…0020     # schema, RLS, triggers, RPCs — run in order (see Backend)
+  migrations/0001…0021     # schema, RLS, triggers, RPCs — run in order (see Backend)
   functions/admin-users    # account creation / password reset (service role, audit-logged)
   functions/send-push      # chat push notifications (push_tokens)
 scripts/seed-supabase.ts   # seed demo accounts + stores into a demo/staging project
