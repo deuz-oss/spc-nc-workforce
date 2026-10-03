@@ -144,3 +144,12 @@ describe('attritionSignal', () => {
     assert.deepEqual(s, { attendanceGap: false, missingReports: false, atRisk: false });
   });
 });
+
+describe('computeNcStat with a forgotten clock-out', () => {
+  it('counts an open session only up to the auto-close limit (16 h)', () => {
+    const clockIn = Date.now() - 40 * HOUR;
+    const open: Attendance = { ...attendance('open', clockIn, 0), clockOutAt: null };
+    const stat = computeNcStat('nc1', 'NC', [open], [], { from: clockIn - HOUR, to: Date.now() + HOUR });
+    assert.equal(stat.workMs, 16 * HOUR);
+  });
+});

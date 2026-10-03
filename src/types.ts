@@ -94,6 +94,8 @@ export interface Attendance {
   geoFenceOk: boolean;
   /** The phone reported the clock-in position as mocked (fake-GPS app). */
   locationMocked?: boolean;
+  /** Never clocked out — closed by the server at the last activity (0016). */
+  autoClosed?: boolean;
   /**
    * MWH (Market Working Hours) definition is still open per PRD §7/§15 — if it
    * ends up needing excluded non-market blocks, this is where they'll be
@@ -117,6 +119,8 @@ export interface Visit {
   geoValid: boolean;
   /** The phone reported the check-in position as mocked (fake-GPS app). */
   locationMocked?: boolean;
+  /** Never checked out — closed by the server at the last activity (0016). */
+  autoClosed?: boolean;
 }
 
 // --- 7 report modules (PRD §5) — Phase 1 defines the shape; screens are stubs ---

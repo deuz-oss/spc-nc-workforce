@@ -1,5 +1,6 @@
 import { Attendance, NtgGwp, OfftakeRow, StockTakingRow, Visit } from '../types';
 import { C } from '../theme';
+import { AUTO_CLOSE_ATTENDANCE_HOURS } from '../config';
 import { polylineKm } from './geo';
 import { inRange } from './period';
 
@@ -53,7 +54,10 @@ export function computeNcStat(
   const closed = vs.filter((v) => v.checkOutAt);
 
   const days = new Set(a.map((x) => new Date(x.clockInAt).toDateString())).size;
-  const workMs = a.reduce((t, x) => t + ((x.clockOutAt ?? Date.now()) - x.clockInAt), 0);
+  // A session still open counts up to now, but never beyond the point where the
+  // server auto-closes it (0016) — a forgotten clock-out must not inflate hours.
+  const maxOpenMs = AUTO_CLOSE_ATTENDANCE_HOURS * 3600000;
+  const workMs = a.reduce((t, x) => t + (x.clockOutAt ? x.clockOutAt - x.clockInAt : Math.min(Date.now() - x.clockInAt, maxOpenMs)), 0);
   const cftMs = closed.reduce((t, v) => t + ((v.checkOutAt ?? 0) - v.checkInAt), 0);
 
   const minStayMs = TARGETS.minStayMinutes * 60000;

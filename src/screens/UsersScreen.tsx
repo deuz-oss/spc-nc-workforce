@@ -119,7 +119,7 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
           </View>
         </Field>
       )}
-      <Field label={`Reset password (opsional, min. ${MIN_PASSWORD} karakter)`}>
+      <Field label={`Reset password (opsional, min. ${MIN_PASSWORD} karakter, huruf + angka)`}>
         <Input value={password} onChangeText={setPassword} secureTextEntry placeholder="Kosongkan bila tidak diubah" />
       </Field>
       {err && <Text style={{ color: C.accent, fontSize: 12.5, fontFamily: F.semi }}>{err}</Text>}
@@ -258,6 +258,7 @@ export default function UsersScreen() {
         <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
           <Btn small variant="outline" title="Impor Massal (CSV, 215 akun)" onPress={() => navigation.navigate('Import')} />
           <Btn small variant="outline" title={showAddTeam ? 'Tutup Tim' : `Kelola Tim (${teams.length})`} onPress={() => setShowAddTeam((v) => !v)} />
+          <Btn small variant="outline" title="Log Aktivitas" onPress={() => navigation.navigate('AuditLog')} />
         </View>
         {showAdd && <AddUserForm onDone={() => setShowAdd(false)} />}
         {showAddTeam && !editingTeam && <TeamForm onDone={() => setShowAddTeam(false)} />}

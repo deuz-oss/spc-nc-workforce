@@ -49,7 +49,7 @@ function ChangePasswordCard() {
           <Field label="Password Lama">
             <Input value={current} onChangeText={setCurrent} secureTextEntry autoComplete="current-password" />
           </Field>
-          <Field label={`Password Baru (min. ${MIN_PASSWORD} karakter)`}>
+          <Field label={`Password Baru (min. ${MIN_PASSWORD} karakter, huruf + angka)`}>
             <Input value={next} onChangeText={setNext} secureTextEntry autoComplete="new-password" />
           </Field>
           <Field label="Ulangi Password Baru">

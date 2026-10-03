@@ -129,7 +129,10 @@ export default function StoreVisitScreen() {
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
             <H style={{ flexShrink: 1 }}>{store?.name ?? '-'}</H>
-            <Badge label={done ? 'Selesai' : 'Berlangsung'} color={done ? C.ok : C.warn} />
+            <Badge
+              label={visit.autoClosed ? 'Ditutup otomatis' : done ? 'Selesai' : 'Berlangsung'}
+              color={visit.autoClosed ? C.warn : done ? C.ok : C.warn}
+            />
           </View>
           <Muted style={{ marginTop: 4 }}>Check-in: {fmtDateTime(visit.checkInAt)}</Muted>
           <Muted>Check-out: {fmtDateTime(visit.checkOutAt)}</Muted>

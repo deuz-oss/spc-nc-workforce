@@ -57,6 +57,7 @@ import { BufferedPoint, onPointsRecorded, readBufferedPoints } from '../utils/ro
 import { flushRouteBuffer } from '../utils/routeSync';
 import { funnelStepError } from '../utils/funnel';
 import { isValidWa, normalizeWa } from '../utils/wa';
+import { passwordProblem } from '../utils/password';
 import { drainQueue, isNetworkError, OP_LABEL, QueueReason, queueReason, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
@@ -87,8 +88,7 @@ const TEAMLESS_ROLES: Role[] = [
   'admin_data_entry',
 ];
 
-/** Must match MIN_PASSWORD in supabase/functions/admin-users/index.ts. */
-export const MIN_PASSWORD = 6;
+export { MIN_PASSWORD } from '../utils/password';
 
 export interface NewStoreInput {
   name: string;
@@ -99,6 +99,17 @@ export interface NewStoreInput {
   category: Store['category'];
   lat: number | null;
   lng: number | null;
+}
+
+/** One admin_audit_log row (migration 0016). */
+export interface AuditEntry {
+  id: number;
+  at: number;
+  actorId: string | null;
+  action: string;
+  targetType: string;
+  targetId: string | null;
+  details: Record<string, unknown>;
 }
 
 /** Editable team fields; the home-base pin drives the clock-in geofence (0014). */
@@ -329,6 +340,9 @@ interface StoreState {
   /** GPS route of one attendance session (RLS-scoped), oldest first. For viewing
    * another user's day — the store only mirrors the viewer's own routes. */
   fetchRoute(attendanceId: string): Promise<RoutePoint[]>;
+  /** Newest-first page of the admin audit log (super_admin / PM, RLS), older than
+   * `before` when given. Fetched on demand, not kept in state. Throws on failure. */
+  fetchAuditLog(limit: number, before?: number): Promise<AuditEntry[]>;
 
   /** Resolves true if it was saved offline only (the user has already been told). */
   clockIn(pos: { lat: number; lng: number; mocked?: boolean }): Promise<boolean>;
@@ -445,6 +459,7 @@ function mapVisit(v: any): Visit {
     storeDistanceM: v.store_distance_m,
     geoValid: v.geo_valid,
     locationMocked: v.location_mocked ?? false,
+    autoClosed: v.auto_closed ?? false,
   };
 }
 
@@ -461,6 +476,7 @@ function mapAttendance(a: any, route: RoutePoint[]): Attendance {
     route,
     geoFenceOk: a.geo_fence_ok,
     locationMocked: a.location_mocked ?? false,
+    autoClosed: a.auto_closed ?? false,
     nonMarketMs: a.non_market_ms ?? undefined,
   };
 }
@@ -2199,7 +2215,8 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (!name.trim()) return 'Nama wajib diisi.';
     if (!uname) return 'Username wajib diisi.';
     if (get().users.some((u) => u.username.toLowerCase() === uname)) return 'Username sudah dipakai.';
-    if (password.length < MIN_PASSWORD) return `Password minimal ${MIN_PASSWORD} karakter.`;
+    const pwErr = passwordProblem(password, uname);
+    if (pwErr) return pwErr;
     const { error } = await callAdminUsers({
       action: 'create',
       username: uname,
@@ -2238,8 +2255,9 @@ export const useStore = create<StoreState>()((set, get) => ({
         errors.push(`Baris ${i + 1}: username "${uname}" sudah dipakai`);
         continue;
       }
-      if (r.password.length < MIN_PASSWORD) {
-        errors.push(`Baris ${i + 1}: password minimal ${MIN_PASSWORD} karakter`);
+      const pwErr = passwordProblem(r.password, uname);
+      if (pwErr) {
+        errors.push(`Baris ${i + 1}: ${pwErr}`);
         continue;
       }
       const { error } = await callAdminUsers({
@@ -2307,7 +2325,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   setUserPassword: async (id, password) => {
-    if (password.length < MIN_PASSWORD) return `Password minimal ${MIN_PASSWORD} karakter.`;
+    const pwErr = passwordProblem(password, get().users.find((u) => u.id === id)?.username);
+    if (pwErr) return pwErr;
     const { error } = await callAdminUsers({ action: 'setPassword', userId: id, password });
     return error ?? null;
   },
@@ -2315,7 +2334,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   changeOwnPassword: async (current, next) => {
     const me = get().users.find((u) => u.id === get().sessionUserId);
     if (!me) return 'Sesi tidak ditemukan. Silakan login ulang.';
-    if (next.length < MIN_PASSWORD) return `Password baru minimal ${MIN_PASSWORD} karakter.`;
+    const pwErr = passwordProblem(next, me.username);
+    if (pwErr) return pwErr;
     if (next === current) return 'Password baru harus berbeda dari password lama.';
     // Re-verify the current password: an unlocked phone left unattended must
     // not be enough to take over the account.
@@ -3133,6 +3153,22 @@ export const useStore = create<StoreState>()((set, get) => ({
       out.push(...(data ?? []).map((p: any) => ({ lat: p.lat, lng: p.lng, t: new Date(p.recorded_at).getTime() })));
       if (!data || data.length < PAGE_SIZE) return out;
     }
+  },
+
+  fetchAuditLog: async (limit, before) => {
+    let q = supabase.from('admin_audit_log').select('*').order('at', { ascending: false }).limit(limit);
+    if (before != null) q = q.lt('at', new Date(before).toISOString());
+    const { data, error } = await q;
+    if (error) throw new Error(error.message);
+    return (data ?? []).map((r: any) => ({
+      id: r.id,
+      at: new Date(r.at).getTime(),
+      actorId: r.actor_id ?? null,
+      action: r.action,
+      targetType: r.target_type,
+      targetId: r.target_id ?? null,
+      details: r.details ?? {},
+    }));
   },
 
   refreshChat: async () => {

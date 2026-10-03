@@ -9,6 +9,11 @@ export const VISIT_VALID_RADIUS_M = 300;
  * kolom teams.base_radius_m (migration 0014); bisa diubah per tim di Kelola Tim. */
 export const DEFAULT_TEAM_BASE_RADIUS_M = 10000;
 
+/** Sesi yang lupa ditutup ditutup otomatis oleh server (auto_close_stale_sessions, migration
+ * 0016) pada aktivitas terakhirnya: kunjungan toko setelah 12 jam, absensi setelah 16 jam. */
+export const AUTO_CLOSE_VISIT_HOURS = 12;
+export const AUTO_CLOSE_ATTENDANCE_HOURS = 16;
+
 /** Riwayat data lapangan (kunjungan, absensi, laporan, pesan) yang dimuat saat login.
  * 62 hari = bulan berjalan + bulan sebelumnya pada tanggal berapa pun — cukup untuk
  * semua dashboard/KPI periode harian/mingguan/bulanan. Riwayat lebih lama dimuat

@@ -11,6 +11,26 @@ export interface MapMarker {
 }
 
 /**
+ * Leaflet is loaded from unpkg pinned to an exact version with Subresource
+ * Integrity, so an altered CDN file is refused instead of run inside the app's
+ * WebView. Changing the version means recomputing both hashes
+ * (`openssl dgst -sha256 -binary leaflet.js | openssl base64 -A`).
+ */
+const LEAFLET_VERSION = '1.9.4';
+const LEAFLET_CSS_SRI = 'sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=';
+const LEAFLET_JS_SRI = 'sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=';
+
+/**
+ * Tile server. The default is OpenStreetMap's community server, whose usage
+ * policy (operations.osmfoundation.org/policies/tiles) isn't meant for a
+ * production app at fleet scale — set EXPO_PUBLIC_MAP_TILE_URL (and its
+ * attribution) to a keyed provider before go-live. The attribution is required
+ * by the map data licence and is always shown.
+ */
+const TILE_URL = process.env.EXPO_PUBLIC_MAP_TILE_URL || 'https://tile.openstreetmap.org/{z}/{x}/{y}.png';
+const TILE_ATTRIBUTION = process.env.EXPO_PUBLIC_MAP_TILE_ATTRIBUTION || '&copy; OpenStreetMap contributors';
+
+/**
  * Peta ringan berbasis Leaflet di dalam WebView. Berjalan di Android, iOS, dan
  * Web (butuh internet untuk memuat tile OSM) — ported from spc-field-force's
  * LeafletMap.tsx (Phase 4a, PRD §16), which was already domain-agnostic.
@@ -36,16 +56,22 @@ export function LeafletMap({
     fit: (polyline?.length ?? 0) > 1 || markers.length > 1,
   };
   const json = JSON.stringify(data).replace(/</g, '\\u003c');
+  const tiles = JSON.stringify({ url: TILE_URL, attribution: TILE_ATTRIBUTION }).replace(/</g, '\\u003c');
 
   const html = `<!DOCTYPE html><html><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
-<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<style>html,body,#m{height:100%;margin:0;padding:0}</style></head>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.css" integrity="${LEAFLET_CSS_SRI}" crossorigin=""/>
+<script src="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.js" integrity="${LEAFLET_JS_SRI}" crossorigin=""></script>
+<style>html,body,#m{height:100%;margin:0;padding:0}
+.off{display:flex;height:100%;align-items:center;justify-content:center;font:13px sans-serif;color:#475569;text-align:center;padding:0 16px}
+.leaflet-control-attribution{font-size:9px}</style></head>
 <body><div id="m"></div><script>
+if(!window.L){document.body.innerHTML='<div class="off">Peta tidak dapat dimuat — butuh koneksi internet.</div>';}else{
 var D=${json};
-var map=L.map('m',{zoomControl:false,attributionControl:false});
-L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19}).addTo(map);
+var T=${tiles};
+var map=L.map('m',{zoomControl:false,attributionControl:true});
+map.attributionControl.setPrefix(false);
+L.tileLayer(T.url,{maxZoom:19,attribution:T.attribution}).addTo(map);
 D.markers.forEach(function(mk){
   L.circleMarker([mk.lat,mk.lng],{radius:7,color:'#FFFFFF',weight:2,fillColor:mk.color||'${C.accent}',fillOpacity:1})
    .addTo(map).bindTooltip(mk.label||'',{permanent:false,direction:'top'});
@@ -59,6 +85,7 @@ if(D.fit){
   map.fitBounds(b,{padding:[24,24]});
 }else{
   map.setView([D.center.lat,D.center.lng],D.zoom);
+}
 }
 </script></body></html>`;
 

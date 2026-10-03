@@ -417,6 +417,30 @@ async function main() {
     expect(after.error, 'point after clock-out / in the future was accepted');
   });
 
+  await check('a forgotten session is auto-closed at its last activity; a real clock-out still replaces it (0016)', async () => {
+    const staleId = `${RUN}_a_stale`;
+    const clockIn = new Date(Date.now() - 17 * 3600000);
+    expectOk(
+      await nc.client.from('attendances').insert({
+        id: staleId, user_id: nc.id, clock_in_at: clockIn.toISOString(), clock_in_lat: -6.2, clock_in_lng: 106.8, geo_fence_ok: true,
+      }),
+      'stale clock-in',
+    );
+    created.attendances.push(staleId);
+    const run = await admin.rpc('auto_close_stale_sessions');
+    if (run.error && /auto_close_stale_sessions/.test(run.error.message)) throw new Error('auto_close_stale_sessions() missing — run migration 0016');
+    expectOk(run, 'auto_close_stale_sessions');
+    const { data: closed } = await admin.from('attendances').select('clock_out_at, auto_closed').eq('id', staleId).single();
+    expect(
+      closed?.auto_closed && Math.abs(new Date(closed.clock_out_at).getTime() - clockIn.getTime()) < 2000,
+      `not auto-closed at its last activity (${JSON.stringify(closed)})`,
+    );
+    const real = new Date(clockIn.getTime() + 8 * 3600000).toISOString();
+    expectOk(await nc.client.from('attendances').update({ clock_out_at: real, clock_out_lat: -6.2, clock_out_lng: 106.8 }).eq('id', staleId), 'late real clock-out');
+    const { data: after } = await admin.from('attendances').select('clock_out_at, auto_closed').eq('id', staleId).single();
+    expect(after && !after.auto_closed && new Date(after.clock_out_at).getTime() === new Date(real).getTime(), `real clock-out did not replace the estimate (${JSON.stringify(after)})`);
+  });
+
   await check('evidence photos are private: no anonymous URL; signed URL for the TL, refused for another NC', async () => {
     const path = `${visitId}/${RUN}.png`;
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -612,6 +636,21 @@ async function main() {
     const dup = await analyst.client.from('targets').insert({ id: id2, nc_id: nc.id, period_key: TEST_PERIOD, offtake_target: 50, set_by: analyst.id });
     if (!dup.error) created.targets.push(id2);
     expect(dup.error?.code === '23505', `duplicate target accepted (${dup.error?.code ?? 'no error'}) — 0009 not applied`);
+  });
+
+  await check('admin changes are audit-logged; only super_admin/PM can read the log (0016)', async () => {
+    const { data: rows, error } = await admin
+      .from('admin_audit_log')
+      .select('action, actor_id, details')
+      .eq('actor_id', analyst.id)
+      .eq('action', 'targets.insert')
+      .gte('at', new Date(Date.now() - 10 * 60000).toISOString());
+    if (error && /admin_audit_log/.test(error.message)) throw new Error('admin_audit_log missing — run migration 0016');
+    expect(rows?.length, 'the target set by the Data Analyst was not audit-logged');
+    expect(!(await nc.client.from('admin_audit_log').select('id').limit(1)).data?.length, 'an NC can read the audit log');
+    expect(!(await reckitt.client.from('admin_audit_log').select('id').limit(1)).data?.length, 'reckitt_client can read the audit log');
+    expect((await pm.client.from('admin_audit_log').select('id').limit(1)).data?.length === 1, 'PM cannot read the audit log');
+    expectDenied(await superadmin.client.from('admin_audit_log').delete().eq('actor_id', analyst.id).select(), 'audit log delete');
   });
 
   await check('NC cannot set targets', async () => {

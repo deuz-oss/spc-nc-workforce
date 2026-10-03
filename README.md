@@ -56,7 +56,7 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0015`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0016`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
@@ -64,7 +64,11 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
    `0013_route_buffer_and_report_dedup.sql` (late/offline GPS points accepted, one report per visit per SKU) and
    `0014_server_side_field_checks.sql` (server-computed geofence, timestamp bounds, under-1 rule) and
    `0015_consumer_privacy_and_funnel.sql` (forward-only funnel, unique WhatsApp, consent record + erasure, Reckitt
-   PII limits, private push tokens — **redeploy `send-push` with it**) are required.
+   PII limits, private push tokens — **redeploy `send-push` with it**) and
+   `0016_audit_log_outlier_autoclose.sql` (admin audit log, offtake outlier window, hourly auto-close of forgotten
+   sessions — **redeploy `admin-users` with it**) are required.
+   Also in **Authentication → Providers → Email**, set the minimum password length to **8** (matches `MIN_PASSWORD`,
+   `src/utils/password.ts` — the self-service password change goes straight to Supabase Auth).
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
    ever provisioned by the `admin-users` edge function.
 2. Copy `.env.example` → `.env`, fill in `EXPO_PUBLIC_SUPABASE_URL`, `EXPO_PUBLIC_SUPABASE_ANON_KEY`, and
@@ -72,7 +76,7 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
 3. `npm run seed:supabase` — one-time, creates 10 demo accounts (one per role) + 2 demo stores (see
    `src/store/seed.ts`). This is demo data only — real 47-city store master data and the real 215-account
    roster come in via the CSV bulk-import flow (Import screen), not this script.
-4. Deploy both edge functions (redeploy after pulling `0008`, and `send-push` again with `0015` — they changed with them):
+4. Deploy both edge functions (redeploy after pulling `0008`, `send-push` again with `0015` and `admin-users` again with `0016` — they changed with them):
    `npx supabase functions deploy admin-users --project-ref <ref>` (account creation incl. bulk, password reset) and
    `npx supabase functions deploy send-push --project-ref <ref>` (chat push notifications).
    New auth users start **inactive** with no trusted role (`handle_new_auth_user`, 0008); `admin-users` and the
@@ -167,6 +171,17 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
 - ✅ **Push tokens are private** (`push_tokens`, no client access); a device token belongs to the last user signed in
   on it and is cleared at logout; dead tokens are removed by `send-push`.
 - ✅ **CSV exports are safe to open in Excel** (formula injection neutralized in `src/utils/csv.ts`).
+- ✅ **Admin audit log** (migration 0016): account role/team/status changes, account creation and password resets
+  (`admin-users`), team edits, store pin/assignment changes, targets, report reviews, scorecard weights and consumer
+  erasures, with who did it — Pengguna → Log Aktivitas (super_admin) / dashboard (PM). Passwords: min. 8 characters
+  with letters and digits, not containing the username.
+- ✅ **Forgotten sessions close themselves** (0016): an hourly job closes visits left open at clock-out or for >12 h
+  and attendances open >16 h, at the last recorded activity (marked "Ditutup otomatis"); a real clock-out/check-out
+  synced later still replaces it. Clock-out offers to check out of an open store visit first.
+- ✅ **Offtake outliers** are judged against the 7 WIB days before the offtake's own date (not the sync time).
+- 🟨 **Maps** load Leaflet with Subresource Integrity and show the required attribution. Tiles default to
+  OpenStreetMap's community server, which isn't meant for production scale — set `EXPO_PUBLIC_MAP_TILE_URL` /
+  `EXPO_PUBLIC_MAP_TILE_ATTRIBUTION` (see `.env.example`) to a keyed provider before go-live.
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
@@ -257,7 +272,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0015`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0016`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -288,7 +303,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 39 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 41 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)

@@ -7,7 +7,7 @@
 // provisioning, org configuration" is Super Admin-only) — re-checked here
 // server-side too, since this function's own client uses the service-role
 // key and therefore bypasses RLS entirely by design.
-import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SERVICE_ROLE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
@@ -43,7 +43,16 @@ type Body = CreateBody | SetPasswordBody;
 const VALID_ROLES = [
   'super_admin', 'reckitt_client', 'pm', 'arco', 'tl', 'nc', 'lead_trainer', 'trainer', 'data_analyst', 'admin_data_entry',
 ];
-const MIN_PASSWORD = 6;
+// Must match src/utils/password.ts.
+const MIN_PASSWORD = 8;
+
+function passwordProblem(password: string, username = ''): string | null {
+  if (password.length < MIN_PASSWORD) return `Password minimal ${MIN_PASSWORD} karakter.`;
+  if (!/[A-Za-z]/.test(password) || !/[0-9]/.test(password)) return 'Password harus berisi huruf dan angka.';
+  const u = username.trim().toLowerCase();
+  if (u && password.toLowerCase().includes(u)) return 'Password tidak boleh memuat username.';
+  return null;
+}
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -88,9 +97,8 @@ Deno.serve(async (req) => {
         return json({ error: 'Username hanya boleh huruf kecil, angka, titik, garis bawah, atau strip.' }, 400);
       }
       if (!VALID_ROLES.includes(body.role)) return json({ error: `Role tidak dikenal: ${body.role}` }, 400);
-      if ((body.password ?? '').length < MIN_PASSWORD) {
-        return json({ error: `Password minimal ${MIN_PASSWORD} karakter.` }, 400);
-      }
+      const pwErr = passwordProblem(body.password ?? '', username);
+      if (pwErr) return json({ error: pwErr }, 400);
       const email = `${username}@internal.spc`;
       const { data, error } = await admin.auth.admin.createUser({
         email,
@@ -116,15 +124,17 @@ Deno.serve(async (req) => {
         await admin.auth.admin.deleteUser(data.user.id);
         return json({ error: `Gagal mengaktifkan profil: ${activateErr.message}` }, 400);
       }
+      await audit(admin, caller.id, 'user.create', data.user.id, { username, role: body.role, team_id: body.teamId });
       return json({ id: data.user.id });
     }
 
     if (body.action === 'setPassword') {
-      if ((body.password ?? '').length < MIN_PASSWORD) {
-        return json({ error: `Password minimal ${MIN_PASSWORD} karakter.` }, 400);
-      }
+      const { data: target } = await admin.from('profiles').select('username').eq('id', body.userId).single();
+      const pwErr = passwordProblem(body.password ?? '', target?.username ?? '');
+      if (pwErr) return json({ error: pwErr }, 400);
       const { error } = await admin.auth.admin.updateUserById(body.userId, { password: body.password });
       if (error) return json({ error: error.message }, 400);
+      await audit(admin, caller.id, 'user.password_reset', body.userId, {});
       return json({ ok: true });
     }
 
@@ -133,6 +143,23 @@ Deno.serve(async (req) => {
     return json({ error: err instanceof Error ? err.message : 'Unknown error' }, 500);
   }
 });
+
+/** admin_audit_log (migration 0016). This function writes with the service
+ * role, which the table's triggers can't attribute — so it records the acting
+ * super_admin itself. Best-effort: never fails the operation it describes. */
+async function audit(
+  // deno-lint-ignore no-explicit-any
+  admin: SupabaseClient<any>,
+  actorId: string,
+  action: string,
+  targetId: string,
+  details: Record<string, unknown>,
+) {
+  const { error } = await admin
+    .from('admin_audit_log')
+    .insert({ actor_id: actorId, action, target_type: 'profile', target_id: targetId, details });
+  if (error) console.warn(`audit ${action} failed: ${error.message}`);
+}
 
 function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {

@@ -307,6 +307,16 @@ export default function ManagementDashboard() {
         </Card>
       )}
 
+      {me.role === 'pm' && (
+        <Card>
+          <SectionHeader
+            title="Log Aktivitas Admin"
+            subtitle="Siapa mengubah akun, tim, pin toko, target, review & bobot skorkartu"
+            action={{ label: 'Buka', onPress: () => navigation.navigate('AuditLog') }}
+          />
+        </Card>
+      )}
+
       {TARGET_MANAGER_ROLES.includes(me.role) && (
         <Card>
           <SectionHeader

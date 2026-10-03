@@ -58,6 +58,7 @@ import CertificationsScreen from './src/screens/CertificationsScreen';
 import ProductsScreen from './src/screens/ProductsScreen';
 import ChatListScreen from './src/screens/ChatListScreen';
 import ChatThreadScreen from './src/screens/ChatThreadScreen';
+import AuditLogScreen from './src/screens/AuditLogScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
 
 const Stack = createNativeStackNavigator();
@@ -535,6 +536,7 @@ export default function App() {
             <Stack.Screen name="Targets" component={TargetsScreen} options={{ title: 'Target Bulanan' }} />
             <Stack.Screen name="Certifications" component={CertificationsScreen} options={{ title: 'Sertifikasi' }} />
             <Stack.Screen name="Products" component={ProductsScreen} options={{ title: 'Master Produk' }} />
+            <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Log Aktivitas' }} />
             <Stack.Screen
               name="ChatThread"
               component={ChatThreadScreen}
