@@ -674,6 +674,15 @@ async function main() {
     expect(fnStatus(error) === 403, `expected 403, got ${fnStatus(error) ?? 'success'} — redeploy send-push`);
   });
 
+  await check('send-push refuses a conversationId that is not the caller ↔ recipient chat', async () => {
+    if (!team!.tl_id) throw new Skip('team t_jaksel has no tl_id');
+    const { error } = await nc.client.functions.invoke('send-push', {
+      body: { recipientUserId: team!.tl_id, conversationId: `${RUN}_not_this_chat`, title: 'spoof', body: 'smoke' },
+    });
+    if (fnStatus(error) === 404) throw new Skip('send-push not deployed');
+    expect(fnStatus(error) === 403, `expected 403, got ${fnStatus(error) ?? 'success'} — redeploy send-push`);
+  });
+
   // ===== 5. Targets + scorecards ==============================================
 
   await check('Data Analyst can set a target; a duplicate NC/month is rejected', async () => {

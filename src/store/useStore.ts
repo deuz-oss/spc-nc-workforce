@@ -2858,7 +2858,9 @@ export const useStore = create<StoreState>()((set, get) => ({
     const sender = get().users.find((u) => u.id === me);
     if (recipientId) {
       supabase.functions
-        .invoke('send-push', { body: { recipientUserId: recipientId, title: sender?.name ?? 'Pesan baru', body: trimmed } })
+        .invoke('send-push', {
+          body: { recipientUserId: recipientId, conversationId, title: sender?.name ?? 'Pesan baru', body: trimmed },
+        })
         .catch(() => {
           // Best-effort only — push delivery failing must never affect the chat itself.
         });

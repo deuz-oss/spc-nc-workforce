@@ -62,8 +62,10 @@ import { TrackingWatcher } from './src/components/TrackingWatcher';
 import type { RootStackParamList } from './src/navigation';
 import { ErrorBoundary } from './src/components/ErrorBoundary';
 import { installGlobalErrorHandlers } from './src/utils/errorReport';
+import { flushPendingChat, installNotificationHandlers, navigationRef } from './src/notifications';
 
 installGlobalErrorHandlers();
+installNotificationHandlers();
 
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator();
@@ -428,6 +430,15 @@ export default function App() {
     useStore.getState().init();
   }, []);
 
+  // A chat notification tapped while signed out opens once the user is in
+  // (after the signed-in navigator has mounted).
+  const userId = user?.id;
+  React.useEffect(() => {
+    if (!userId) return;
+    const t = setTimeout(flushPendingChat, 0);
+    return () => clearTimeout(t);
+  }, [userId]);
+
   React.useEffect(() => {
     // @react-navigation/elements sets aria-hidden="true" on inactive tab
     // screens (correctly shielding screen readers) but never pairs it with
@@ -482,7 +493,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
-        <NavigationContainer theme={navTheme}>
+        <NavigationContainer ref={navigationRef} theme={navTheme} onReady={flushPendingChat}>
           <StatusBar style="light" />
           {!user ? (
             <Stack.Navigator screenOptions={stackOpts}>

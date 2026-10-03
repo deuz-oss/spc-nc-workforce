@@ -23,7 +23,9 @@ const CORS_HEADERS = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-type Body = { recipientUserId: string; title: string; body: string };
+/** `conversationId` (optional for older app builds) lets a tap on the
+ * notification open that chat thread. */
+type Body = { recipientUserId: string; title: string; body: string; conversationId?: string };
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -59,15 +61,18 @@ Deno.serve(async (req) => {
 
     const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
 
-    const { data: shared } = await admin
+    let q = admin
       .from('conversations')
       .select('id')
       .or(
         `and(participant_a.eq.${caller.id},participant_b.eq.${body.recipientUserId}),` +
           `and(participant_a.eq.${body.recipientUserId},participant_b.eq.${caller.id})`,
-      )
-      .limit(1);
+      );
+    // When named, the conversation must be exactly one between these two.
+    if (body.conversationId) q = q.eq('id', String(body.conversationId));
+    const { data: shared } = await q.limit(1);
     if (!shared?.length) return json({ error: 'Forbidden: no conversation with recipient' }, 403);
+    const conversationId = shared[0].id as string;
 
     const { data: sender } = await admin.from('profiles').select('name, active').eq('id', caller.id).single();
     if (!sender?.active) return json({ error: 'Forbidden' }, 403);
@@ -93,6 +98,8 @@ Deno.serve(async (req) => {
           title: sender.name,
           body: String(body.body).slice(0, 200),
           sound: 'default',
+          // Read by the app to open the thread when the notification is tapped.
+          data: { type: 'chat', conversationId },
         })),
       ),
     });

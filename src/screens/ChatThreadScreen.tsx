@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ScrollView, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
+import { setOpenConversation } from '../notifications';
 import { Btn, Input, Muted, StickyFooter } from '../components/ui';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -34,7 +35,10 @@ export default function ChatThreadScreen() {
   useFocusEffect(
     useCallback(() => {
       void refreshChat();
-    }, [refreshChat]),
+      // While this thread is on screen its own push notifications aren't shown.
+      setOpenConversation(conversationId);
+      return () => setOpenConversation(null);
+    }, [refreshChat, conversationId]),
   );
 
   useEffect(() => {

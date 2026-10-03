@@ -225,6 +225,10 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   each plan to the NC's check-in that day (`actual_visit_id`, 0020 — not client-settable), so the NC's "Rencana
   Kunjungan Hari Ini", the team PJP compliance and the Admin Data Entry PJP KPI are real. **Not yet:** CSV import
   of plans.
+- ✅ **Chat notifications open the chat**: tapping a push (app running, in the background, or not running)
+  opens that thread — after sign-in if needed; while the app is open a push shows as a banner unless that thread
+  is already on screen (`src/notifications.ts`). Needs the updated `send-push` (it now puts the conversation in
+  the payload) and a new app build.
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
@@ -346,7 +350,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 46 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 47 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)
