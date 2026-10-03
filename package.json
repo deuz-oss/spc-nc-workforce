@@ -59,6 +59,7 @@
     "test": "tsx --test \"src/**/*.test.ts\"",
     "build:dev": "npx eas-cli build --profile development --platform android",
     "build:preview": "npx eas-cli build --profile preview --platform android",
+    "build:production-apk": "npx eas-cli build --profile production-apk --platform android",
     "build:production": "npx eas-cli build --profile production --platform android"
   }
 }

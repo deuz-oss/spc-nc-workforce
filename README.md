@@ -341,8 +341,9 @@ this repo. Production gets its own Supabase project.
    before real field data exists.
 8. **Smoke test** the new project: seed demo accounts on a *separate staging* project, not production — the smoke
    test needs them. Keep staging as the place to run `npm run smoke` after every migration.
-9. **Build**: `npx eas-cli build -p android --profile production` (Play Store bundle) or `--profile preview` (APK
-   for internal distribution).
+9. **Build**: `npx eas-cli build -p android --profile production` (Play Store bundle). EAS environments pick the
+   backend: `preview` (APK) → staging, `production` and `production-apk` → production. `production-apk`
+   (`npm run build:production-apk`) is an installable APK against production, for testing before the store upload.
 
 ## Checks
 
