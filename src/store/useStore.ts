@@ -4,7 +4,8 @@ import NetInfo from '@react-native-community/netinfo';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { isAuthRetryableFetchError, type RealtimeChannel } from '@supabase/supabase-js';
-import { supabase } from '../lib/supabase';
+import { supabase, supabaseUntyped } from '../lib/supabase';
+import type { Json, TablesUpdate } from '../lib/database.types';
 import { showDialog, showToast } from '../components/dialog';
 import {
   CONSENT_VERSION,
@@ -453,12 +454,12 @@ export function consumerScope(s: Pick<StoreState, 'consumers' | 'users' | 'teams
   if (viewer.role === 'nc') return s.consumers.filter((c) => c.createdByNcId === viewer.id);
   if (viewer.role === 'tl') {
     const ncIds = new Set(s.users.filter((u) => u.teamId === viewer.teamId).map((u) => u.id));
-    return s.consumers.filter((c) => ncIds.has(c.createdByNcId));
+    return s.consumers.filter((c) => c.createdByNcId != null && ncIds.has(c.createdByNcId));
   }
   if (viewer.role === 'arco') {
     const myTeamIds = new Set(s.teams.filter((t) => t.arcoId === viewer.id).map((t) => t.id));
     const ncIds = new Set(s.users.filter((u) => u.teamId && myTeamIds.has(u.teamId)).map((u) => u.id));
-    return s.consumers.filter((c) => ncIds.has(c.createdByNcId));
+    return s.consumers.filter((c) => c.createdByNcId != null && ncIds.has(c.createdByNcId));
   }
   return s.consumers; // monitor roles: program-wide
 }
@@ -597,12 +598,12 @@ async function replayOp(set: (p: Partial<StoreState>) => void, get: () => StoreS
     // since 0013 the server also accepts in-session points after clock-out).
     const userId = get().sessionUserId;
     if (userId) await flushRouteBuffer(userId);
-    if (op.addPoint) {
+    if (op.addPoint && userId) {
       // Before closing the session: route_points_insert_own only accepts points
       // for an attendance that is still open.
       const { error: rpErr } = await supabase.from('route_points').insert({
         attendance_id: op.attendanceId,
-        user_id: get().sessionUserId,
+        user_id: userId,
         lat: op.lat,
         lng: op.lng,
         recorded_at: new Date(op.clockOutAt).toISOString(),
@@ -713,7 +714,7 @@ async function replayOptionalPhotoBatch<K extends 'stockTakingRows' | 'priceMoni
   // Without a deferred local photo the rows go as-is: either no photo, or (web)
   // one that was already uploaded before the op was built.
   const rowsWithPhoto = localPhotoUri ? rows.map((r) => ({ ...r, photoUrl })) : rows;
-  const { error } = await supabase.from(table).insert(rowsWithPhoto.map(toDbRow));
+  const { error } = await supabaseUntyped.from(table).insert(rowsWithPhoto.map(toDbRow));
   const result = settleLogged(error);
   if (result !== 'done' || !localPhotoUri) return result;
 
@@ -770,7 +771,7 @@ async function replayRequiredPhotoRow<K extends 'shareOfShelfRows' | 'paidVisibi
   }
 
   const fullRow = { ...row, photoUrl } as unknown as R;
-  const { error } = await supabase.from(table).insert(toDbRow(fullRow));
+  const { error } = await supabaseUntyped.from(table).insert(toDbRow(fullRow));
   const result = settleLogged(error);
   if (result !== 'done') return result;
 
@@ -950,7 +951,7 @@ async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVis
   }
   const full = { ...p.row, photoUrl };
   setRows([full, ...rowsOf()]);
-  const { error } = await supabase.from(p.table).insert(p.toDbRow(full));
+  const { error } = await supabaseUntyped.from(p.table).insert(p.toDbRow(full));
   if (error) {
     setRows(rowsOf().filter((r) => r.id !== p.row.id));
     showDialog('Gagal Menyimpan', `Tidak dapat menyimpan ${p.label} ke server. Periksa koneksi internet dan coba lagi.`);
@@ -1236,7 +1237,7 @@ async function fetchAll(
 ): Promise<{ data: any[]; error: { message: string; code?: string } | null }> {
   const out: any[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
-    let q = supabase.from(table).select('*');
+    let q = supabaseUntyped.from(table).select('*');
     if (filter?.since) {
       q = filter.keepNull
         ? q.or(`${filter.col}.gte."${filter.since}",${filter.keepNull}.is.null`)
@@ -1452,8 +1453,9 @@ async function hydrateAll(
   if (meErr) return meErr.code === 'PGRST116' ? 'inactive' : 'offline';
   if (!me?.active) return 'inactive';
 
-  const w = historyWindow(me.role);
-  const { rows, error: snapErr } = await fetchSnapshot(w, me.role);
+  const role = me.role as Role;
+  const w = historyWindow(role);
+  const { rows, error: snapErr } = await fetchSnapshot(w, role);
   if (snapErr) {
     // Connection dropped mid-load: keep whatever the caller already has rather
     // than replacing it with a partial snapshot.
@@ -1479,7 +1481,7 @@ async function hydrateAll(
   lastRefreshAt = Date.now();
   void setLastUser(userId);
 
-  subscribeRealtime(set, get, userId, me.role);
+  subscribeRealtime(set, get, userId, role);
   return 'ok';
 }
 
@@ -2115,7 +2117,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         ids.includes(m.id) ? { ...m, assignedNcId: ncId, teamId: ncId ? teamId! : m.teamId } : m,
       ),
     });
-    const patch: Record<string, unknown> = { assigned_nc_id: ncId };
+    const patch: TablesUpdate<'stores'> = { assigned_nc_id: ncId };
     if (ncId) patch.team_id = teamId;
     const { error } = await supabase.from('stores').update(patch).in('id', ids);
     if (error) {
@@ -2581,7 +2583,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const { error } = await supabase.from('surveys').upsert({
       id: s.id,
       title: s.title,
-      questions: s.questions,
+      questions: s.questions as unknown as Json,
       campaign_tag: s.campaignTag,
       created_by: s.createdBy,
       created_at: new Date(s.createdAt).toISOString(),
@@ -2934,7 +2936,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const { data, error } = await supabase.rpc('management_summary', {
       p_from: new Date(range.from).toISOString(),
       p_to: new Date(range.to).toISOString(),
-      p_store_ids: storeIds,
+      p_store_ids: storeIds ?? undefined, // omitted = all stores the caller can see
     });
     if (error) throw new Error(error.message);
     const d = data as any;

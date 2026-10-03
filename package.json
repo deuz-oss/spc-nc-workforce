@@ -55,6 +55,7 @@
     "web": "expo start --web",
     "seed:supabase": "tsx scripts/seed-supabase.ts",
     "smoke": "tsx scripts/smoke-rls.ts",
+    "gen:types": "npx supabase gen types typescript --linked --schema public > src/lib/database.types.ts",
     "test": "tsx --test \"src/**/*.test.ts\"",
     "build:dev": "npx eas-cli build --profile development --platform android",
     "build:preview": "npx eas-cli build --profile preview --platform android",

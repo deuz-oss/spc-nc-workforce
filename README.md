@@ -352,6 +352,9 @@ this repo. Production gets its own Supabase project.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
   `npm run smoke -- --project <project-ref>` — 47 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
+- **DB types:** `src/lib/database.types.ts` is generated from the live schema and types the Supabase client and
+  the row mappers. After a migration, `npx supabase link --project-ref <ref>` (once) then `npm run gen:types`,
+  and commit the result — `tsc` then flags code that no longer matches the schema.
 
 ## Reused vs New (PRD §3)
 
@@ -376,6 +379,7 @@ src/
   types.ts                 # domain model (mirrors the Postgres schema)
   navigation.ts            # RootStackParamList — every route + params, typed navigate/useAppRoute
   lib/supabase.ts          # Supabase client
+  lib/database.types.ts    # generated schema types (npm run gen:types)
   store/useStore.ts        # zustand store: session/offline boot, realtime mirror, all write actions
   store/mappers.ts         # Postgres row <-> app type mapping (pure, tested)
   store/replay.ts          # offline-queue replay rules + queue/network decisions (pure, tested)

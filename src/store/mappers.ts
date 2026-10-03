@@ -5,30 +5,42 @@ import type {
   CoachingLog,
   Consumer,
   Conversation,
+  ConversationType,
   Message,
   NtgGwp,
+  NtgGwpStage,
   OfftakeRow,
   PaidVisibilityRow,
   PriceMonitoringRow,
   Product,
   ReportReview,
+  ReportReviewStatus,
+  ReportType,
+  Role,
   RoutePoint,
   Schedule,
   Scorecard,
+  ScorecardStatus,
   ShareOfShelfRow,
   StockTakingRow,
   Store,
+  StoreCategory,
   Survey,
+  SurveyQuestion,
   SurveyResponse,
   Target,
   Team,
   User,
   Visit,
 } from '../types';
+import type { Tables as DbRow } from '../lib/database.types';
 
 /**
  * Supabase row <-> app type mapping, in both directions: `map*` turn a
  * PostgREST/realtime row (snake_case, ISO strings) into the app's type;
+ * rows are typed from the generated schema (src/lib/database.types.ts —
+ * `npm run gen:types`). Enum-like columns are text + check constraints in
+ * the DB, so they come back as `string` and are narrowed here;
  * `*Row` build the column object written back. Pure — no React Native /
  * Supabase imports — so it's unit-testable (mappers.test.ts).
  */
@@ -42,12 +54,12 @@ export function upsertById<T extends { id: string | number }>(list: T[], row: T)
 
 // --- Supabase row <-> app type mapping -------------------------------------
 
-export function mapProfile(p: any): User {
+export function mapProfile(p: DbRow<'profiles'>): User {
   return {
     id: p.id,
     name: p.name,
     username: p.username,
-    role: p.role,
+    role: p.role as Role,
     teamId: p.team_id,
     city: p.city ?? undefined,
     phone: p.phone ?? undefined,
@@ -56,7 +68,7 @@ export function mapProfile(p: any): User {
   };
 }
 
-export function mapTeam(t: any): Team {
+export function mapTeam(t: DbRow<'teams'>): Team {
   return {
     id: t.id,
     name: t.name,
@@ -69,7 +81,7 @@ export function mapTeam(t: any): Team {
   };
 }
 
-export function mapStore(m: any): Store {
+export function mapStore(m: DbRow<'stores'>): Store {
   return {
     id: m.id,
     name: m.name,
@@ -77,17 +89,17 @@ export function mapStore(m: any): Store {
     city: m.city,
     channel: m.channel,
     account: m.account ?? undefined,
-    category: m.category,
+    category: m.category as StoreCategory,
     lat: m.lat,
     lng: m.lng,
     assignedNcId: m.assigned_nc_id,
     teamId: m.team_id,
-    source: m.source,
+    source: m.source as Store['source'],
     createdAt: new Date(m.created_at).getTime(),
   };
 }
 
-export function mapVisit(v: any): Visit {
+export function mapVisit(v: DbRow<'visits'>): Visit {
   return {
     id: v.id,
     storeId: v.store_id,
@@ -103,7 +115,7 @@ export function mapVisit(v: any): Visit {
   };
 }
 
-export function mapAttendance(a: any, route: RoutePoint[]): Attendance {
+export function mapAttendance(a: DbRow<'attendances'>, route: RoutePoint[]): Attendance {
   return {
     id: a.id,
     userId: a.user_id,
@@ -121,7 +133,7 @@ export function mapAttendance(a: any, route: RoutePoint[]): Attendance {
   };
 }
 
-export function mapProduct(p: any): Product {
+export function mapProduct(p: DbRow<'products'>): Product {
   return {
     id: p.id,
     sku: p.sku,
@@ -132,7 +144,7 @@ export function mapProduct(p: any): Product {
   };
 }
 
-export function mapStockTaking(r: any): StockTakingRow {
+export function mapStockTaking(r: DbRow<'stock_taking'>): StockTakingRow {
   return {
     id: r.id,
     visitId: r.visit_id,
@@ -146,7 +158,7 @@ export function mapStockTaking(r: any): StockTakingRow {
   };
 }
 
-export function mapOfftake(r: any): OfftakeRow {
+export function mapOfftake(r: DbRow<'offtake'>): OfftakeRow {
   return {
     id: r.id,
     visitId: r.visit_id,
@@ -160,7 +172,7 @@ export function mapOfftake(r: any): OfftakeRow {
   };
 }
 
-export function mapConsumer(c: any): Consumer {
+export function mapConsumer(c: DbRow<'consumers'>): Consumer {
   return {
     id: c.id,
     name: c.name,
@@ -174,17 +186,17 @@ export function mapConsumer(c: any): Consumer {
     consentAt: optTime(c.consent_at),
     consentVersion: c.consent_version ?? undefined,
     erasedAt: optTime(c.erased_at),
-    currentStage: c.current_stage ?? undefined,
+    currentStage: (c.current_stage as NtgGwpStage | null) ?? undefined,
     currentStageAt: optTime(c.current_stage_at),
   };
 }
 
-export function mapNtgGwp(g: any): NtgGwp {
+export function mapNtgGwp(g: DbRow<'ntg_gwp'>): NtgGwp {
   return {
     id: g.id,
     consumerId: g.consumer_id,
     visitId: g.visit_id,
-    stage: g.stage,
+    stage: g.stage as NtgGwpStage,
     gwpItem: g.gwp_item ?? undefined,
     gwpQty: g.gwp_qty ?? undefined,
     offtakeId: g.offtake_id ?? undefined,
@@ -193,13 +205,13 @@ export function mapNtgGwp(g: any): NtgGwp {
   };
 }
 
-export function mapShareOfShelf(r: any): ShareOfShelfRow {
+export function mapShareOfShelf(r: DbRow<'share_of_shelf'>): ShareOfShelfRow {
   return {
     id: r.id,
     visitId: r.visit_id,
     storeId: r.store_id,
     channel: r.channel,
-    category: r.category,
+    category: r.category as StoreCategory,
     ownFacingCount: r.own_facing_count,
     totalFacingCount: r.total_facing_count,
     photoUrl: r.photo_url,
@@ -208,20 +220,20 @@ export function mapShareOfShelf(r: any): ShareOfShelfRow {
   };
 }
 
-export function mapPaidVisibility(r: any): PaidVisibilityRow {
+export function mapPaidVisibility(r: DbRow<'paid_visibility'>): PaidVisibilityRow {
   return {
     id: r.id,
     visitId: r.visit_id,
     storeId: r.store_id,
     visibilityType: r.visibility_type,
-    complianceChecklist: r.compliance_checklist ?? {},
+    complianceChecklist: (r.compliance_checklist ?? {}) as Record<string, boolean>,
     photoUrl: r.photo_url,
     createdAt: new Date(r.created_at).getTime(),
     receivedAt: optTime(r.received_at),
   };
 }
 
-export function mapPriceMonitoring(r: any): PriceMonitoringRow {
+export function mapPriceMonitoring(r: DbRow<'price_monitoring'>): PriceMonitoringRow {
   return {
     id: r.id,
     visitId: r.visit_id,
@@ -235,29 +247,29 @@ export function mapPriceMonitoring(r: any): PriceMonitoringRow {
   };
 }
 
-export function mapSurvey(s: any): Survey {
+export function mapSurvey(s: DbRow<'surveys'>): Survey {
   return {
     id: s.id,
     title: s.title,
-    questions: s.questions ?? [],
+    questions: (s.questions ?? []) as unknown as SurveyQuestion[],
     campaignTag: s.campaign_tag ?? undefined,
     createdBy: s.created_by,
     createdAt: new Date(s.created_at).getTime(),
   };
 }
 
-export function mapSurveyResponse(r: any): SurveyResponse {
+export function mapSurveyResponse(r: DbRow<'survey_responses'>): SurveyResponse {
   return {
     id: r.id,
     surveyId: r.survey_id,
     visitId: r.visit_id ?? null,
     consumerId: r.consumer_id ?? null,
-    answers: r.answers ?? {},
+    answers: (r.answers ?? {}) as Record<string, string>,
     createdAt: new Date(r.created_at).getTime(),
   };
 }
 
-export function mapTarget(t: any): Target {
+export function mapTarget(t: DbRow<'targets'>): Target {
   return {
     id: t.id,
     storeId: t.store_id ?? null,
@@ -269,19 +281,19 @@ export function mapTarget(t: any): Target {
   };
 }
 
-export function mapReportReview(r: any): ReportReview {
+export function mapReportReview(r: DbRow<'report_reviews'>): ReportReview {
   return {
     id: r.id,
-    reportType: r.report_type,
+    reportType: r.report_type as ReportType,
     reportId: r.report_id,
-    status: r.status,
+    status: r.status as ReportReviewStatus,
     reviewedBy: r.reviewed_by ?? undefined,
     reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).getTime() : undefined,
     note: r.note ?? undefined,
   };
 }
 
-export function mapCoachingLog(l: any): CoachingLog {
+export function mapCoachingLog(l: DbRow<'coaching_logs'>): CoachingLog {
   return {
     id: l.id,
     tlId: l.tl_id,
@@ -292,20 +304,20 @@ export function mapCoachingLog(l: any): CoachingLog {
   };
 }
 
-export function mapScorecard(s: any): Scorecard {
+export function mapScorecard(s: DbRow<'scorecards'>): Scorecard {
   return {
     id: s.id,
     subjectId: s.subject_id,
-    role: s.role,
+    role: s.role as Role,
     periodKey: s.period_key,
     score: s.score,
-    status: s.status,
-    breakdown: s.breakdown ?? {},
+    status: s.status as ScorecardStatus,
+    breakdown: (s.breakdown ?? {}) as Record<string, number>,
     computedAt: new Date(s.computed_at).getTime(),
   };
 }
 
-export function mapSchedule(s: any): Schedule {
+export function mapSchedule(s: DbRow<'schedules'>): Schedule {
   return {
     id: s.id,
     ncId: s.nc_id,
@@ -325,7 +337,7 @@ export function scheduleRow(s: Schedule) {
   };
 }
 
-export function mapCertification(c: any): Certification {
+export function mapCertification(c: DbRow<'certifications'>): Certification {
   return {
     id: c.id,
     userId: c.user_id,
@@ -335,17 +347,17 @@ export function mapCertification(c: any): Certification {
   };
 }
 
-export function mapConversation(c: any): Conversation {
+export function mapConversation(c: DbRow<'conversations'>): Conversation {
   return {
     id: c.id,
-    type: c.type,
+    type: c.type as ConversationType,
     participantA: c.participant_a,
     participantB: c.participant_b,
     createdAt: new Date(c.created_at).getTime(),
   };
 }
 
-export function mapMessage(m: any): Message {
+export function mapMessage(m: DbRow<'messages'>): Message {
   return {
     id: m.id,
     conversationId: m.conversation_id,

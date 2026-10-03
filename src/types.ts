@@ -241,8 +241,9 @@ export interface Consumer {
   currentBrand?: string;
   quizResult?: string; // segment tag, not a medical assessment — PRD §6
   /** Added in Phase 2 (0003 migration) to fix an RLS gap that let any NC edit
-   * any other NC's consumer rows — see the migration's comment. */
-  createdByNcId: string;
+   * any other NC's consumer rows — see the migration's comment. Null on rows
+   * created before that column existed. */
+  createdByNcId: string | null;
   createdAt: number;
   /** Consent record, stamped by the server (migration 0015) — when, and which
    * version of CONSENT_TEXT (config.ts) the consumer agreed to. */
