@@ -14,10 +14,11 @@ import {
 } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
-import { Consumer, NtgGwpStage } from '../types';
+import { Consumer, NtgGwp, NtgGwpStage } from '../types';
 import { uid } from '../utils/uuid';
 import { funnelStepError } from '../utils/funnel';
 import { isValidWa } from '../utils/wa';
+import { programDayKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
 
 export default function ConsumerDetailScreen() {
@@ -31,8 +32,7 @@ export default function ConsumerDetailScreen() {
   const consumers = useStore((s) => s.consumers);
   const ntgGwps = useStore((s) => s.ntgGwps);
   const offtakeRows = useStore((s) => s.offtakeRows);
-  const upsertConsumer = useStore((s) => s.upsertConsumer);
-  const addNtgGwp = useStore((s) => s.addNtgGwp);
+  const saveConsumerWithStep = useStore((s) => s.saveConsumerWithStep);
 
   const existing = consumerId ? consumers.find((c) => c.id === consumerId) : undefined;
   const history = useMemo(
@@ -93,8 +93,8 @@ export default function ConsumerDetailScreen() {
 
   const todaysStoreOfftake = useMemo(() => {
     if (!storeId) return [];
-    const today = new Date().toDateString();
-    return offtakeRows.filter((o) => o.storeId === storeId && new Date(o.createdAt).toDateString() === today);
+    const today = programDayKey(Date.now());
+    return offtakeRows.filter((o) => o.storeId === storeId && programDayKey(o.createdAt) === today);
   }, [offtakeRows, storeId]);
 
   const submit = async () => {
@@ -122,25 +122,23 @@ export default function ConsumerDetailScreen() {
         createdByNcId: existing?.createdByNcId ?? me.id,
         createdAt: existing?.createdAt ?? now,
       };
-      const cErr = await upsertConsumer(consumer);
-      if (cErr) return; // upsertConsumer already showed a dialog
-
       // Only record a funnel row when the stage actually moves (or on create) —
       // saving a contact-detail edit must not append a duplicate stage entry.
-      if (canAdvanceStage && visitId && (isCreate || stage !== currentStage)) {
-        const ntg = {
-          id: uid('ntg_'),
-          consumerId: consumer.id,
-          visitId,
-          stage,
-          gwpItem: stage === 'gwp_given' ? gwpItem.trim() || undefined : undefined,
-          gwpQty: stage === 'gwp_given' && gwpQty.trim() ? Number(gwpQty) : undefined,
-          offtakeId: stage === 'gwp_given' ? offtakeId : undefined,
-          createdAt: now,
-        };
-        const gErr = await addNtgGwp(ntg);
-        if (gErr) return;
-      }
+      const step: NtgGwp | null =
+        canAdvanceStage && visitId && (isCreate || stage !== currentStage)
+          ? {
+              id: uid('ntg_'),
+              consumerId: consumer.id,
+              visitId,
+              stage,
+              gwpItem: stage === 'gwp_given' ? gwpItem.trim() || undefined : undefined,
+              gwpQty: stage === 'gwp_given' && gwpQty.trim() ? Number(gwpQty) : undefined,
+              offtakeId: stage === 'gwp_given' ? offtakeId : undefined,
+              createdAt: now,
+            }
+          : null;
+      // One transaction: the consumer never ends up saved without its step.
+      if (await saveConsumerWithStep(consumer, step)) return; // dialog already shown
 
       showDialog(isCreate ? 'Konsumen Tersimpan' : 'Perubahan Tersimpan', undefined, [
         { label: 'OK', onPress: () => navigation.goBack() },

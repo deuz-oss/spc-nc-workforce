@@ -96,7 +96,7 @@ export default function ScorecardScreen() {
     <ScrollView tabIndex={0} role="main" contentContainerStyle={{ padding: 16, gap: 12, maxWidth: 800, width: '100%', alignSelf: 'center' }}>
       <SectionHeader title="Skorkartu Saya" subtitle={ROLE_LABEL[me.role]} />
       {mine.length === 0 ? (
-        <Empty text="Belum ada skorkartu untukmu. Skorkartu dihitung oleh Data Analyst/PM setiap periode." />
+        <Empty text="Belum ada skorkartu untukmu. Skorkartu dihitung otomatis tiap malam; posisi yang belum punya KPI terukur (mis. Data Analyst) belum dapat dinilai." />
       ) : (
         mine.map((sc) => <ScorecardCard key={sc.id} sc={sc} />)
       )}

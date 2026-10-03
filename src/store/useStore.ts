@@ -257,6 +257,10 @@ interface StoreState {
   upsertConsumer(c: Consumer): Promise<string | null>;
   /** Appends one funnel-stage row (history is append-only, forward-only). */
   addNtgGwp(n: NtgGwp): Promise<string | null>;
+  /** Saves a consumer and (optionally) its next funnel step in ONE server
+   * transaction (save_consumer_with_step, 0017) — never a consumer without its
+   * step or the reverse. Returns an error message (already shown) or null. */
+  saveConsumerWithStep(c: Consumer, step: NtgGwp | null): Promise<string | null>;
   /** Data subject deletion request (UU PDP): blanks the consumer's personal data
    * server-side (erase_consumer RPC, 0015); funnel counts stay. Creator NC,
    * super_admin or PM. Returns an error message or null. */
@@ -1303,6 +1307,46 @@ function assertNewSkus(rows: Array<{ visitId: string; sku: string }>, visitId: s
   const done = reportedSkus(rows, visitId);
   const dup = skus.filter((sku) => done.has(sku.toLowerCase()));
   if (dup.length) throw new Error(`SKU berikut sudah dilaporkan di kunjungan ini: ${dup.join(', ')}.`);
+}
+
+/** Consumer rules checked before any write (same as consumers_server_checks,
+ * 0015, which also sees other NCs' consumers). Shows the dialog; returns a reason or null. */
+function consumerProblem(get: () => StoreState, c: Consumer): string | null {
+  const before = get().consumers.find((x) => x.id === c.id);
+  if (c.erasedAt || (before && before.waContact === c.waContact)) return null;
+  if (!isValidWa(c.waContact)) {
+    showDialog('Nomor WhatsApp Tidak Valid', 'Gunakan nomor HP Indonesia, mis. 0812xxxxxxxx.');
+    return 'invalid wa';
+  }
+  const key = normalizeWa(c.waContact);
+  if (get().consumers.some((x) => x.id !== c.id && !x.erasedAt && normalizeWa(x.waContact) === key)) {
+    showDialog('Konsumen Sudah Terdaftar', 'Nomor WhatsApp ini sudah terdaftar sebagai konsumen. Buka data konsumen yang ada.');
+    return 'duplicate wa';
+  }
+  return null;
+}
+
+/** NTG step rules checked before any write: visit synced, forward-only funnel
+ * (0015), under-1 rule (0014). `ageBracket` is the consumer's as it will be
+ * saved. Shows the dialog; returns a reason or null. */
+function ntgStepProblem(get: () => StoreState, n: NtgGwp, ageBracket: string | undefined): string | null {
+  if (visitPendingSync(get, n.visitId)) {
+    showVisitPendingDialog();
+    return 'visit not synced yet';
+  }
+  const stepErr = funnelStepError(
+    get().ntgGwps.filter((g) => g.consumerId === n.consumerId).map((g) => g.stage),
+    n.stage,
+  );
+  if (stepErr) {
+    showDialog('Tahap Funnel Tidak Valid', stepErr);
+    return stepErr;
+  }
+  if (n.stage !== 'approached' && isUnder1Bracket(ageBracket)) {
+    showDialog(UNDER1_TITLE, UNDER1_MESSAGE);
+    return 'under-1 consumer';
+  }
+  return null;
 }
 
 /** True while this visit's own check-in is still in the offline queue — the
@@ -2601,19 +2645,8 @@ export const useStore = create<StoreState>()((set, get) => ({
 
   upsertConsumer: async (c) => {
     const before = get().consumers.find((x) => x.id === c.id);
-    // Same rules as consumers_server_checks (0015) — checked here first for a
-    // clear message without a round-trip (the server also sees other NCs' rows).
-    if (!c.erasedAt && (!before || before.waContact !== c.waContact)) {
-      if (!isValidWa(c.waContact)) {
-        showDialog('Nomor WhatsApp Tidak Valid', 'Gunakan nomor HP Indonesia, mis. 0812xxxxxxxx.');
-        return 'invalid wa';
-      }
-      const key = normalizeWa(c.waContact);
-      if (get().consumers.some((x) => x.id !== c.id && !x.erasedAt && normalizeWa(x.waContact) === key)) {
-        showDialog('Konsumen Sudah Terdaftar', 'Nomor WhatsApp ini sudah terdaftar sebagai konsumen. Buka data konsumen yang ada.');
-        return 'duplicate wa';
-      }
-    }
+    const problem = consumerProblem(get, c);
+    if (problem) return problem;
     set({ consumers: upsertById(get().consumers, c) });
     const fields = {
       name: c.name,
@@ -2648,25 +2681,8 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   addNtgGwp: async (n) => {
-    if (visitPendingSync(get, n.visitId)) {
-      showVisitPendingDialog();
-      return 'visit not synced yet';
-    }
-    // Forward-only funnel — mirrors ntg_gwp_progression_check (0015).
-    const stepErr = funnelStepError(
-      get().ntgGwps.filter((g) => g.consumerId === n.consumerId).map((g) => g.stage),
-      n.stage,
-    );
-    if (stepErr) {
-      showDialog('Tahap Funnel Tidak Valid', stepErr);
-      return stepErr;
-    }
-    // PRD §6 / PP 33/2012 — also enforced by ntg_gwp_under1_check (0014).
-    const consumer = get().consumers.find((c) => c.id === n.consumerId);
-    if (n.stage !== 'approached' && consumer && isUnder1Bracket(consumer.childAgeBracket)) {
-      showDialog(UNDER1_TITLE, UNDER1_MESSAGE);
-      return 'under-1 consumer';
-    }
+    const problem = ntgStepProblem(get, n, get().consumers.find((c) => c.id === n.consumerId)?.childAgeBracket);
+    if (problem) return problem;
     set({ ntgGwps: [n, ...get().ntgGwps] });
     // Funnel history is append-only (ntg_gwp_insert policy, 0008 migration).
     const { error } = await supabase.from('ntg_gwp').insert({
@@ -2682,6 +2698,56 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (error) {
       set({ ntgGwps: get().ntgGwps.filter((x) => x.id !== n.id) });
       showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
+      return error.message;
+    }
+    return null;
+  },
+
+  saveConsumerWithStep: async (c, step) => {
+    const before = get().consumers.find((x) => x.id === c.id);
+    const problem = consumerProblem(get, c) ?? (step ? ntgStepProblem(get, step, c.childAgeBracket) : null);
+    if (problem) return problem;
+
+    set({ consumers: upsertById(get().consumers, c), ...(step ? { ntgGwps: [step, ...get().ntgGwps] } : {}) });
+    const { error } = await supabase.rpc('save_consumer_with_step', {
+      p_consumer: {
+        id: c.id,
+        name: c.name,
+        wa_contact: c.waContact,
+        consent: c.consent,
+        consent_version: c.consent ? CONSENT_VERSION : null,
+        child_age_bracket: c.childAgeBracket,
+        current_brand: c.currentBrand ?? null,
+        quiz_result: c.quizResult ?? null,
+        created_at: new Date(c.createdAt).toISOString(),
+      },
+      p_is_new: !before,
+      p_step: step
+        ? {
+            id: step.id,
+            visit_id: step.visitId,
+            stage: step.stage,
+            gwp_item: step.gwpItem ?? null,
+            gwp_qty: step.gwpQty ?? null,
+            offtake_id: step.offtakeId ?? null,
+            created_at: new Date(step.createdAt).toISOString(),
+          }
+        : null,
+    });
+    if (error?.code === 'PGRST202') {
+      // Migration 0017 not applied yet: the previous two-step save.
+      set({
+        consumers: before ? get().consumers.map((x) => (x.id === c.id ? before : x)) : get().consumers.filter((x) => x.id !== c.id),
+        ntgGwps: step ? get().ntgGwps.filter((x) => x.id !== step.id) : get().ntgGwps,
+      });
+      return (await get().upsertConsumer(c)) ?? (step ? get().addNtgGwp(step) : null);
+    }
+    if (error) {
+      set({
+        consumers: before ? get().consumers.map((x) => (x.id === c.id ? before : x)) : get().consumers.filter((x) => x.id !== c.id),
+        ntgGwps: step ? get().ntgGwps.filter((x) => x.id !== step.id) : get().ntgGwps,
+      });
+      showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data konsumen. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
     return null;

@@ -18,7 +18,7 @@ import { useDataRefresh } from '../components/useDataRefresh';
 import { REPORT_TYPE_LABEL } from '../config';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { attritionSignal, todaysReportStatus } from '../utils/kpi';
-import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
+import { getRange, inRange, monthKey, monthRange, PERIODS, PeriodKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
 import { photoStoragePath } from '../utils/photoRef';
 import { openReportPhoto } from '../utils/storage';
@@ -89,7 +89,8 @@ export default function ValidationQueueScreen() {
   /** 'exceptions' = the PRD §8 exception queue; 'all' = every report in scope, for spot checks / manual flags. */
   const [view, setView] = useState<'exceptions' | 'all'>('exceptions');
 
-  const range = useMemo(() => getRange(periodKey, new Date().getMonth()), [periodKey]);
+  const range = useMemo(() => getRange(periodKey), [periodKey]);
+  const thisMonth = monthKey();
 
   const ncUsers = useMemo(
     () => scopeUsers({ users, teams }, me).filter((u) => u.role === 'nc'),
@@ -145,14 +146,18 @@ export default function ValidationQueueScreen() {
       ncUsers.map((nc) => {
         const todays = todaysReportStatus(nc.id, visits, stockTakingRows, offtakeRows, ntgGwps);
         const risk = attritionSignal(nc.id, attendances, visits, stockTakingRows, offtakeRows, ntgGwps);
-        const offtakeInRange = offtakeRows
-          .filter((r) => visitsById.get(r.visitId)?.ncId === nc.id && inRange(r.createdAt, range))
-          .reduce((t, r) => t + r.unitsSold, 0);
-        const periodKeyMonthly = monthKey();
-        const target = targets.find((t) => t.ncId === nc.id && t.periodKey === periodKeyMonthly)?.offtakeTarget;
-        return { nc, todays, risk, offtakeInRange, target };
+        const units = (r: { from: number; to: number }) =>
+          offtakeRows
+            .filter((o) => visitsById.get(o.visitId)?.ncId === nc.id && inRange(o.createdAt, r))
+            .reduce((t, o) => t + o.unitsSold, 0);
+        const offtakeInRange = units(range);
+        // Targets are monthly: compare them with this month so far, never with
+        // the selected day/week (that made every NC look far behind target).
+        const offtakeMonth = units(monthRange(thisMonth));
+        const target = targets.find((t) => t.ncId === nc.id && t.periodKey === thisMonth)?.offtakeTarget;
+        return { nc, todays, risk, offtakeInRange, offtakeMonth, target };
       }),
-    [ncUsers, visits, stockTakingRows, offtakeRows, ntgGwps, attendances, visitsById, range, targets],
+    [ncUsers, visits, stockTakingRows, offtakeRows, ntgGwps, attendances, visitsById, range, targets, thisMonth],
   );
   const atRiskCount = rollup.filter((r) => r.risk.atRisk).length;
 
@@ -263,12 +268,17 @@ export default function ValidationQueueScreen() {
           {ncUsers.length === 0 ? (
             <Empty text="Belum ada NC di scope Anda." />
           ) : (
-            rollup.map(({ nc, todays, risk, offtakeInRange, target }) => (
+            rollup.map(({ nc, todays, risk, offtakeInRange, offtakeMonth, target }) => (
               <ListRow
                 key={nc.id}
                 title={nc.name}
                 subtitle={`Laporan hari ini: ${[todays.stockTaking && 'Stock', todays.offtake && 'Offtake', todays.ntgGwp && 'NTG&GWP'].filter(Boolean).join(', ') || 'Belum ada'}`}
-                meta={target ? `Offtake: ${offtakeInRange}/${target}` : `Offtake: ${offtakeInRange} (target belum diset)`}
+                meta={
+                  `Offtake periode ini: ${offtakeInRange} · ` +
+                  (target
+                    ? `bulan ini ${offtakeMonth}/${target} (${Math.round((100 * offtakeMonth) / target)}%)`
+                    : `bulan ini ${offtakeMonth} (target belum diset)`)
+                }
                 trailing={
                   risk.atRisk ? (
                     <StatusBadge label="Perlu Perhatian" color="#B45309" icon="alert-circle" />

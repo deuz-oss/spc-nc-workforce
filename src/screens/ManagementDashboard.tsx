@@ -8,15 +8,15 @@ import { HistoryNotice } from '../components/HistoryNotice';
 import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
-import { getRange, PERIODS, PeriodKey, inRange, monthKey } from '../utils/period';
+import { getRange, inRange, monthKey, monthLabel, PERIODS, PeriodKey, programParts, shiftMonth } from '../utils/period';
 import { toCsv } from '../utils/csv';
 import { fmtDateTime } from '../utils/format';
 import { exportCsv } from '../utils/export';
 
 /** Short "d/M" label for trend bar axes — fmtDate's "23 Sep 2026" is too wide for a 26px bar column. */
 function dayLabel(ts: number): string {
-  const d = new Date(ts);
-  return `${d.getDate()}/${d.getMonth() + 1}`;
+  const { d, m } = programParts(ts); // program (WIB) day, like the buckets themselves
+  return `${d}/${m + 1}`;
 }
 
 /**
@@ -103,7 +103,11 @@ export default function ManagementDashboard() {
   const [tlId, setTlId] = useState<string | null>(null);
   const [storeQuery, setStoreQuery] = useState('');
 
-  const range = useMemo(() => getRange(periodKey, new Date().getMonth()), [periodKey]);
+  // The month shown by "Bulanan" and used for targets / scorecards — any month,
+  // any year (older months load via the history notice below).
+  const currentMonth = monthKey();
+  const [month, setMonth] = useState(currentMonth);
+  const range = useMemo(() => getRange(periodKey, month), [periodKey, month]);
   const visitsById = useMemo(() => new Map(visits.map((v) => [v.id, v])), [visits]);
 
   const cities = useMemo(() => Array.from(new Set(stores.map((s) => s.city))).filter(Boolean).sort(), [stores]);
@@ -147,7 +151,7 @@ export default function ManagementDashboard() {
   const sosPct = totalFacing > 0 ? Math.round((100 * ownFacing) / totalFacing) : null;
   const offtakeSum = offtakeInRange.reduce((t, r) => t + r.unitsSold, 0);
 
-  const monthlyKey = monthKey();
+  const monthlyKey = month;
   const targetSum = targets
     .filter((t) => t.periodKey === monthlyKey && (t.storeId === null || storeIds.has(t.storeId)))
     .reduce((sum, t) => sum + (t.offtakeTarget ?? 0), 0);
@@ -248,6 +252,15 @@ export default function ManagementDashboard() {
               <Chip key={p.key} label={p.label} active={periodKey === p.key} onPress={() => setPeriodKey(p.key)} />
             ))}
           </View>
+          <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center', marginTop: 8 }}>
+            <Btn small variant="outline" title="‹" onPress={() => setMonth((m) => shiftMonth(m, -1))} />
+            <Text style={[T.label, { minWidth: 80, textAlign: 'center' }]}>{monthLabel(month)}</Text>
+            <Btn small variant="outline" title="›" disabled={month >= currentMonth} onPress={() => setMonth((m) => shiftMonth(m, 1))} />
+            {month !== currentMonth && <Btn small variant="outline" title="Bulan ini" onPress={() => setMonth(currentMonth)} />}
+          </View>
+          <Muted style={{ marginTop: 4 }}>
+            Bulan untuk periode "Bulanan", target & skorkartu{periodKey !== 'monthly' ? ' (periode harian/mingguan selalu hari/minggu ini)' : ''}.
+          </Muted>
           <HistoryNotice needsFrom={range.from} />
         </Field>
         <Field label="Kota">

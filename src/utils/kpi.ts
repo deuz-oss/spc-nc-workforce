@@ -2,7 +2,7 @@ import { Attendance, NtgGwp, OfftakeRow, StockTakingRow, Visit } from '../types'
 import { C } from '../theme';
 import { AUTO_CLOSE_ATTENDANCE_HOURS } from '../config';
 import { polylineKm } from './geo';
-import { inRange } from './period';
+import { inRange, programDayKey, programDayStart } from './period';
 
 /**
  * Phase 1 scope only: attendance/visit-derived discipline metrics (PRD §7).
@@ -53,7 +53,7 @@ export function computeNcStat(
   const vs = vst.filter((v) => v.ncId === userId && inRange(v.checkInAt, range));
   const closed = vs.filter((v) => v.checkOutAt);
 
-  const days = new Set(a.map((x) => new Date(x.clockInAt).toDateString())).size;
+  const days = new Set(a.map((x) => programDayKey(x.clockInAt))).size;
   // A session still open counts up to now, but never beyond the point where the
   // server auto-closes it (0016) — a forgotten clock-out must not inflate hours.
   const maxOpenMs = AUTO_CLOSE_ATTENDANCE_HOURS * 3600000;
@@ -116,9 +116,10 @@ export function reportStatusForDay(
   offtake: OfftakeRow[],
   ntgGwps: NtgGwp[],
 ): TodaysReportStatus {
-  const key = day.toDateString();
+  // Program (WIB) days — the same days the server's scorecards use.
+  const key = programDayKey(day.getTime());
   const dayVisitIds = new Set(
-    visits.filter((v) => v.ncId === ncId && new Date(v.checkInAt).toDateString() === key).map((v) => v.id),
+    visits.filter((v) => v.ncId === ncId && programDayKey(v.checkInAt) === key).map((v) => v.id),
   );
   const activeVisit = visits.find((v) => v.ncId === ncId && !v.checkOutAt);
   return {
@@ -158,11 +159,12 @@ export function attritionSignal(
 ): AttritionSignal {
   let noAttendanceDays = 0;
   let noReportDays = 0;
+  const todayStart = programDayStart(today.getTime());
   for (let i = 0; i < 7; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() - i);
-    const key = d.toDateString();
-    const hasAttendance = attendances.some((a) => a.userId === ncId && new Date(a.clockInAt).toDateString() === key);
+    // Midday of the i-th WIB day back — any instant inside the day works.
+    const d = new Date(todayStart - i * 86400000 + 12 * 3600000);
+    const key = programDayKey(d.getTime());
+    const hasAttendance = attendances.some((a) => a.userId === ncId && programDayKey(a.clockInAt) === key);
     if (!hasAttendance) noAttendanceDays++;
     const status = reportStatusForDay(d, ncId, visits, stockTaking, offtake, ntgGwps);
     if (!status.stockTaking && !status.offtake && !status.ntgGwp) noReportDays++;
@@ -177,13 +179,19 @@ export function outlierCount(offtake: OfftakeRow[], range: { from: number; to: n
   return offtake.filter((o) => o.isOutlier && inRange(o.createdAt, range)).length;
 }
 
+/**
+ * Field-discipline status (PRD §7: working hours, geofence, valid visits) —
+ * computed on the phone from attendance/visits only. NOT the official PRD §9
+ * scorecard (server-computed, weighted KPIs incl. offtake), so its labels say
+ * "Disiplin" and never reuse the scorecard's wording: the two can differ.
+ */
 export function statusOf(s: NcStat): { label: string; color: string } {
-  if (s.days === 0) return { label: 'Tanpa Absensi', color: C.muted };
+  if (s.days === 0) return { label: 'Belum ada absensi', color: C.muted };
   let fails = 0;
   if (s.workMs < s.targetWorkMs * 0.75) fails++;
   if (s.fencePct != null && s.fencePct < TARGETS.fencePct) fails++;
   if (s.validVisitPct != null && s.validVisitPct < TARGETS.validVisitPct) fails++;
-  if (fails === 0) return { label: 'On Track', color: C.ok };
-  if (fails === 1) return { label: 'Perlu Perhatian', color: C.warn };
-  return { label: 'Di Bawah Target', color: C.accent };
+  if (fails === 0) return { label: 'Disiplin baik', color: C.ok };
+  if (fails === 1) return { label: 'Disiplin perlu perhatian', color: C.warn };
+  return { label: 'Disiplin di bawah target', color: C.accent };
 }

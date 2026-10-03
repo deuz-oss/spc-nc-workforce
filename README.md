@@ -56,7 +56,7 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0016`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0017`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
@@ -66,7 +66,9 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
    `0015_consumer_privacy_and_funnel.sql` (forward-only funnel, unique WhatsApp, consent record + erasure, Reckitt
    PII limits, private push tokens — **redeploy `send-push` with it**) and
    `0016_audit_log_outlier_autoclose.sql` (admin audit log, offtake outlier window, hourly auto-close of forgotten
-   sessions — **redeploy `admin-users` with it**) are required.
+   sessions — **redeploy `admin-users` with it**) and
+   `0017_scorecard_fairness_atomic_consumer.sql` (attendance KPI on working days, no score without computable KPIs,
+   consumer + funnel step saved atomically) are required.
    Also in **Authentication → Providers → Email**, set the minimum password length to **8** (matches `MIN_PASSWORD`,
    `src/utils/password.ts` — the self-service password change goes straight to Supabase Auth).
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
@@ -182,6 +184,17 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
 - 🟨 **Maps** load Leaflet with Subresource Integrity and show the required attribution. Tiles default to
   OpenStreetMap's community server, which isn't meant for production scale — set `EXPO_PUBLIC_MAP_TILE_URL` /
   `EXPO_PUBLIC_MAP_TILE_ATTRIBUTION` (see `.env.example`) to a keyed provider before go-live.
+- ✅ **One program clock: WIB.** Every day/week/month boundary in the app (dashboards, "today's reports",
+  attrition signal, targets/scorecard months, history window) is computed in WIB — the zone the server uses for
+  scorecards, outliers and report checks — so NCs in WITA/WIT cities (or with a phone set to another zone) land on
+  the same day as their scorecard. Displayed clock times stay in the phone's own zone. See `src/utils/period.ts`.
+- ✅ **Scores that mean what they say** (0017): the NC attendance KPI divides by working days (Mon–Sat —
+  `work_days_between`; change it if the schedule differs), and a role with no computable KPI (Data Analyst; a Lead
+  Trainer without certifications that month) gets no scorecard instead of a fabricated 0. The NC dashboard's
+  phone-side figure is labelled field *discipline* and shown apart from the official server scorecard. The
+  management dashboard has a month picker (any year); the Validasi rollup compares month-to-date offtake with the
+  monthly target.
+- ✅ **Consumer + funnel step are saved in one transaction** (`save_consumer_with_step`, 0017).
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further
@@ -272,7 +285,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0016`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0017`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -303,7 +316,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 41 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 42 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)

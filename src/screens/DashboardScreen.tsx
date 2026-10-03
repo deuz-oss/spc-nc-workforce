@@ -17,7 +17,7 @@ import {
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
-import { getRange } from '../utils/period';
+import { getRange, monthKey } from '../utils/period';
 import { fmtDurShort, fmtKm } from '../utils/format';
 import {
   Coords,
@@ -95,13 +95,26 @@ function NcStatsCard() {
   const me = useCurrentUser()!;
   const attendances = useStore((s) => s.attendances);
   const visits = useStore((s) => s.visits);
-  const range = getRange('monthly', new Date().getMonth());
+  const scorecards = useStore((s) => s.scorecards);
+  const navigation = useNavigation<any>();
+  const range = getRange('monthly');
   const stat = computeNcStat(me.id, me.name, attendances, visits, range);
   const status = statusOf(stat);
+  // The official PRD §9 score is the server's (nightly); the card above it is
+  // only field discipline from this phone's data — shown apart, labelled apart.
+  const official = scorecards.find((sc) => sc.subjectId === me.id && sc.periodKey === monthKey());
 
   return (
     <Card>
       <SectionHeader title="Ringkasan Bulan Ini" subtitle={status.label} />
+      <Muted style={{ marginTop: 2 }}>
+        {official
+          ? `Skorkartu resmi bulan ini: ${Math.round(official.score)} (dihitung server tiap malam)`
+          : 'Skorkartu resmi bulan ini belum dihitung (dihitung server tiap malam).'}
+      </Muted>
+      <View style={{ alignSelf: 'flex-start', marginTop: 6 }}>
+        <Btn small variant="outline" title="Lihat Skorkartu" onPress={() => navigation.navigate('Scorecard')} />
+      </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
         <StatCard title="Working Hours" value={fmtDurShort(stat.workMs)} color={status.color} />
         <StatCard title="CFT" value={fmtDurShort(stat.cftMs)} sub="Customer Facing Time" />

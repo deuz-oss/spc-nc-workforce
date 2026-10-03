@@ -7,8 +7,9 @@ import type { Attendance, StockTakingRow, Visit } from '../types';
 
 const MIN = 60000;
 const HOUR = 60 * MIN;
-const day = (d: number, h = 9, m = 0) => new Date(2026, 8, d, h, m).getTime(); // September 2026, local time
-const SEPT = { from: new Date(2026, 8, 1).getTime(), to: new Date(2026, 9, 1).getTime() };
+// September 2026, WIB wall-clock (program time) — independent of the machine's zone.
+const day = (d: number, h = 9, m = 0) => Date.UTC(2026, 8, d, h - 7, m);
+const SEPT = { from: Date.UTC(2026, 8, 1, -7), to: Date.UTC(2026, 9, 1, -7) };
 
 function visit(id: string, checkIn: number, stayMin: number | null, geoValid = true, ncId = 'nc1'): Visit {
   return {
@@ -90,7 +91,7 @@ describe('computeNcStat', () => {
     const s = computeNcStat('nc1', 'Budi', [], [], SEPT);
     assert.equal(s.validVisitPct, null);
     assert.equal(s.fencePct, null);
-    assert.equal(statusOf(s).label, 'Tanpa Absensi');
+    assert.equal(statusOf(s).label, 'Belum ada absensi');
   });
 });
 
@@ -98,14 +99,14 @@ describe('statusOf', () => {
   it('On Track when hours, geo-fence and valid visits all meet target', () => {
     const att = [attendance('a1', day(1), 8)];
     const s = computeNcStat('nc1', 'Budi', att, [visit('v', day(1, 10), 20)], SEPT);
-    assert.equal(statusOf(s).label, 'On Track');
+    assert.equal(statusOf(s).label, 'Disiplin baik');
   });
 
   it('escalates with the number of missed targets', () => {
     const oneMiss = computeNcStat('nc1', 'Budi', [attendance('a1', day(1), 8, false)], [], SEPT);
-    assert.equal(statusOf(oneMiss).label, 'Perlu Perhatian');
+    assert.equal(statusOf(oneMiss).label, 'Disiplin perlu perhatian');
     const twoMiss = computeNcStat('nc1', 'Budi', [attendance('a1', day(1), 1, false)], [], SEPT);
-    assert.equal(statusOf(twoMiss).label, 'Di Bawah Target');
+    assert.equal(statusOf(twoMiss).label, 'Disiplin di bawah target');
   });
 });
 

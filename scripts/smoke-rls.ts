@@ -534,6 +534,20 @@ async function main() {
     expect((await step('quiz_completed', 5)).error, 'funnel moved backwards');
   });
 
+  await check('a consumer and its funnel step save together or not at all (0017)', async () => {
+    const id = `${RUN}_cons_atomic`;
+    const res = await nc.client.rpc('save_consumer_with_step', {
+      p_consumer: { id, name: 'Smoke Atomic', wa_contact: '081100000009', consent: true, child_age_bracket: '1-2tahun' },
+      p_is_new: true,
+      p_step: { id: `${RUN}_ntg_atomic`, visit_id: visitId, stage: 'gwp_given', created_at: inVisitAt }, // invalid first step
+    });
+    if (res.error && /save_consumer_with_step/.test(res.error.message)) throw new Error('save_consumer_with_step() missing — run migration 0017');
+    expect(res.error, 'GWP as the first funnel step was accepted');
+    const { count } = await admin.from('consumers').select('id', { count: 'exact', head: true }).eq('id', id);
+    if (count) created.consumers.push(id);
+    expect(count === 0, 'the consumer was saved although its funnel step was rejected');
+  });
+
   await check('consent is server-stamped and required; a WhatsApp number registers once (0015)', async () => {
     const { data: c } = await admin.from('consumers').select('consent_at, consent_by').eq('id', consumerId).single();
     expect(c?.consent_at && c.consent_by === nc.id, `consent not recorded by the server (${JSON.stringify(c)})`);
@@ -742,6 +756,12 @@ async function main() {
     expectOk(await analyst.client.rpc('compute_scorecards', { p_period_key: TEST_PERIOD }), 'analyst compute_scorecards');
     const { data } = await admin.from('scorecards').select('breakdown').eq('subject_id', nc.id).eq('period_key', TEST_PERIOD).single();
     expect(data, 'no scorecard written for demo NC');
+    const { count } = await admin
+      .from('scorecards')
+      .select('id', { count: 'exact', head: true })
+      .eq('subject_id', analyst.id)
+      .eq('period_key', TEST_PERIOD);
+    expect(count === 0, 'Data Analyst got a scorecard with no computable KPI — run migration 0017');
   });
 }
 
