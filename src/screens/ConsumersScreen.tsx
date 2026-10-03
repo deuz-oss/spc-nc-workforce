@@ -49,7 +49,7 @@ export default function ConsumersScreen() {
     <View role="main" style={{ flex: 1 }}>
       <View style={{ padding: 16, gap: 10 }}>
         <SectionHeader title={`Konsumen NTG & GWP (${scoped.length})`} />
-        <Input placeholder="Cari nama atau kontak WhatsApp..." value={q} onChangeText={setQ} />
+        <Input placeholder="Cari nama atau kontak WhatsApp..." value={q} onChangeText={setQ} accessibilityLabel="Cari konsumen" />
         {me.role === 'nc' && visitId && storeId && (
           <Btn
             title="+ Konsumen Baru untuk Kunjungan Ini"
@@ -61,7 +61,12 @@ export default function ConsumersScreen() {
         data={filtered}
         keyExtractor={(c) => c.id}
         contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 10 }}
-        ListEmptyComponent={<Empty text="Belum ada data konsumen." />}
+        ListEmptyComponent={
+          <Empty
+            icon={q.trim() ? 'search-outline' : 'people-outline'}
+            text={q.trim() ? `Tidak ada konsumen yang cocok dengan “${q.trim()}”.` : 'Belum ada data konsumen.'}
+          />
+        }
         renderItem={({ item: c }) => {
           const stage = latestStage(c);
           return (

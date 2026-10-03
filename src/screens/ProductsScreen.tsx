@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Badge, Btn, Card, Chip, Empty, Field, Input, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { PRODUCT_MANAGER_ROLES } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Product } from '../types';
 
@@ -161,10 +161,10 @@ export default function ProductsScreen() {
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
             <View style={{ flexShrink: 1 }}>
-              <Text style={{ fontFamily: F.semi, fontSize: 13.5, color: p.active ? C.text : C.muted }} numberOfLines={1}>
+              <Text style={[T.h3, { color: p.active ? C.text : C.muted }]} numberOfLines={1}>
                 {p.name}
               </Text>
-              <Text style={{ fontFamily: F.reg, fontSize: 12, color: C.muted }}>
+              <Text style={T.meta}>
                 {p.sku}
                 {p.category ? ` · ${p.category}` : ''}
               </Text>

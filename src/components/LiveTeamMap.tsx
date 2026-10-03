@@ -1,7 +1,7 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { View } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
-import { Badge, Empty, H, ListRow, Muted } from './ui';
+import { Badge, Empty, ErrorState, H, ListRow, Muted, SkeletonBlock } from './ui';
 import { LeafletMap, MapMarker } from './LeafletMap';
 import { C } from '../theme';
 import { useStore } from '../store/useStore';
@@ -32,7 +32,7 @@ export function LiveTeamMap({ ncUsers, visits, stores }: { ncUsers: User[]; visi
   const fetchLivePositions = useStore((s) => s.fetchLivePositions);
   const [positions, setPositions] = useState<LivePosition[] | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
 
   const load = useCallback(async () => {
     try {
@@ -53,8 +53,8 @@ export function LiveTeamMap({ ncUsers, visits, stores }: { ncUsers: User[]; visi
       return () => clearInterval(t);
     }, [load]),
   );
-  // Visits change via realtime / refreshData — re-evaluate "in store" labels.
-  useEffect(() => setNow(Date.now()), [visits]);
+  // "In store" labels follow `visits` directly (rows below are recomputed on
+  // every render); `now` only ages positions and is refreshed with each poll.
 
   const ncById = new Map(ncUsers.map((u) => [u.id, u]));
   const rows = (positions ?? [])
@@ -79,13 +79,13 @@ export function LiveTeamMap({ ncUsers, visits, stores }: { ncUsers: User[]; visi
     <View style={{ gap: 8 }}>
       <H>Peta Live Tim</H>
       {error ? (
-        <Muted style={{ color: C.accent }}>
-          Gagal memuat posisi tim{/function .*live_positions/i.test(error) ? ' — migrasi 0012 belum dijalankan.' : '.'}
-        </Muted>
+        <ErrorState text="Posisi tim belum bisa dimuat. Periksa koneksi internet — dicoba lagi otomatis tiap menit." />
       ) : positions == null ? (
-        <Muted>Memuat posisi tim…</Muted>
+        <View role="status" aria-label="Memuat posisi tim">
+          <SkeletonBlock height={200} />
+        </View>
       ) : rows.length === 0 ? (
-        <Empty text="Belum ada anggota tim yang clock-in saat ini." />
+        <Empty icon="people-outline" text="Belum ada anggota tim yang clock-in saat ini." />
       ) : (
         <>
           <Muted>
@@ -107,8 +107,7 @@ export function LiveTeamMap({ ncUsers, visits, stores }: { ncUsers: User[]; visi
           </View>
           {rows.some((r) => r.state === 'stale') && (
             <Muted>
-              "Tidak ada update" = tidak ada titik GPS &gt;{STALE_AFTER_MIN} menit (HP mati, GPS nonaktif, atau app ditutup
-              paksa).
+              {`“Tidak ada update” = tidak ada titik GPS lebih dari ${STALE_AFTER_MIN} menit (HP mati, GPS nonaktif, atau app ditutup paksa).`}
             </Muted>
           )}
         </>

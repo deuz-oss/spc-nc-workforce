@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useAppRoute } from '../navigation';
 import { Card, Empty, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { HistoryNotice } from '../components/HistoryNotice';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { useStore } from '../store/useStore';
 import { toCsv } from '../utils/csv';
 import { exportCsv } from '../utils/export';
@@ -80,8 +80,8 @@ export default function SurveyResultsScreen() {
               q.options.map((o) => (
                 <View key={o.option} style={{ gap: 4 }}>
                   <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
-                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text, flexShrink: 1 }}>{o.option}</Text>
-                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.muted }}>
+                    <Text style={[T.label, { flexShrink: 1 }]}>{o.option}</Text>
+                    <Text style={[T.label, { color: C.muted }]}>
                       {o.count} · {o.pct}%
                     </Text>
                   </View>
@@ -96,7 +96,7 @@ export default function SurveyResultsScreen() {
               <View style={{ gap: 6 }}>
                 {q.answers.slice(0, 50).map((a) => (
                   <View key={a.responseId} style={{ borderLeftWidth: 3, borderColor: C.border, paddingLeft: 8 }}>
-                    <Text style={{ fontFamily: F.reg, fontSize: 13, color: C.text }}>{a.answer}</Text>
+                    <Text style={T.body}>{a.answer}</Text>
                     <Muted>{fmtDateTime(a.createdAt)}</Muted>
                   </View>
                 ))}

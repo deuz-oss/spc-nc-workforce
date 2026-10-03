@@ -27,13 +27,13 @@ export default function SurveyListScreen() {
   return (
     <View role="main" style={{ flex: 1 }}>
       <View style={{ padding: 16, gap: 10 }}>
-        <SectionHeader title={`Survey Tersedia (${surveys.length})`} subtitle="Ad hoc / campaign-driven (PRD §5.7)" />
+        <SectionHeader title={`Survey Tersedia (${surveys.length})`} subtitle="Survey yang sedang berjalan" />
       </View>
       <FlatList
         data={surveys}
         keyExtractor={(s) => s.id}
         contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 10 }}
-        ListEmptyComponent={<Empty text="Belum ada survey yang dibuat Data Analyst." />}
+        ListEmptyComponent={<Empty icon="clipboard-outline" text="Tidak ada survey yang sedang berjalan." />}
         renderItem={({ item: s }) => (
           <ListRow
             onPress={() => navigation.navigate('SurveyRespond', { surveyId: s.id, visitId, storeId })}

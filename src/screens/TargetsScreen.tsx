@@ -4,7 +4,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StatCard, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { TARGET_MANAGER_ROLES } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Target, User } from '../types';
 import { parseCsv, toCsv } from '../utils/csv';
@@ -76,14 +76,14 @@ const TargetRow = memo(function TargetRow({
     >
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}>
         <View style={{ flexShrink: 1 }}>
-          <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>
+          <Text style={T.label} numberOfLines={1}>
             {nc.name}
           </Text>
-          <Text style={{ fontFamily: F.reg, fontSize: 11.5, color: C.muted }} numberOfLines={1}>
+          <Text style={T.meta} numberOfLines={1}>
             {nc.username} · {teamName}
           </Text>
         </View>
-        {dirty && <Text style={{ fontFamily: F.semi, fontSize: 11.5, color: C.warn }}>Belum disimpan</Text>}
+        {dirty && <Text style={[T.badge, { color: C.warnStrong }]}>Belum disimpan</Text>}
       </View>
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <View style={{ flex: 1 }}>
@@ -320,7 +320,7 @@ export default function TargetsScreen() {
 
   const header = (
     <View style={{ gap: 12, paddingBottom: 12 }}>
-      <SectionHeader title="Target Bulanan NC" subtitle="Target offtake & alokasi GWP per NC (PRD §9)" />
+      <SectionHeader title="Target Bulanan NC" subtitle="Target offtake dan alokasi GWP per NC" />
 
       <Card style={{ gap: 10 }}>
         <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>

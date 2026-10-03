@@ -7,7 +7,7 @@ import { useDataRefresh } from '../components/useDataRefresh';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { ShowMore } from '../components/ShowMore';
 import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
-import { C, F, T } from '../theme';
+import { C, T } from '../theme';
 import { ManagementSummary, useCurrentUser, useStore } from '../store/useStore';
 import {
   getRange,
@@ -54,7 +54,7 @@ function TrendBars({ title, data }: { title: string; data: Array<{ label: string
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 90, paddingVertical: 4 }}>
             {data.map((d, i) => (
-              <View key={i} style={{ alignItems: 'center', width: 26 }}>
+              <View key={i} style={{ alignItems: 'center', width: 38 }}>
                 <View
                   style={{
                     width: 16,
@@ -63,7 +63,7 @@ function TrendBars({ title, data }: { title: string; data: Array<{ label: string
                     borderRadius: 3,
                   }}
                 />
-                <Text style={{ fontSize: 9, color: C.muted, fontFamily: F.reg, marginTop: 4 }} numberOfLines={1}>
+                <Text style={[T.meta, { marginTop: 4 }]} numberOfLines={1}>
                   {d.label}
                 </Text>
               </View>
@@ -314,7 +314,7 @@ export default function ManagementDashboard() {
             {month !== currentMonth && <Btn small variant="outline" title="Bulan ini" onPress={() => setMonth(currentMonth)} />}
           </View>
           <Muted style={{ marginTop: 4 }}>
-            Bulan untuk periode "Bulanan", target & skorkartu{periodKey !== 'monthly' ? ' (periode harian/mingguan selalu hari/minggu ini)' : ''}.
+            Bulan untuk periode “Bulanan”, target & skorkartu{periodKey !== 'monthly' ? ' (periode harian/mingguan selalu hari/minggu ini)' : ''}.
           </Muted>
           {server ? (
             <Muted style={{ marginTop: 4 }}>Angka dihitung di server untuk seluruh periode.</Muted>
@@ -366,7 +366,7 @@ export default function ManagementDashboard() {
         <Card>
           <SectionHeader
             title="Survey"
-            subtitle="Question set untuk NC (PRD §5.7)"
+            subtitle="Buat dan kelola pertanyaan survey untuk NC"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
           />
         </Card>
@@ -410,7 +410,7 @@ export default function ManagementDashboard() {
         <Card>
           <SectionHeader
             title="Skorkartu Program"
-            subtitle={`Periode ${monthlyKey} · PRD §9`}
+            subtitle={`Periode ${monthlyKey}`}
             action={{ label: 'Lihat Detail', onPress: () => navigation.navigate('Scorecard') }}
           />
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
@@ -496,9 +496,8 @@ export default function ManagementDashboard() {
 
       {hidePii && (
         <Muted>
-          Tampilan Reckitt tidak menampilkan data pribadi konsumen (nama/kontak WhatsApp) — hanya angka agregat
-          NTG/GWP, sesuai PRD §11 dan catatan data minimization UU PDP. Ekspor terjadwal (email mingguan) belum
-          dibangun — butuh infrastruktur email yang belum ada di codebase ini.
+          Tampilan ini tidak memuat data pribadi konsumen (nama, kontak WhatsApp) — hanya angka agregat NTG dan GWP,
+          sesuai prinsip minimisasi data UU PDP.
         </Muted>
       )}
     </ScrollView>

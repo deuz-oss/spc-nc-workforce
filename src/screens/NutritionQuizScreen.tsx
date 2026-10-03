@@ -3,12 +3,12 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, STICKY_FOOTER_SPACE } from '../components/ui';
+import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showToast } from '../components/dialog';
 import { DraftNotice } from '../components/DraftNotice';
 import { draftKey, useDraft } from '../components/useDraft';
 import { CHILD_AGE_BRACKETS, NUTRITION_QUIZ_SURVEY_ID } from '../config';
-import { C, F } from '../theme';
+import { C, T, TOUCH } from '../theme';
 import { useStore } from '../store/useStore';
 import { SurveyQuestion } from '../types';
 import { uid } from '../utils/uuid';
@@ -137,7 +137,7 @@ export default function NutritionQuizScreen() {
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 }}>
         <Ionicons name="alert-circle-outline" size={28} color={C.warn} />
         <Muted style={{ textAlign: 'center' }}>
-          Quick Nutrition Check belum di-setup (survey seed belum dijalankan Data Analyst). Hubungi admin.
+          Quick Nutrition Check belum tersedia. Hubungi TL atau admin Anda.
         </Muted>
       </View>
     );
@@ -212,6 +212,24 @@ export default function NutritionQuizScreen() {
     }
   };
 
+  // One primary action at the bottom (thumb zone), with a way back between questions.
+  const lastQ = QUIZ_QUESTIONS.length - 1;
+  const footer: { title: string; next: () => void; disabled?: boolean; back?: () => void } | null =
+    step === 'consent'
+      ? { title: 'Mulai Quiz', next: () => setStep('age'), disabled: !consent }
+      : step === 'age'
+        ? { title: 'Lanjut', next: () => setStep(bracket?.under1 ? 'under1' : 0), disabled: !bracket, back: () => setStep('consent') }
+        : step === 'under1'
+          ? { title: 'Selesai', next: () => void finishUnder1(), back: () => setStep('age') }
+          : typeof step === 'number'
+            ? {
+                title: step === lastQ ? 'Selesai' : 'Lanjut',
+                next: () => (step === lastQ ? void finishQuiz() : setStep(step + 1)),
+                disabled: QUIZ_QUESTIONS[step].type === 'multiple_choice' && !answers[QUIZ_QUESTIONS[step].id],
+                back: () => setStep(step === 0 ? 'age' : step - 1),
+              }
+            : null;
+
   return (
     <View style={{ flex: 1 }}>
       <ScrollView
@@ -235,19 +253,16 @@ export default function NutritionQuizScreen() {
           <Card>
             <TouchableOpacity
               onPress={() => setConsent((v) => !v)}
-              style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+              style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: TOUCH }}
               accessibilityRole="checkbox"
               accessibilityState={{ checked: consent }}
             >
-              <Ionicons name={consent ? 'checkbox' : 'square-outline'} size={24} color={consent ? C.primaryDark : C.faint} />
-              <Text style={{ flex: 1, fontFamily: F.semi, fontSize: 13, color: C.text }}>
+              <Ionicons name={consent ? 'checkbox' : 'square-outline'} size={28} color={consent ? C.primaryDark : C.muted} />
+              <Text style={[T.body, { flex: 1 }]}>
                 Saya (orang tua/wali) bersedia menjawab beberapa pertanyaan singkat seputar nutrisi anak. Jawaban tidak
                 mencakup data berat/tinggi/tanggal lahir anak dan bukan merupakan diagnosis medis.
               </Text>
             </TouchableOpacity>
-            <View style={{ marginTop: 14 }}>
-              <Btn title="Mulai Quiz" onPress={() => setStep('age')} disabled={!consent} />
-            </View>
           </Card>
         )}
 
@@ -259,13 +274,6 @@ export default function NutritionQuizScreen() {
               {CHILD_AGE_BRACKETS.map((b) => (
                 <Chip key={b.key} label={b.label} active={ageBracket === b.key} onPress={() => setAgeBracket(b.key)} />
               ))}
-            </View>
-            <View style={{ marginTop: 14 }}>
-              <Btn
-                title="Lanjut"
-                disabled={!bracket}
-                onPress={() => setStep(bracket?.under1 ? 'under1' : 0)}
-              />
             </View>
           </Card>
         )}
@@ -279,9 +287,6 @@ export default function NutritionQuizScreen() {
               anjuran dokter/ahli gizi (6-12 bulan). Kami tidak memberikan rekomendasi produk susu pertumbuhan untuk
               kelompok usia ini, dan sesi ini tidak akan memicu follow-up penjualan.
             </Muted>
-            <View style={{ marginTop: 14 }}>
-              <Btn title="Selesai" onPress={finishUnder1} disabled={busy} loading={busy} />
-            </View>
           </Card>
         )}
 
@@ -311,17 +316,6 @@ export default function NutritionQuizScreen() {
                   />
                 </Field>
               )}
-            </View>
-            <View style={{ marginTop: 14 }}>
-              <Btn
-                title={step === QUIZ_QUESTIONS.length - 1 ? 'Selesai' : 'Lanjut'}
-                disabled={
-                  busy ||
-                  (QUIZ_QUESTIONS[step].type === 'multiple_choice' && !answers[QUIZ_QUESTIONS[step].id])
-                }
-                loading={busy}
-                onPress={() => (step === QUIZ_QUESTIONS.length - 1 ? finishQuiz() : setStep(step + 1))}
-              />
             </View>
           </Card>
         )}
@@ -357,6 +351,21 @@ export default function NutritionQuizScreen() {
           </Card>
         )}
       </ScrollView>
+
+      {footer && (
+        <StickyFooter>
+          <View style={{ flexDirection: 'row', gap: 8 }}>
+            {footer.back && (
+              <View style={{ flex: 1 }}>
+                <Btn variant="outline" title="Kembali" onPress={footer.back} disabled={busy} />
+              </View>
+            )}
+            <View style={{ flex: 2 }}>
+              <Btn title={footer.title} onPress={footer.next} disabled={footer.disabled || busy} loading={busy} />
+            </View>
+          </View>
+        </StickyFooter>
+      )}
     </View>
   );
 }

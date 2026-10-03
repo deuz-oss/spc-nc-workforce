@@ -1,10 +1,11 @@
 import React, { useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
+import Constants from 'expo-constants';
 import { Btn, Card, Field, H, Input, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { APP_NAME, ROLE_LABEL, SCORECARD_ROLES } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { MIN_PASSWORD, useCurrentUser, useStore } from '../store/useStore';
 
 function ChangePasswordCard() {
@@ -55,7 +56,7 @@ function ChangePasswordCard() {
           <Field label="Ulangi Password Baru">
             <Input value={confirm} onChangeText={setConfirm} secureTextEntry autoComplete="new-password" />
           </Field>
-          {err && <Text style={{ color: C.accent, fontSize: 12.5, fontFamily: F.semi }}>{err}</Text>}
+          {err && <Text style={[T.label, { color: C.dangerStrong }]}>{err}</Text>}
           <View style={{ flexDirection: 'row', gap: 8 }}>
             <Btn title="Simpan" onPress={save} disabled={busy || !current || !next} loading={busy} />
             <Btn variant="outline" title="Batal" onPress={reset} />
@@ -90,16 +91,15 @@ export default function ProfileScreen() {
         <Card>
           <H>Kinerja</H>
           <View style={{ marginTop: 8 }}>
-            <ListRow title="Lihat Skorkartu" subtitle="Skor KPI per periode (PRD §9)" onPress={() => navigation.navigate('Scorecard')} />
+            <ListRow title="Lihat Skorkartu" subtitle="Nilai kinerja Anda per bulan" onPress={() => navigation.navigate('Scorecard')} />
           </View>
         </Card>
       )}
       <ChangePasswordCard />
       <Card>
-        <H>Tentang</H>
+        <H>Tentang aplikasi</H>
         <Muted style={{ marginTop: 4 }}>
-          {APP_NAME} — dibangun di atas arsitektur spc-field-force (Expo + Supabase) yang sudah tervalidasi,
-          disesuaikan untuk pelaporan konsultasi nutrisi Enfagrow A+.
+          {`${APP_NAME} versi ${Constants.expoConfig?.version ?? '-'}. Untuk masalah akun atau aplikasi, hubungi TL atau admin Anda.`}
         </Muted>
       </Card>
       <Btn

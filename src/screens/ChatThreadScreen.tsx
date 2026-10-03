@@ -3,8 +3,9 @@ import { ScrollView, Text, View } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { setOpenConversation } from '../notifications';
-import { Btn, Input, Muted, StickyFooter } from '../components/ui';
-import { C, F } from '../theme';
+import { Btn, Empty, Input, OfflineNote, StickyFooter } from '../components/ui';
+import { useOnline } from '../components/useOnline';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime } from '../utils/format';
 
@@ -20,6 +21,7 @@ export default function ChatThreadScreen() {
   const sendMessage = useStore((s) => s.sendMessage);
   const markMessagesRead = useStore((s) => s.markMessagesRead);
 
+  const online = useOnline();
   const [text, setText] = useState('');
   const [busy, setBusy] = useState(false);
   const scrollRef = useRef<ScrollView>(null);
@@ -70,7 +72,7 @@ export default function ChatThreadScreen() {
         onContentSizeChange={() => scrollRef.current?.scrollToEnd({ animated: false })}
       >
         {thread.length === 0 ? (
-          <Muted>Belum ada pesan dengan {counterpartName || 'lawan bicara'}. Mulai percakapan di bawah.</Muted>
+          <Empty icon="chatbubbles-outline" text={`Belum ada pesan dengan ${counterpartName || 'lawan bicara'}. Tulis pesan pertama di bawah.`} />
         ) : (
           thread.map((m) => {
             const mine = m.senderId === me.id;
@@ -87,9 +89,9 @@ export default function ChatThreadScreen() {
                     paddingVertical: 8,
                   }}
                 >
-                  <Text style={{ color: mine ? C.onPrimary : C.text, fontFamily: F.reg, fontSize: 14 }}>{m.body}</Text>
+                  <Text style={[T.body, { color: mine ? C.onPrimary : C.text }]}>{m.body}</Text>
                 </View>
-                <Text style={{ fontSize: 10.5, color: C.muted, fontFamily: F.reg, marginTop: 2 }}>{fmtDateTime(m.createdAt)}</Text>
+                <Text style={[T.meta, { marginTop: 2 }]}>{fmtDateTime(m.createdAt)}</Text>
               </View>
             );
           })
@@ -97,11 +99,19 @@ export default function ChatThreadScreen() {
       </ScrollView>
 
       <StickyFooter>
+        {!online && <OfflineNote text="Offline — pesan bisa dikirim lagi setelah ada koneksi." />}
         <View style={{ flexDirection: 'row', gap: 8, alignItems: 'flex-end' }}>
           <View style={{ flex: 1 }}>
-            <Input placeholder="Tulis pesan..." value={text} onChangeText={setText} onSubmitEditing={send} returnKeyType="send" />
+            <Input
+              placeholder="Tulis pesan..."
+              value={text}
+              onChangeText={setText}
+              onSubmitEditing={send}
+              returnKeyType="send"
+              accessibilityLabel={`Pesan untuk ${counterpartName || 'lawan bicara'}`}
+            />
           </View>
-          <Btn title="Kirim" onPress={send} disabled={busy || !text.trim()} loading={busy} small />
+          <Btn title="Kirim" onPress={send} disabled={busy || !text.trim() || !online} loading={busy} small />
         </View>
       </StickyFooter>
     </View>

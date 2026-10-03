@@ -211,8 +211,8 @@ function NcStatsCard() {
         <Btn small variant="outline" title="Lihat Skorkartu" onPress={() => navigation.navigate('Scorecard')} />
       </View>
       <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-        <StatCard title="Working Hours" value={fmtDurShort(stat.workMs)} color={status.color} />
-        <StatCard title="CFT" value={fmtDurShort(stat.cftMs)} sub="Customer Facing Time" />
+        <StatCard title="Jam kerja" value={fmtDurShort(stat.workMs)} color={status.color} />
+        <StatCard title="Waktu di toko" value={fmtDurShort(stat.cftMs)} sub="CFT (customer facing time)" />
         <StatCard title="Kunjungan Toko" value={String(stat.visits)} sub={`${stat.distinctStores} toko berbeda`} />
         <StatCard title="Jarak Tempuh" value={fmtKm(stat.km)} />
       </View>
@@ -464,7 +464,7 @@ export default function DashboardScreen() {
         <Card>
           <SectionHeader
             title="Sertifikasi"
-            subtitle="Catat hasil sesi sertifikasi NC & TL-Coach (PRD §9)"
+            subtitle="Catat hasil sesi sertifikasi NC dan TL"
             action={{ label: 'Buka', onPress: () => navigation.navigate('Certifications') }}
           />
         </Card>
@@ -484,7 +484,7 @@ export default function DashboardScreen() {
         <Card>
           <SectionHeader
             title="Target Bulanan"
-            subtitle="Target offtake & alokasi GWP per NC (PRD §9)"
+            subtitle="Target offtake dan alokasi GWP per NC"
             action={{ label: 'Atur Target', onPress: () => navigation.navigate('Targets') }}
           />
         </Card>
@@ -494,7 +494,7 @@ export default function DashboardScreen() {
         <Card>
           <SectionHeader
             title="Survey"
-            subtitle="Question set untuk NC (PRD §5.7)"
+            subtitle="Buat dan kelola pertanyaan survey untuk NC"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
           />
         </Card>

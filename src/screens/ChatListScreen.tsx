@@ -84,9 +84,10 @@ export default function ChatListScreen() {
 
   return (
     <ScrollView tabIndex={0} role="main" contentContainerStyle={{ padding: 16, gap: 8, maxWidth: 700, width: '100%', alignSelf: 'center' }}>
-      <SectionHeader title="Pesan" subtitle="NC ↔ TL / TL ↔ ARCO (PRD §17)" />
+      <SectionHeader title="Pesan" subtitle={me.role === 'nc' ? 'Pesan dengan Team Leader Anda' : 'Pesan dengan tim Anda'} />
       {rows.length === 0 ? (
         <Empty
+          icon="chatbubbles-outline"
           text={
             me.role === 'nc'
               ? 'Tim kamu belum punya Team Leader — chat belum bisa dipakai.'

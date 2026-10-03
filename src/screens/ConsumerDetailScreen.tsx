@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog, showToast } from '../components/dialog';
+import { announce, showDialog, showToast } from '../components/dialog';
 import { DraftNotice } from '../components/DraftNotice';
 import { draftKey, useDraft } from '../components/useDraft';
 import { useNow } from '../components/useNow';
@@ -16,7 +16,7 @@ import {
   NTG_GWP_STAGE_LABEL,
   UNDER1_MESSAGE,
 } from '../config';
-import { C, F } from '../theme';
+import { C, T, TOUCH } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Consumer, NtgGwp, NtgGwpStage } from '../types';
 import { uid } from '../utils/uuid';
@@ -64,6 +64,8 @@ export default function ConsumerDetailScreen() {
   const [gwpQty, setGwpQty] = useState('');
   const [offtakeId, setOfftakeId] = useState<string | undefined>(undefined);
   const [busy, setBusy] = useState(false);
+  /** Set by the first save attempt — required-field errors show from then on, not while typing. */
+  const [tried, setTried] = useState(false);
   const now = useNow();
 
   // Entered data survives back / app restart; "empty" = nothing changed from what the screen opened with.
@@ -135,8 +137,11 @@ export default function ConsumerDetailScreen() {
 
   const submit = async () => {
     if (readOnly) return;
-    if (!name.trim()) return showDialog('Belum lengkap', 'Nama konsumen wajib diisi.');
-    if (!waContact.trim()) return showDialog('Belum lengkap', 'Kontak WhatsApp wajib diisi.');
+    setTried(true);
+    if (!name.trim() || !waContact.trim()) {
+      announce('Lengkapi isian yang ditandai wajib.');
+      return;
+    }
     if (!consent) return showDialog('Consent diperlukan', 'Konsumen harus menyetujui consent sebelum data disimpan (UU PDP).');
     // The stage may have been picked before the age was set to under 1.
     if (under1 && stage !== 'approached' && stage !== currentStage) {
@@ -233,14 +238,15 @@ export default function ConsumerDetailScreen() {
           <TouchableOpacity
             onPress={() => !readOnly && setConsent((v) => !v)}
             disabled={readOnly}
-            style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+            style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: TOUCH }}
             accessibilityRole="checkbox"
-            accessibilityState={{ checked: consent }}
+            accessibilityState={{ checked: consent, disabled: readOnly }}
           >
-            <Ionicons name={consent ? 'checkbox' : 'square-outline'} size={24} color={consent ? C.primaryDark : C.faint} />
-            <Text style={{ flex: 1, fontFamily: F.semi, fontSize: 13, color: C.text }}>
-              {CONSENT_TEXT}
-            </Text>
+            <Ionicons name={consent ? 'checkbox' : 'square-outline'} size={28} color={consent ? C.primaryDark : C.muted} />
+            <View style={{ flex: 1, gap: 2 }}>
+              <Text style={T.h3}>Persetujuan konsumen</Text>
+              <Text style={T.body}>{CONSENT_TEXT}</Text>
+            </View>
           </TouchableOpacity>
           {existing?.consentAt && (
             <Muted style={{ marginTop: 8 }}>
@@ -253,18 +259,27 @@ export default function ConsumerDetailScreen() {
         {consent && (
           <>
             <Card>
-              <Field label="Nama">
-                <Input value={name} onChangeText={setName} editable={!readOnly} placeholder="Nama konsumen" />
+              <Field label="Nama" required={!readOnly} error={tried && !name.trim() ? 'Isi nama konsumen.' : null}>
+                <Input value={name} onChangeText={setName} editable={!readOnly} placeholder="Nama konsumen" accessibilityLabel="Nama konsumen" />
               </Field>
               <View style={{ height: 10 }} />
-              <Field label="Kontak WhatsApp">
-                <Input value={waContact} onChangeText={setWaContact} editable={!readOnly} placeholder="08xxxxxxxxxx" keyboardType="phone-pad" />
-                {!readOnly && waContact.trim() !== '' && !isValidWa(waContact) && (
-                  <Muted style={{ marginTop: 4, color: C.accent }}>Nomor HP Indonesia, mis. 0812xxxxxxxx.</Muted>
-                )}
+              <Field
+                label="Kontak WhatsApp"
+                required={!readOnly}
+                error={
+                  readOnly
+                    ? null
+                    : tried && !waContact.trim()
+                      ? 'Isi nomor WhatsApp konsumen.'
+                      : waContact.trim() !== '' && !isValidWa(waContact)
+                        ? 'Periksa nomornya — nomor HP Indonesia, mis. 0812xxxxxxxx.'
+                        : null
+                }
+              >
+                <Input value={waContact} onChangeText={setWaContact} editable={!readOnly} placeholder="08xxxxxxxxxx" keyboardType="phone-pad" accessibilityLabel="Nomor WhatsApp konsumen" />
               </Field>
               <View style={{ height: 10 }} />
-              <Field label="Usia Anak (bracket — bukan tanggal lahir, PRD §6)">
+              <Field label="Usia anak (kelompok usia — jangan tanyakan tanggal lahir)">
                 <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
                   {CHILD_AGE_BRACKETS.map((b) => (
                     <Chip

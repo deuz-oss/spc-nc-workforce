@@ -81,7 +81,7 @@ export default function ShareOfShelfScreen() {
 
   const submit = async () => {
     if (!photoUri) {
-      showDialog('Belum lengkap', 'Foto wajib untuk Share of Shelf — manual count adalah sumber data utama, foto sebagai bukti (PRD §5.2).');
+      showDialog('Foto Belum Ada', 'Ambil foto rak sebagai bukti sebelum menyimpan.');
       return;
     }
     if (facingInvalid) {
@@ -129,8 +129,8 @@ export default function ShareOfShelfScreen() {
         />
 
         <Card>
-          <Field label="Account / Channel">
-            <Input placeholder="mis. DMS, LMT, MTI (definisi menunggu konfirmasi client)" value={channel} onChangeText={setChannel} />
+          <Field label="Channel toko">
+            <Input placeholder="mis. DMS, LMT, MTI" value={channel} onChangeText={setChannel} />
           </Field>
           {!!store?.channel && (
             <Muted style={{ marginTop: 4 }}>Diisi dari data toko ({store.channel}); ubah hanya bila berbeda.</Muted>
@@ -153,34 +153,38 @@ export default function ShareOfShelfScreen() {
         </Card>
 
         <Card>
-          <H>Facing Count</H>
+          <H>Hitung facing</H>
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 10 }}>
             <View style={{ flex: 1 }}>
-              <Field label="Own Facing">
+              <Field label="Facing produk kita" required>
                 <Input placeholder="0" keyboardType="numeric" value={ownFacing} onChangeText={(v) => setOwnFacing(v.replace(/[^0-9]/g, ''))} />
               </Field>
             </View>
             <View style={{ flex: 1 }}>
-              <Field label="Total Category Facing">
+              <Field label="Total facing kategori" required>
                 <Input placeholder="0" keyboardType="numeric" value={totalFacing} onChangeText={(v) => setTotalFacing(v.replace(/[^0-9]/g, ''))} />
               </Field>
             </View>
           </View>
           {facingInvalid && <Muted style={{ marginTop: 8, color: C.accent }}>Own facing tidak boleh melebihi total facing.</Muted>}
           <View style={{ marginTop: 12 }}>
-            <KPICard title="SOS %" value={sosPct != null ? `${sosPct}%` : '-'} status="neutral" />
+            <KPICard title="Porsi rak (SOS)" value={sosPct != null ? `${sosPct}%` : '-'} status="neutral" />
           </View>
         </Card>
 
         <Card>
-          <H>Foto Rak (wajib)</H>
-          <Muted style={{ marginTop: 2 }}>Bukti evidence — hitung manual tetap jadi sumber data utama (annotasi foto di luar scope v1).</Muted>
-          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
+          <H>Foto rak (wajib)</H>
+          <Muted style={{ marginTop: 2 }}>Bukti untuk angka yang Anda hitung di atas.</Muted>
+          <EvidencePhotoField
+            uri={photoUri}
+            onChange={setPhotoUri}
+            tips={['Seluruh rak kategori masuk bingkai', 'Ambil dari depan, tidak miring', 'Terang dan tidak buram']}
+          />
         </Card>
       </ScrollView>
 
       <StickyFooter>
-        <Btn title="Simpan Share of Shelf" onPress={submit} disabled={!canSubmit} loading={busy} />
+        <Btn title={busy ? 'Mengirim…' : 'Simpan Share of Shelf'} onPress={submit} disabled={!canSubmit} loading={busy} />
       </StickyFooter>
     </View>
   );

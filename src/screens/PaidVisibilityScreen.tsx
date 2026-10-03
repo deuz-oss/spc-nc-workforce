@@ -9,7 +9,7 @@ import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { DraftNotice } from '../components/DraftNotice';
 import { draftKey, useDraft } from '../components/useDraft';
 import { COMPLIANCE_CHECKLIST_ITEMS, VISIBILITY_TYPES } from '../config';
-import { C, F } from '../theme';
+import { C, T, TOUCH } from '../theme';
 import { ShownError, useStore } from '../store/useStore';
 
 /** Paid Visibility (PRD §5.5) — required photo, compliance checklist. Visibility
@@ -57,7 +57,7 @@ export default function PaidVisibilityScreen() {
       return;
     }
     if (!photoUri) {
-      showDialog('Belum lengkap', 'Foto wajib untuk Paid Visibility (PRD §5.5).');
+      showDialog('Foto Belum Ada', 'Ambil foto materi promosi yang terpasang sebelum menyimpan.');
       return;
     }
     setBusy(true);
@@ -95,7 +95,7 @@ export default function PaidVisibilityScreen() {
         />
 
         <Card>
-          <H>Jenis Visibility</H>
+          <H>Jenis materi promosi</H>
           <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
             {VISIBILITY_TYPES.map((v) =>
               doneTypes.has(v.key) ? (
@@ -108,36 +108,41 @@ export default function PaidVisibilityScreen() {
         </Card>
 
         <Card>
-          <H>Compliance Checklist</H>
+          <H>Checklist kepatuhan</H>
           <View style={{ gap: 10, marginTop: 10 }}>
             {COMPLIANCE_CHECKLIST_ITEMS.map((item) => (
               <TouchableOpacity
                 key={item.key}
                 onPress={() => toggleItem(item.key)}
-                style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}
+                style={{ flexDirection: 'row', alignItems: 'center', gap: 12, minHeight: TOUCH }}
                 accessibilityRole="checkbox"
+                accessibilityLabel={item.label}
                 accessibilityState={{ checked: !!checklist[item.key] }}
               >
                 <Ionicons
                   name={checklist[item.key] ? 'checkbox' : 'square-outline'}
-                  size={22}
-                  color={checklist[item.key] ? C.primaryDark : C.faint}
+                  size={28}
+                  color={checklist[item.key] ? C.primaryDark : C.muted}
                 />
-                <Text style={{ flex: 1, fontFamily: F.reg, fontSize: 13, color: C.text }}>{item.label}</Text>
+                <Text style={[T.body, { flex: 1 }]}>{item.label}</Text>
               </TouchableOpacity>
             ))}
           </View>
         </Card>
 
         <Card>
-          <H>Foto (wajib)</H>
+          <H>Foto materi promosi (wajib)</H>
           <Muted style={{ marginTop: 2 }}>Bukti pemasangan asset visibility.</Muted>
-          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
+          <EvidencePhotoField
+            uri={photoUri}
+            onChange={setPhotoUri}
+            tips={['Seluruh materi promosi terlihat utuh', 'Posisinya di rak/toko ikut terlihat', 'Terang dan tidak buram']}
+          />
         </Card>
       </ScrollView>
 
       <StickyFooter>
-        <Btn title="Simpan Paid Visibility" onPress={submit} disabled={!canSubmit} loading={busy} />
+        <Btn title={busy ? 'Mengirim…' : 'Simpan Paid Visibility'} onPress={submit} disabled={!canSubmit} loading={busy} />
       </StickyFooter>
     </View>
   );

@@ -10,9 +10,11 @@ import {
   ListRow,
   Muted,
   SectionHeader,
+  OfflineNote,
   StatusBadge,
 } from '../components/ui';
 import { LiveTeamMap } from '../components/LiveTeamMap';
+import { useOnline } from '../components/useOnline';
 import { useDataRefresh } from '../components/useDataRefresh';
 import { REPORT_TYPE_LABEL } from '../config';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
@@ -36,6 +38,7 @@ export default function ValidationQueueScreen() {
   const navigation = useNavigation();
   const me = useCurrentUser()!;
   const refreshControl = useDataRefresh();
+  const online = useOnline();
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
   const stores = useStore((s) => s.stores);
@@ -147,16 +150,24 @@ export default function ValidationQueueScreen() {
           title={view === 'exceptions' ? 'Antrian Pengecualian' : 'Semua Laporan'}
           subtitle={
             view === 'exceptions'
-              ? 'Hanya laporan anomali/flag yang butuh tindakan manual'
-              : 'Semua laporan periode ini — untuk cek acak & flag manual'
+              ? 'Hanya laporan yang janggal atau ditandai — perlu Anda cek'
+              : 'Semua laporan periode ini — untuk cek acak dan tandai manual'
           }
         />
+        {!online && (
+          <View style={{ marginTop: 8 }}>
+            <OfflineNote text="Offline — setujui dan tandai laporan bisa dilakukan lagi setelah ada koneksi." />
+          </View>
+        )}
         <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
           <Chip label={`Pengecualian (${exceptions.length})`} active={view === 'exceptions'} onPress={() => setView('exceptions')} />
           <Chip label={`Semua (${groups.length})`} active={view === 'all'} onPress={() => setView('all')} />
         </View>
         {shown.length === 0 ? (
-          <Empty text={view === 'exceptions' ? 'Tidak ada laporan yang perlu ditinjau.' : 'Belum ada laporan pada periode ini.'} />
+          <Empty
+            icon={view === 'exceptions' ? 'checkmark-done-outline' : 'document-text-outline'}
+            text={view === 'exceptions' ? 'Tidak ada laporan yang perlu ditinjau.' : 'Belum ada laporan pada periode ini.'}
+          />
         ) : (
           <View style={{ gap: 8, marginTop: 10 }}>
             <ShowMore
@@ -189,12 +200,12 @@ export default function ValidationQueueScreen() {
                     )}
                     {flaggingKey === g.key ? (
                       <View style={{ gap: 8, paddingHorizontal: 4 }}>
-                        <Input placeholder="Catatan (wajib untuk flag)" value={flagNote} onChangeText={setFlagNote} multiline />
+                        <Input placeholder="Alasan ditandai (wajib)" value={flagNote} onChangeText={setFlagNote} multiline accessibilityLabel="Alasan ditandai" />
                         <View style={{ flexDirection: 'row', gap: 8 }}>
                           <Btn
                             small
-                            title="Kirim Flag"
-                            disabled={!flagNote.trim() || busyKey === g.key}
+                            title="Kirim Tanda"
+                            disabled={!flagNote.trim() || busyKey === g.key || !online}
                             loading={busyKey === g.key}
                             onPress={() => act(g, 'flagged', flagNote)}
                           />
@@ -203,8 +214,8 @@ export default function ValidationQueueScreen() {
                       </View>
                     ) : (
                       <View style={{ flexDirection: 'row', gap: 8, paddingHorizontal: 4 }}>
-                        <Btn small variant="ok" title="Approve" disabled={busyKey === g.key} loading={busyKey === g.key} onPress={() => act(g, 'approved')} />
-                        <Btn small variant="outline" title="Flag" onPress={() => { setFlaggingKey(g.key); setFlagNote(''); }} />
+                        <Btn small variant="ok" title="Setujui" disabled={busyKey === g.key || !online} loading={busyKey === g.key} onPress={() => act(g, 'approved')} />
+                        <Btn small variant="outline" title="Tandai" disabled={!online} onPress={() => { setFlaggingKey(g.key); setFlagNote(''); }} />
                       </View>
                     )}
                   </View>
@@ -214,7 +225,7 @@ export default function ValidationQueueScreen() {
           </View>
         )}
         <Muted style={{ marginTop: 12 }}>
-          {normalCount} laporan normal periode ini, otomatis disetujui (tidak butuh tindakan manual).
+          {normalCount} laporan normal periode ini sudah otomatis disetujui.
         </Muted>
       </Card>
 
@@ -250,9 +261,7 @@ export default function ValidationQueueScreen() {
           )}
         </View>
         <Muted style={{ marginTop: 10 }}>
-          Sinyal "Perlu Perhatian": tidak absen ≥3 dari 7 hari terakhir, atau tidak lapor ≥3 dari 7 hari terakhir.
-          Tren "penurunan performa 2 minggu berturut-turut" (PRD §9) belum diimplementasikan — definisi/formula
-          belum ditentukan client (lihat PRD §15).
+          “Perlu Perhatian”: tidak absen atau tidak lapor pada 3 hari atau lebih dari 7 hari terakhir.
         </Muted>
       </Card>
     </ScrollView>

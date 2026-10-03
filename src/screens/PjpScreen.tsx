@@ -12,6 +12,7 @@ import { Schedule } from '../types';
 import { PJP_MANAGER_ROLES } from '../config';
 import { MONTHS_SHORT, programDayKey, programParts } from '../utils/period';
 import { copyWeekPlan, planCompliance, scheduleStatus, ScheduleStatus, weekDays, weekStart } from '../utils/pjp';
+import { useNow } from '../components/useNow';
 
 const DAY = 86400000;
 const DAY_NAMES = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
@@ -64,7 +65,8 @@ export default function PjpScreen() {
   const [busy, setBusy] = useState(false);
 
   const nc = ncs.find((u) => u.id === ncId) ?? null;
-  const thisWeek = weekStart(Date.now());
+  const now = useNow();
+  const thisWeek = weekStart(now);
   const days = weekDays(week);
   const storesById = useMemo(() => new Map(stores.map((st) => [st.id, st])), [stores]);
 
@@ -203,7 +205,7 @@ export default function PjpScreen() {
             const plans = [...(plansByDay.get(key) ?? [])].sort((a, b) =>
               (storesById.get(a.storeId)?.name ?? '').localeCompare(storesById.get(b.storeId)?.name ?? ''),
             );
-            const isToday = key === programDayKey(Date.now());
+            const isToday = key === programDayKey(now);
             return (
               <Card key={key} style={{ gap: 8 }}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import { Btn, Empty, ListRow, Muted, SectionHeader } from '../components/ui';
+import { Btn, Empty, ErrorState, ListRow, LoadingCard, SectionHeader } from '../components/ui';
 import { AuditEntry, useStore } from '../store/useStore';
 import { fmtDateTime } from '../utils/format';
 
@@ -34,7 +34,7 @@ export default function AuditLogScreen() {
   const stores = useStore((s) => s.stores);
   const [entries, setEntries] = useState<AuditEntry[]>([]);
   const [done, setDone] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState(true); // the first page loads on mount
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(
@@ -54,9 +54,22 @@ export default function AuditLogScreen() {
     [fetchAuditLog],
   );
 
+  // First page: state is only set from the request's callbacks, never synchronously in the effect.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    fetchAuditLog(PAGE)
+      .then((page) => {
+        if (cancelled) return;
+        setEntries(page);
+        setDone(page.length < PAGE);
+        setError(null);
+      })
+      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => !cancelled && setBusy(false));
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchAuditLog]);
 
   const nameOf = (id: string | null) => (id ? (users.find((u) => u.id === id)?.name ?? id) : 'Sistem');
   const targetName = (e: AuditEntry) => {
@@ -79,13 +92,13 @@ export default function AuditLogScreen() {
     <View role="main" style={{ flex: 1 }}>
       <View style={{ padding: 16, gap: 6 }}>
         <SectionHeader title="Log Aktivitas Admin" subtitle="Perubahan akun, tim, pin toko, target, review & bobot" />
-        {error && <Muted>Gagal memuat: {error}</Muted>}
+        {error && <ErrorState text="Log aktivitas belum bisa dimuat. Periksa koneksi internet." onRetry={() => void load(entries.length ? entries[entries.length - 1].at : undefined)} />}
       </View>
       <FlatList
         data={entries}
         keyExtractor={(e) => String(e.id)}
         contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 8 }}
-        ListEmptyComponent={busy ? null : <Empty text="Belum ada aktivitas tercatat." />}
+        ListEmptyComponent={busy ? <LoadingCard label="Memuat log aktivitas…" /> : error ? null : <Empty icon="list-outline" text="Belum ada aktivitas tercatat." />}
         renderItem={({ item: e }) => (
           <ListRow
             title={`${ACTION_LABEL[e.action] ?? e.action}${targetName(e) ? ` · ${targetName(e)}` : ''}`}

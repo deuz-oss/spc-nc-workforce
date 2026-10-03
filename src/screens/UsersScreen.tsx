@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { Badge, Btn, Card, Chip, Empty, Field, Input, ListRow, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { DEFAULT_TEAM_BASE_RADIUS_M, ROLE_LABEL } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { MIN_PASSWORD, useStore } from '../store/useStore';
 import { Role, Team, User } from '../types';
 import { parseLatLng } from '../utils/geo';
@@ -64,7 +64,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
           </View>
         </Field>
       )}
-      {err && <Text style={{ color: C.accent, fontSize: 12.5, fontFamily: F.semi }}>{err}</Text>}
+      {err && <Text style={[T.label, { color: C.dangerStrong }]}>{err}</Text>}
       <Btn title="Simpan" onPress={submit} disabled={busy} loading={busy} />
     </Card>
   );
@@ -122,7 +122,7 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
       <Field label={`Reset password (opsional, min. ${MIN_PASSWORD} karakter, huruf + angka)`}>
         <Input value={password} onChangeText={setPassword} secureTextEntry placeholder="Kosongkan bila tidak diubah" />
       </Field>
-      {err && <Text style={{ color: C.accent, fontSize: 12.5, fontFamily: F.semi }}>{err}</Text>}
+      {err && <Text style={[T.label, { color: C.dangerStrong }]}>{err}</Text>}
       <View style={{ flexDirection: 'row', gap: 8 }}>
         <Btn title="Simpan" onPress={save} disabled={busy} loading={busy} />
         <Btn variant="outline" title="Batal" onPress={onDone} />
@@ -222,7 +222,7 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
         <Input value={radiusKm} onChangeText={setRadiusKm} keyboardType="decimal-pad" />
       </Field>
       <Muted>
-        Clock-in di luar radius ini tetap diterima tetapi ditandai "Pengecualian". Tanpa titik basis, clock-in tim ini
+        Clock-in di luar radius ini tetap diterima tetapi ditandai “Pengecualian”. Tanpa titik basis, clock-in tim ini
         tidak dicek geofence.
       </Muted>
       <View style={{ flexDirection: 'row', gap: 8 }}>

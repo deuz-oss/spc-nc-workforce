@@ -71,6 +71,17 @@ installNotificationHandlers();
 const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator();
 
+/** Filled icon for the selected tab — selection never depends on color alone. */
+const TAB_ICON_ACTIVE: Record<string, keyof typeof Ionicons.glyphMap> = {
+  Dashboard: 'grid',
+  Toko: 'storefront',
+  Absensi: 'time',
+  Validasi: 'checkmark-done',
+  Chat: 'chatbubbles',
+  Pengguna: 'people',
+  Profil: 'person-circle',
+};
+
 const TAB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
   Dashboard: 'grid-outline',
   Toko: 'storefront-outline',
@@ -101,13 +112,13 @@ function RailHeader({ me }: { me: User }) {
         >
           <Ionicons name="nutrition" size={18} color={C.onGold} />
         </View>
-        <Text style={{ color: C.onDark, fontFamily: F.xbold, fontSize: 15 }}>{APP_NAME}</Text>
+        <Text style={[T.h2, { color: C.onDark, fontFamily: F.xbold }]}>{APP_NAME}</Text>
       </View>
       <View style={{ marginTop: 18, borderTopWidth: 1, borderColor: C.darkDivider, paddingTop: 14 }}>
-        <Text style={{ color: C.onDark, fontFamily: F.bold, fontSize: 13 }} numberOfLines={1}>
+        <Text style={[T.label, { color: C.onDark, fontFamily: F.bold }]} numberOfLines={1}>
           {me.name}
         </Text>
-        <Text style={{ color: C.onDarkFaint, fontFamily: F.reg, fontSize: 11.5, marginTop: 1 }}>
+        <Text style={[T.meta, { color: C.onDarkFaint, marginTop: 1 }]}>
           {ROLE_LABEL[me.role]}
         </Text>
       </View>
@@ -148,17 +159,20 @@ function ResponsiveTabBar({
       >
         {routes.map((route, i) => {
           const focused = state.index === i;
-          const color = focused ? C.primaryText : C.faint;
+          // Inactive tabs stay readable (muted, 7.6:1) — not the 2.6:1 "faint".
+          const color = focused ? C.primaryText : C.muted;
           return (
             <TouchableOpacity
               key={route.key}
               onPress={() => navigation.navigate(route.name)}
-              accessibilityRole="button"
-              accessibilityState={focused ? { selected: true } : {}}
-              style={{ flex: 1, alignItems: 'center', gap: 2, minHeight: 44, justifyContent: 'center' }}
+              accessibilityRole="tab"
+              accessibilityLabel={route.name}
+              accessibilityState={{ selected: focused }}
+              style={{ flex: 1, alignItems: 'center', gap: 2, minHeight: 56, justifyContent: 'center' }}
             >
-              <Ionicons name={TAB_ICON[route.name] ?? 'ellipse-outline'} size={21} color={color} />
-              <Text style={{ fontSize: 10.5, fontFamily: F.semi, color }}>{route.name}</Text>
+              {focused && <View style={{ position: 'absolute', top: 0, width: 32, height: 3, borderRadius: 2, backgroundColor: C.gold }} />}
+              <Ionicons name={focused ? TAB_ICON_ACTIVE[route.name] ?? 'ellipse' : TAB_ICON[route.name] ?? 'ellipse-outline'} size={24} color={color} />
+              <Text style={[T.tab, { color, fontFamily: focused ? F.bold : F.semi }]}>{route.name}</Text>
             </TouchableOpacity>
           );
         })}
@@ -269,7 +283,7 @@ function ResponsiveTabBar({
               />
               <Text
                 style={{
-                  fontSize: 13.5,
+                  fontSize: T.label.fontSize,
                   fontFamily: focused ? F.bold : F.semi,
                   color: focused ? C.onDark : C.onDarkMuted,
                 }}
@@ -338,7 +352,7 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
       screenOptions={({ route }) => ({
         headerStyle: { backgroundColor: C.railBg, shadowOpacity: 0, borderBottomWidth: 0 },
         headerTintColor: C.onDark,
-        headerTitleStyle: { fontFamily: F.bold, fontSize: 17 },
+        headerTitleStyle: T.header,
         headerShadowVisible: false,
         sceneStyle: railWidth ? { marginLeft: railWidth } : undefined,
         header: ({ layout, options, route: r }: BottomTabHeaderProps) => (
@@ -361,7 +375,7 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
             <Text
               numberOfLines={1}
               ellipsizeMode="tail"
-              style={{ color: C.onDark, fontFamily: F.semi, fontSize: 11.5 }}
+              style={[T.badge, { color: C.onDark }]}
             >
               {ROLE_LABEL[role]}
             </Text>
@@ -453,7 +467,7 @@ export default function App() {
   const stackOpts = {
     headerStyle: { backgroundColor: C.railBg, shadowOpacity: 0, borderBottomWidth: 0 },
     headerTintColor: C.onDark,
-    headerTitleStyle: { fontFamily: F.bold, fontSize: 17 },
+    headerTitleStyle: T.header,
     headerShadowVisible: false,
   };
 

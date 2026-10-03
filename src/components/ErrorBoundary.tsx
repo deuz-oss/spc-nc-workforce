@@ -2,7 +2,7 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn } from './ui';
-import { C, F, T } from '../theme';
+import { C, T } from '../theme';
 import { reportError } from '../utils/errorReport';
 
 /**
@@ -27,7 +27,7 @@ export class ErrorBoundary extends React.Component<{ children: React.ReactNode }
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 12, backgroundColor: C.bg }}>
         <Ionicons name="alert-circle-outline" size={36} color={C.warn} />
         <Text style={[T.h2, { textAlign: 'center' }]}>Terjadi kesalahan pada aplikasi</Text>
-        <Text style={{ fontFamily: F.reg, fontSize: 13, color: C.muted, textAlign: 'center', maxWidth: 340 }}>
+        <Text style={[T.body, { color: C.muted, textAlign: 'center', maxWidth: 340 }]}>
           Kesalahan ini sudah dicatat. Data yang tersimpan offline tetap aman dan akan dikirim saat tersinkron.
         </Text>
         <Btn title="Coba Lagi" onPress={() => this.setState({ error: null })} />

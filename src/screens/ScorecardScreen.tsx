@@ -41,7 +41,7 @@ function ScorecardCard({ sc, subtitle }: { sc: Scorecard; subtitle?: string }) {
           {subtitle && <Muted>{subtitle}</Muted>}
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-          <Text style={{ fontFamily: F.xbold, fontSize: 20, color: meta.color }}>{Math.round(sc.score)}</Text>
+          <Text style={[T.h1, { color: meta.color }]}>{Math.round(sc.score)}</Text>
           <StatusBadge label={meta.label} color={meta.color} icon={meta.icon} />
         </View>
       </View>
@@ -58,7 +58,7 @@ function ScorecardCard({ sc, subtitle }: { sc: Scorecard; subtitle?: string }) {
           {skipped.map((key) => (
             <View key={key} style={{ flexDirection: 'row', justifyContent: 'space-between' }}>
               <Text style={{ ...T.body, color: C.muted }}>{SCORECARD_KPI_LABEL[key] ?? key}</Text>
-              <Text style={{ ...T.small, color: C.muted }}>Belum dapat dihitung — lihat PRD §15</Text>
+              <Text style={{ ...T.small, color: C.muted }}>Belum dapat dihitung — datanya belum tersedia</Text>
             </View>
           ))}
         </View>

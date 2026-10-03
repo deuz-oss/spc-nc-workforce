@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { AccessibilityInfo, Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { C, ELEV, F, R, SP, T } from '../theme';
+import { C, ELEV, R, SP, T, TOUCH } from '../theme';
 
 export interface DialogButton {
   label: string;
@@ -59,6 +59,19 @@ export function DialogHost() {
   const [queue, setQueue] = useState<DialogState[]>([]);
   const state = queue[0] ?? null;
   const [liveMessage, setLiveMessage] = useState('');
+  // The fade is the app's only motion; skip it when the phone asks for reduced motion.
+  const [reduceMotion, setReduceMotion] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then((v) => alive && setReduceMotion(v))
+      .catch(() => undefined);
+    const sub = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      alive = false;
+      sub.remove();
+    };
+  }, []);
 
   useEffect(() => {
     // A double tap raises the same dialog twice — keep one, or the second
@@ -98,6 +111,12 @@ export function DialogHost() {
     };
   }, []);
 
+  const given = state?.buttons ?? [];
+  const mainButton = given[given.length - 1];
+  // Side by side only for two short labels; otherwise full-width rows, main action on top.
+  const stacked = given.length > 2 || given.some((b) => b.label.length > 14);
+  const buttons = stacked ? [...given].reverse() : given;
+
   const close = (fn?: () => void) => {
     setQueue((q) => q.slice(1));
     fn?.();
@@ -124,30 +143,43 @@ export function DialogHost() {
       <Modal
         visible={!!state}
         transparent
-        animationType="fade"
+        animationType={reduceMotion ? 'none' : 'fade'}
         onRequestClose={() => close()}
         aria-label={state?.title}
       >
         <View style={styles.backdrop}>
-          <View style={styles.card}>
-            <Text style={styles.title}>{state?.title}</Text>
+          <View style={styles.card} role="alertdialog" aria-label={state?.title}>
+            <Text role="heading" style={styles.title}>
+              {state?.title}
+            </Text>
             {state?.message ? <Text style={styles.message}>{state.message}</Text> : null}
-            <View style={styles.buttonsRow}>
-              {(state?.buttons ?? []).map((b) => (
-                <TouchableOpacity
-                  key={b.label}
-                  activeOpacity={0.8}
-                  onPress={() => close(b.onPress)}
-                  style={[
-                    styles.btn,
-                    { backgroundColor: b.destructive ? C.accent : C.primary },
-                  ]}
-                >
-                          <Text style={[styles.btnLabel, { color: C.onPrimary }]}>
-                    {b.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
+            <View style={stacked ? styles.buttonsColumn : styles.buttonsRow}>
+              {buttons.map((b) => {
+                // The last button is the main action (filled); the others —
+                // "Batal", "Tutup", "Buka di Maps" — are outlined, so the two
+                // never look alike. Destructive actions are red.
+                // A destructive action that isn't the recommended one (e.g. "Tetap
+                // Check-out" next to "Isi Dulu") is a red outline, never the loudest button.
+                const main = b === mainButton;
+                const fill = main ? (b.destructive ? C.dangerFill : C.primary) : C.card;
+                const fg = main ? C.onPrimary : b.destructive ? C.dangerStrong : C.primaryText;
+                return (
+                  <TouchableOpacity
+                    key={b.label}
+                    activeOpacity={0.8}
+                    onPress={() => close(b.onPress)}
+                    accessibilityRole="button"
+                    accessibilityLabel={b.label}
+                    style={[
+                      styles.btn,
+                      stacked && styles.btnStacked,
+                      { backgroundColor: fill, borderWidth: main ? 0 : 1.5, borderColor: b.destructive ? C.dangerStrong : C.primaryDark },
+                    ]}
+                  >
+                    <Text style={[styles.btnLabel, { color: fg }]}>{b.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
           </View>
         </View>
@@ -178,11 +210,13 @@ const styles = StyleSheet.create({
     maxWidth: 380,
     ...ELEV[2],
   },
-  title: { ...T.h2, fontSize: 16 },
-  message: { marginTop: 8, color: C.muted, fontSize: 13, lineHeight: 19, fontFamily: F.reg },
+  title: { ...T.h2, fontSize: T.header.fontSize },
+  message: { ...T.body, marginTop: 8, color: C.text },
   buttonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: SP.sm, marginTop: 18 },
-  btn: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: R.btn },
-  btnLabel: { fontWeight: '700', fontFamily: F.bold, fontSize: 13 },
+  buttonsColumn: { gap: SP.sm, marginTop: 18 },
+  btn: { minHeight: TOUCH, minWidth: 96, paddingHorizontal: SP.lg, borderRadius: R.btn, alignItems: 'center', justifyContent: 'center' },
+  btnStacked: { alignSelf: 'stretch' },
+  btnLabel: { ...T.button, textAlign: 'center' },
   toastWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
   toast: {
     flexDirection: 'row',
@@ -195,5 +229,5 @@ const styles = StyleSheet.create({
     backgroundColor: C.primary,
     ...ELEV[2],
   },
-  toastText: { flexShrink: 1, color: C.onPrimary, fontFamily: F.semi, fontSize: 13 },
+  toastText: { ...T.label, flexShrink: 1, color: C.onPrimary },
 });

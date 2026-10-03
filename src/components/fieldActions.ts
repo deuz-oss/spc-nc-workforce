@@ -93,7 +93,7 @@ export function useCheckIn() {
         const { lat, lng } = store;
         showDialog(
           'Terlalu Jauh dari Toko',
-          `Anda ${dist} m dari titik toko (batas ${VISIT_VALID_RADIUS_M} m). Dekati toko lalu coba lagi. Bila Anda sudah di dalam toko, minta TL memperbaiki titik GPS toko.`,
+          `Anda ${dist >= 1000 ? `${(dist / 1000).toFixed(1).replace('.', ',')} km` : `${dist} m`} dari titik toko (batas ${VISIT_VALID_RADIUS_M} m). Dekati toko lalu coba lagi. Bila Anda sudah di dalam toko, minta TL memperbaiki titik GPS toko.`,
           [
             { label: 'Tutup' },
             { label: 'Buka di Maps', onPress: () => openInMaps(lat, lng) },

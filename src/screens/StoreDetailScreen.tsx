@@ -8,7 +8,7 @@ import { useCheckIn } from '../components/fieldActions';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { StoreEditForm } from '../components/StoreEditForm';
 import { ShowMore } from '../components/ShowMore';
-import { C } from '../theme';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDateTime, fmtDurShort } from '../utils/format';
 
@@ -70,7 +70,7 @@ export default function StoreDetailScreen() {
       >
         <Card>
           <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-            <H style={{ fontSize: 17, flexShrink: 1 }}>{store.name}</H>
+            <H style={{ fontSize: T.header.fontSize, flexShrink: 1 }}>{store.name}</H>
             <Badge label={CATEGORY_LABEL[store.category] ?? store.category} color={C.info} />
           </View>
           <Muted style={{ marginTop: 4 }}>
@@ -150,7 +150,7 @@ export default function StoreDetailScreen() {
           <SectionHeader title={`Riwayat Kunjungan (${storeVisits.length})`} />
           <HistoryNotice />
           {storeVisits.length === 0 ? (
-            <Empty text="Belum ada kunjungan." />
+            <Empty icon="storefront-outline" text="Belum ada kunjungan ke toko ini." />
           ) : (
             <View style={{ gap: 8, marginTop: 10 }}>
               <ShowMore
@@ -162,7 +162,7 @@ export default function StoreDetailScreen() {
                     onPress={() => navigation.navigate('StoreVisit', { visitId: v.id })}
                     title={users.find((u) => u.id === v.ncId)?.name ?? v.ncId}
                     subtitle={v.checkOutAt ? `Selesai · durasi ${fmtDurShort(v.checkOutAt - v.checkInAt)}` : 'Berlangsung (belum check-out)'}
-                    trailing={<GeoValidBadge ok={v.geoValid} okLabel="Geo valid" badLabel={`${v.storeDistanceM ?? '?'}m`} />}
+                    trailing={<GeoValidBadge ok={v.geoValid} okLabel="Lokasi sesuai" badLabel={`${v.storeDistanceM ?? '?'} m dari toko`} />}
                     meta={fmtDateTime(v.checkInAt)}
                   />
                 )}

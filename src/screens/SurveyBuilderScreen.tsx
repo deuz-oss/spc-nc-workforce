@@ -1,10 +1,10 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { Btn, Card, Empty, Field, H, Input, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
+import { Btn, Card, Empty, Field, H, IconButton, Input, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { NUTRITION_QUIZ_CAMPAIGN_TAG, SURVEY_BUILDER_ROLES } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { SurveyQuestion } from '../types';
 import { uid } from '../utils/uuid';
@@ -104,7 +104,7 @@ export default function SurveyBuilderScreen() {
       >
         <SectionHeader
           title="Kelola Survey"
-          subtitle="Question set multiple choice / free text (PRD §5.7)"
+          subtitle="Pertanyaan pilihan ganda atau isian bebas untuk NC"
           action={creating ? undefined : { label: '+ Survey Baru', onPress: () => setCreating(true) }}
         />
 
@@ -146,12 +146,10 @@ export default function SurveyBuilderScreen() {
                 {questions.map((q, i) => (
                   <View key={q.id} style={{ borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, gap: 8 }}>
                     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <Text style={{ fontFamily: F.semi, fontSize: 12, color: C.muted }}>
+                      <Text style={[T.label, { color: C.muted }]}>
                         {`Pertanyaan ${i + 1} · ${q.type === 'multiple_choice' ? 'Pilihan Ganda' : 'Isian Bebas'}`}
                       </Text>
-                      <TouchableOpacity onPress={() => removeQuestion(q.id)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                        <Text style={{ color: C.accent, fontFamily: F.semi, fontSize: 12 }}>Hapus</Text>
-                      </TouchableOpacity>
+                      <IconButton name="trash-outline" color={C.dangerStrong} label={`Hapus pertanyaan ${i + 1}`} onPress={() => removeQuestion(q.id)} />
                     </View>
                     <Input value={q.text} onChangeText={(v) => updateQuestion(q.id, { text: v })} placeholder="Teks pertanyaan" />
                     {q.type === 'multiple_choice' && (

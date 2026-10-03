@@ -1,14 +1,14 @@
 import React, { useMemo, useState } from 'react';
-import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
+import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
-import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
+import { Btn, Card, Empty, Field, H, IconButton, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { DraftNotice } from '../components/DraftNotice';
 import { draftKey, useDraft } from '../components/useDraft';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
-import { C, F } from '../theme';
+import { C, R, SP, T } from '../theme';
 import { fmtIDR } from '../utils/format';
 import { reportedSkus, ShownError, useStore } from '../store/useStore';
 
@@ -120,7 +120,7 @@ export default function PriceMonitoringScreen() {
 
         {reportedList.length > 0 && (
           <Card>
-            <H>Sudah Dilaporkan di Kunjungan Ini ({reportedList.length} SKU)</H>
+            <H>{`Sudah dikirim di kunjungan ini (${reportedList.length} produk)`}</H>
             <Muted style={{ marginTop: 2 }}>{reportedList.map((r) => `${r.sku}: ${fmtIDR(r.ownPrice)}`).join(' · ')}</Muted>
           </Card>
         )}
@@ -128,58 +128,45 @@ export default function PriceMonitoringScreen() {
         <SkuPicker picked={pickedSkus} reported={reported} onAdd={addProduct} />
 
         <Card>
-          <H>SKU Dipilih ({rows.length})</H>
+          <H>{`Produk dipilih (${rows.length})`}</H>
           {rows.length === 0 ? (
-            <Empty text="Belum ada SKU dipilih." />
+            <Empty icon="pricetag-outline" text="Belum ada produk dipilih. Ketuk produk di daftar atas." />
           ) : (
             <View style={{ gap: 10, marginTop: 10 }}>
               {rows.map((r) => (
-                <View key={r.key} style={{ borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, gap: 8 }}>
-                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+                <View key={r.key} style={{ borderWidth: 1, borderColor: C.borderStrong, borderRadius: R.input, padding: SP.md, gap: SP.sm }}>
+                  <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: SP.sm }}>
                     <View style={{ flexShrink: 1 }}>
-                      <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>
+                      <Text style={T.h3} numberOfLines={2}>
                         {r.label}
                       </Text>
-                      <Text style={{ fontFamily: F.reg, fontSize: 11.5, color: C.muted }}>
-                        {r.sku}
-                        {r.manual ? ' · SKU manual' : ''}
-                      </Text>
+                      <Text style={T.small}>{r.manual ? `${r.sku} · ditambah manual` : r.sku}</Text>
                     </View>
-                    <TouchableOpacity onPress={() => removeRow(r.key)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
-                      <Text style={{ color: C.accent, fontFamily: F.semi, fontSize: 12 }}>Hapus</Text>
-                    </TouchableOpacity>
+                    <IconButton name="trash-outline" color={C.dangerStrong} label={`Hapus ${r.label}`} onPress={() => removeRow(r.key)} />
                   </View>
-                  <Field label="Harga Sendiri">
+                  <Field label="Harga produk kita (Rp)" required>
                     <Input
-                      placeholder="0"
+                      placeholder="mis. 125000"
                       keyboardType="numeric"
                       value={r.ownPrice}
                       onChangeText={(v) => updateRow(r.key, { ownPrice: v.replace(/[^0-9.]/g, '') })}
+                      accessibilityLabel={`Harga ${r.label}`}
                     />
                   </Field>
-                  <Text style={{ fontFamily: F.semi, fontSize: 11.5, color: C.muted, marginTop: 2 }}>Harga Kompetitor (opsional, maks. 3)</Text>
-                  <View style={{ flexDirection: 'row', gap: 8 }}>
-                    <Input
-                      placeholder="Kompetitor 1"
-                      keyboardType="numeric"
-                      style={{ flex: 1 }}
-                      value={r.competitor1}
-                      onChangeText={(v) => updateRow(r.key, { competitor1: v.replace(/[^0-9.]/g, '') })}
-                    />
-                    <Input
-                      placeholder="Kompetitor 2"
-                      keyboardType="numeric"
-                      style={{ flex: 1 }}
-                      value={r.competitor2}
-                      onChangeText={(v) => updateRow(r.key, { competitor2: v.replace(/[^0-9.]/g, '') })}
-                    />
-                    <Input
-                      placeholder="Kompetitor 3"
-                      keyboardType="numeric"
-                      style={{ flex: 1 }}
-                      value={r.competitor3}
-                      onChangeText={(v) => updateRow(r.key, { competitor3: v.replace(/[^0-9.]/g, '') })}
-                    />
+                  <Text style={T.label}>Harga kompetitor (opsional, maks. 3)</Text>
+                  {/* Wraps to rows on a narrow phone instead of three 90 dp fields side by side. */}
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: SP.sm }}>
+                    {(['competitor1', 'competitor2', 'competitor3'] as const).map((k, i) => (
+                      <View key={k} style={{ flexGrow: 1, flexBasis: 140 }}>
+                        <Input
+                          placeholder={`Kompetitor ${i + 1}`}
+                          keyboardType="numeric"
+                          value={r[k]}
+                          onChangeText={(v) => updateRow(r.key, { [k]: v.replace(/[^0-9.]/g, '') })}
+                          accessibilityLabel={`Harga kompetitor ${i + 1} untuk ${r.label}`}
+                        />
+                      </View>
+                    ))}
                   </View>
                 </View>
               ))}
@@ -188,13 +175,17 @@ export default function PriceMonitoringScreen() {
         </Card>
 
         <Card>
-          <H>Foto (opsional)</H>
-          <EvidencePhotoField uri={photoUri} onChange={setPhotoUri} />
+          <H>Foto label harga (opsional)</H>
+          <EvidencePhotoField
+            uri={photoUri}
+            onChange={setPhotoUri}
+            tips={['Label harga terbaca jelas', 'Produk dan labelnya ada di satu foto', 'Tidak silau dan tidak buram']}
+          />
         </Card>
       </ScrollView>
 
       <StickyFooter>
-        <Btn title={`Simpan Price Monitoring (${validRows.length} SKU)`} onPress={submit} disabled={!canSubmit} loading={busy} />
+        <Btn title={busy ? 'Mengirim…' : validRows.length ? `Simpan Price Monitoring (${validRows.length} produk)` : 'Isi harga produk dulu'} onPress={submit} disabled={!canSubmit} loading={busy} />
       </StickyFooter>
     </View>
   );

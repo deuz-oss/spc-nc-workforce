@@ -4,7 +4,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, Touchable
 import { Btn, Card, Field, Input, Muted } from '../components/ui';
 import { announce } from '../components/dialog';
 import { APP_NAME } from '../config';
-import { C, F, T } from '../theme';
+import { C, T, TOUCH } from '../theme';
 import { useBreakpoint } from '../utils/responsive';
 import { useStore } from '../store/useStore';
 
@@ -43,7 +43,7 @@ function TrustPoint({ icon, label }: { icon: React.ComponentProps<typeof Ionicon
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Ionicons name={icon} size={15} color={C.gold} />
-      <Text style={{ color: C.onDarkMuted, fontSize: 12.5, fontFamily: F.reg }}>{label}</Text>
+      <Text style={[T.small, { color: C.onDarkMuted }]}>{label}</Text>
     </View>
   );
 }
@@ -112,7 +112,7 @@ export default function LoginScreen() {
           />
         </Field>
         {err ? (
-          <Text id="login-error" style={{ color: C.accent, fontSize: 12.5, fontFamily: F.semi }}>
+          <Text id="login-error" style={[T.label, { color: C.dangerStrong }]}>
             {err}
           </Text>
         ) : null}
@@ -124,6 +124,8 @@ export default function LoginScreen() {
           <TouchableOpacity
             onPress={() => setShowDemo((v) => !v)}
             activeOpacity={0.7}
+            accessibilityRole="button"
+            accessibilityState={{ expanded: showDemo }}
             style={styles.demoToggle}
           >
             <Ionicons name="flask-outline" size={14} color={toggleColor} />
@@ -202,11 +204,9 @@ const styles = StyleSheet.create({
     color: C.onDark,
   },
   brandSub: {
+    ...T.small,
     textAlign: 'center',
     color: C.onDarkMuted,
-    fontSize: 12.5,
-    lineHeight: 18,
-    fontFamily: F.reg,
   },
   trustRow: {
     marginTop: 10,
@@ -220,17 +220,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    paddingVertical: 6,
+    minHeight: TOUCH,
   },
   demoToggleText: {
+    ...T.label,
     color: C.onDarkMuted,
-    fontSize: 12,
-    fontFamily: F.semi,
   },
   footer: {
     textAlign: 'center',
-    fontSize: 11,
+    ...T.meta,
     marginTop: 18,
-    fontFamily: F.reg,
   },
 });

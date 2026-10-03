@@ -1,8 +1,9 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { useAppRoute } from '../navigation';
-import { Btn, Card, Chip, Empty, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
+import { Btn, Card, Chip, Empty, ErrorState, ListRow, Muted, SectionHeader, SkeletonBlock, StatCard } from '../components/ui';
 import { HistoryNotice } from '../components/HistoryNotice';
+import { useNow } from '../components/useNow';
 import { LeafletMap, MapMarker } from '../components/LeafletMap';
 import { STOP_FLAG_DURATION_MS } from '../config';
 import { C } from '../theme';
@@ -30,31 +31,37 @@ function RouteCard({ ncId, initialAttendanceId }: { ncId: string; initialAttenda
   const [selectedId, setSelectedId] = useState<string | undefined>(initialAttendanceId);
   const session: Attendance | undefined = sessions.find((a) => a.id === selectedId) ?? sessions[0];
 
-  const [route, setRoute] = useState<RoutePoint[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  // The fetched route is tagged with its session and attempt: switching
+  // session or retrying shows "loading" again without resetting state in the effect.
+  const [attempt, setAttempt] = useState(0);
+  const [result, setResult] = useState<{ key: string; route: RoutePoint[] | null; error: string | null } | null>(null);
+  const sessionId = session?.id;
+  const key = `${sessionId}:${attempt}`;
   useEffect(() => {
-    if (!session) return;
+    if (!sessionId) return;
     let cancelled = false;
-    setRoute(null);
-    setError(null);
-    fetchRoute(session.id)
-      .then((r) => !cancelled && setRoute(r))
-      .catch((e) => !cancelled && setError(e instanceof Error ? e.message : String(e)));
+    fetchRoute(sessionId)
+      .then((r) => !cancelled && setResult({ key, route: r, error: null }))
+      .catch((e) => !cancelled && setResult({ key, route: null, error: e instanceof Error ? e.message : String(e) }));
     return () => {
       cancelled = true;
     };
-  }, [session?.id, fetchRoute]);
+  }, [sessionId, key, fetchRoute]);
+  const current = result?.key === key ? result : null;
+  const route = current?.route ?? null;
+  const error = current?.error ?? null;
+  const now = useNow();
 
   if (!sessions.length) {
     return (
       <Card>
         <SectionHeader title="Rute" />
-        <Empty text="Belum ada sesi absensi dalam periode yang dimuat." />
+        <Empty icon="map-outline" text="Belum ada sesi absensi dalam periode yang dimuat." />
       </Card>
     );
   }
 
-  const end = session?.clockOutAt ?? Date.now();
+  const end = session?.clockOutAt ?? now;
   const sessionVisits = session
     ? visits.filter((v) => v.ncId === ncId && v.checkInAt >= session.clockInAt && v.checkInAt <= end)
     : [];
@@ -90,9 +97,12 @@ function RouteCard({ ncId, initialAttendanceId }: { ncId: string; initialAttenda
         ))}
       </View>
       {error ? (
-        <Muted style={{ color: C.accent }}>Gagal memuat rute. Periksa koneksi internet.</Muted>
+        <ErrorState text="Rute belum bisa dimuat. Periksa koneksi internet." onRetry={() => setAttempt((n) => n + 1)} />
       ) : route == null ? (
-        <Muted>Memuat rute…</Muted>
+        <View role="status" aria-label="Memuat rute" style={{ gap: 8 }}>
+          <SkeletonBlock height={64} />
+          <SkeletonBlock height={220} />
+        </View>
       ) : (
         <>
           <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
@@ -205,7 +215,7 @@ export default function NcTrackerScreen() {
                   key={v.id}
                   title={store?.name ?? '-'}
                   subtitle={`${fmtDateTime(v.checkInAt)} · ${duration}`}
-                  meta={v.geoValid ? 'Geo valid' : 'Di luar radius'}
+                  meta={v.geoValid ? 'Lokasi sesuai' : 'Di luar radius toko'}
                 />
               );
             })}

@@ -61,7 +61,47 @@ export const C = {
   warnStrong: '#78350F',
   infoStrong: '#0C4A6E',
   dangerStrong: '#7F1D1D',
+  tealStrong: '#134E4A',
+  tealBg: '#CCFBF1',
+  purpleStrong: '#4C1D95',
+  purpleBg: '#EDE9FE',
+  /** destructive button fill — white text 6.5:1 */
+  dangerFill: '#B91C1C',
 };
+
+/**
+ * Badge / status pill colors: a tint background with strong text, >= 7:1.
+ * Callers pass any status color (ok, okStrong, warn, info, accent, teal…);
+ * unknown colors fall back to a neutral pill.
+ */
+export function toneOf(color: string): { fg: string; bg: string } {
+  switch (color) {
+    case C.ok:
+    case C.okStrong:
+      return { fg: C.okStrong, bg: C.okBg };
+    case C.warn:
+    case C.warnStrong:
+      return { fg: C.warnStrong, bg: C.warnBg };
+    case C.info:
+    case C.infoStrong:
+    case C.primary:
+    case C.primaryText:
+    case C.primaryDark:
+      return { fg: C.infoStrong, bg: C.infoBg };
+    case C.accent:
+    case C.dangerStrong:
+    case C.dangerFill:
+      return { fg: C.dangerStrong, bg: C.dangerBg };
+    case C.teal:
+    case C.tealStrong:
+      return { fg: C.tealStrong, bg: C.tealBg };
+    case C.purple:
+    case C.purpleStrong:
+      return { fg: C.purpleStrong, bg: C.purpleBg };
+    default:
+      return { fg: C.text, bg: C.divider };
+  }
+}
 
 /** Target sentuh minimum (dp) — tombol, chip, baris yang bisa diketuk. */
 export const TOUCH = 48;
@@ -81,23 +121,36 @@ export const F = {
   xbold: 'PlusJakartaSans_800ExtraBold',
 };
 
-/** Skala tipografi — Display → H1-H3 → Body → Small → Caption → Label → Metric */
+/**
+ * Skala tipografi — Display → H1-H3 → Body → Small → Caption → Label → Metric.
+ * Tidak ada teks di bawah 12 dp: dibaca berdiri, di bawah lampu toko yang terang.
+ */
 export const T = {
   display: { fontSize: 30, lineHeight: 36, fontFamily: F.xbold, color: C.text, letterSpacing: -0.3 } as const,
   h1: { fontSize: 22, lineHeight: 28, fontFamily: F.xbold, color: C.text } as const,
   h2: { fontSize: 16, lineHeight: 22, fontFamily: F.bold, color: C.text } as const,
   h3: { fontSize: 14, lineHeight: 20, fontFamily: F.bold, color: C.text } as const,
   body: { fontSize: 14, lineHeight: 20, fontFamily: F.reg, color: C.text } as const,
-  small: { fontSize: 12.5, lineHeight: 18, fontFamily: F.reg, color: C.muted } as const,
+  small: { fontSize: 13, lineHeight: 18, fontFamily: F.reg, color: C.muted } as const,
   caption: {
-    fontSize: 10.5,
-    lineHeight: 14,
+    fontSize: 12,
+    lineHeight: 16,
     fontFamily: F.semi,
-    letterSpacing: 0.6,
+    letterSpacing: 0.4,
     textTransform: 'uppercase',
     color: C.muted,
   } as const,
-  label: { fontSize: 12.5, lineHeight: 16, fontFamily: F.semi, color: C.text } as const,
+  label: { fontSize: 13, lineHeight: 18, fontFamily: F.semi, color: C.text } as const,
+  /** badge / status pill text */
+  badge: { fontSize: 12, lineHeight: 16, fontFamily: F.bold } as const,
+  /** bottom-tab label */
+  tab: { fontSize: 12, lineHeight: 15, fontFamily: F.semi } as const,
+  /** secondary line under list rows: times, counts */
+  meta: { fontSize: 12, lineHeight: 16, fontFamily: F.reg, color: C.muted } as const,
+  button: { fontSize: 15, lineHeight: 20, fontFamily: F.bold, letterSpacing: 0.2 } as const,
+  buttonSmall: { fontSize: 14, lineHeight: 18, fontFamily: F.bold, letterSpacing: 0.2 } as const,
+  /** screen title in the navigation header */
+  header: { fontSize: 17, fontFamily: F.bold } as const,
   /** status bar & status lines read at a glance (strip, required-report ticks) */
   status: { fontSize: 13, lineHeight: 18, fontFamily: F.bold, color: C.text } as const,
   /** angka besar di KPI/metric card — mono tabular agar sejajar saat berubah */

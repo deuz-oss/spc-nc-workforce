@@ -5,7 +5,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import { Badge, Btn, Card, Chip, Empty, H, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { CATEGORY_LABEL, PJP_MANAGER_ROLES, PRODUCT_MANAGER_ROLES, STORE_MANAGER_ROLES, USER_MANAGER_ROLES } from '../config';
-import { C, F } from '../theme';
+import { C, F, T } from '../theme';
 import { scopeUsers, useCurrentUser, useStore } from '../store/useStore';
 import { Role, Store } from '../types';
 import { parseCsv } from '../utils/csv';
@@ -15,6 +15,7 @@ import { programDayKey } from '../utils/period';
 import { weekStart } from '../utils/pjp';
 import { parsePjpCsv, PJP_TEMPLATE } from '../utils/pjpImport';
 import { useAppRoute } from '../navigation';
+import { useNow } from '../components/useNow';
 
 // --- Store import -----------------------------------------------------------
 
@@ -210,8 +211,8 @@ function StoreImportSection() {
                   style={{ paddingVertical: 8, borderBottomWidth: 1, borderColor: C.divider, flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}
                 >
                   <View style={{ flexShrink: 1 }}>
-                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>{r.name}</Text>
-                    <Text style={{ color: C.muted, fontSize: 12 }} numberOfLines={1}>{r.city || '-'}</Text>
+                    <Text style={T.label} numberOfLines={1}>{r.name}</Text>
+                    <Text style={T.meta} numberOfLines={1}>{r.city || '-'}</Text>
                   </View>
                   <Badge label={CATEGORY_LABEL[r.category]} color={C.info} />
                 </View>
@@ -337,8 +338,7 @@ function UserImportSection() {
           Format kolom CSV:{'\n'}
           <Text style={{ fontFamily: F.bold, color: C.text }}>nama, username, password, role, kota, telepon</Text>
           {'\n'}Role valid: {VALID_ROLES.join(', ')}.{'\n'}
-          Tim diatur belakangan lewat tombol "Ubah" di layar Pengguna — impor CSV ini fokus pada penyediaan akun 215 orang
-          secara massal (PRD §13), bukan penugasan tim.
+          Tim diatur sesudahnya lewat tombol “Ubah” di layar Pengguna — impor ini hanya membuat akun secara massal.
         </Muted>
         <View style={{ gap: 8, marginTop: 10 }}>
           <Btn small variant="outline" title="Unduh Template CSV" onPress={downloadTemplate} />
@@ -475,8 +475,8 @@ function ProductImportSection() {
         <Muted>
           Format kolom CSV:{'\n'}
           <Text style={{ fontFamily: F.bold, color: C.text }}>sku, name, category</Text>
-          {'\n'}Kolom wajib: sku, name. Kategori opsional. SKU dipakai sebagai picklist di Stock Taking &amp;
-          Offtake (PRD §5.1) — tidak mengunci input manual bila SKU belum terdaftar.
+          {'\n'}Kolom wajib: sku, name. Kategori opsional. Produk ini muncul sebagai daftar di Stock Taking, Offtake
+          dan Price Monitoring; NC tetap bisa menambah kode produk yang belum terdaftar.
         </Muted>
         <View style={{ gap: 8, marginTop: 10 }}>
           <Btn small variant="outline" title="Unduh Template CSV" onPress={downloadTemplate} />
@@ -532,8 +532,9 @@ function PjpImportSection() {
   const stores = useStore((s) => s.stores);
   const importSchedules = useStore((s) => s.importSchedules);
 
-  const thisWeek = weekStart(Date.now());
-  const [week, setWeek] = useState(thisWeek + 7 * DAY);
+  const now = useNow();
+  const thisWeek = weekStart(now);
+  const [week, setWeek] = useState(() => weekStart(Date.now()) + 7 * DAY);
   const [table, setTable] = useState<string[][] | null>(null);
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState<{ created: number; skipped: number; errors: string[] } | null>(null);
@@ -675,10 +676,10 @@ function PjpImportSection() {
                   style={{ paddingVertical: 8, borderBottomWidth: 1, borderColor: C.divider, flexDirection: 'row', justifyContent: 'space-between', gap: 8 }}
                 >
                   <View style={{ flexShrink: 1 }}>
-                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>
+                    <Text style={T.label} numberOfLines={1}>
                       {storeName.get(p.storeId)}
                     </Text>
-                    <Text style={{ color: C.muted, fontSize: 12 }} numberOfLines={1}>
+                    <Text style={T.meta} numberOfLines={1}>
                       {ncName.get(p.ncId)}
                     </Text>
                   </View>

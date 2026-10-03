@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { Badge, Btn, Card, Chip, Empty, Field, H, Input, ListRow, Muted, SectionHeader, StatCard, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { CERT_MANAGER_ROLES, CERT_TYPES } from '../config';
-import { C, F } from '../theme';
+import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Certification } from '../types';
 import { parseSessionDate, passRate, toSessionDateText } from '../utils/certification';
@@ -43,7 +43,7 @@ export default function CertificationsScreen() {
 
   // --- session entry state ---
   const [certType, setCertType] = useState(CERT_TYPES[0].key);
-  const [dateText, setDateText] = useState(toSessionDateText(Date.now()));
+  const [dateText, setDateText] = useState(() => toSessionDateText(Date.now()));
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [q, setQ] = useState('');
   const [marks, setMarks] = useState<Record<string, Mark>>({});
@@ -142,7 +142,7 @@ export default function CertificationsScreen() {
         contentContainerStyle={{ padding: 16, gap: 12, paddingBottom: canEdit ? 110 : 24, maxWidth: 900, width: '100%', alignSelf: 'center' }}
         keyboardShouldPersistTaps="handled"
       >
-        <SectionHeader title="Sertifikasi" subtitle="Hasil sertifikasi NC & TL — KPI Lead Trainer (PRD §9)" />
+        <SectionHeader title="Sertifikasi" subtitle="Catat hasil sesi sertifikasi NC dan TL" />
 
         {canEdit && (
           <Card style={{ gap: 10 }}>
@@ -189,10 +189,10 @@ export default function CertificationsScreen() {
                       }}
                     >
                       <View style={{ flexShrink: 1 }}>
-                        <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }} numberOfLines={1}>
+                        <Text style={T.label} numberOfLines={1}>
                           {u.name}
                         </Text>
-                        <Text style={{ fontFamily: F.reg, fontSize: 11.5, color: C.muted }} numberOfLines={1}>
+                        <Text style={T.meta} numberOfLines={1}>
                           {u.username} · {teamName.get(u.teamId ?? '') ?? 'Tanpa tim'}
                         </Text>
                       </View>

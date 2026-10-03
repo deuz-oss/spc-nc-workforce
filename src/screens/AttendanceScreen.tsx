@@ -55,7 +55,7 @@ export default function AttendanceScreen() {
         data={mine}
         keyExtractor={(a) => a.id}
         contentContainerStyle={{ padding: 16, gap: 10 }}
-        ListEmptyComponent={<Empty text="Belum ada riwayat. Clock in dari Dashboard untuk memulai." />}
+        ListEmptyComponent={<Empty icon="time-outline" text="Belum ada riwayat absensi. Clock in dari Dashboard untuk memulai." />}
         renderItem={({ item: a }) => (
           <ListRow
             title={fmtDate(a.clockInAt)}

@@ -60,6 +60,8 @@ export default function StoresScreen() {
         contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 10 }}
         ListEmptyComponent={
           <Empty
+            icon={q.trim() ? 'search-outline' : 'storefront-outline'}
+            action={canImport && !q.trim() ? { label: 'Impor CSV', onPress: () => navigation.navigate('Import', { mode: 'stores' }) } : undefined}
             text={
               q.trim()
                 ? `Tidak ada toko yang cocok dengan "${q.trim()}".`

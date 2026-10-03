@@ -106,7 +106,8 @@ export default function StoreVisitScreen() {
         ? `Belum diisi: ${missing.join(', ')}. Setelah check-out, laporan untuk kunjungan ini tidak bisa ditambah lagi.`
         : 'Semua laporan wajib sudah diisi. Check-out menutup kunjungan di toko ini.',
       [
-        { label: missing.length ? 'Isi Dulu' : 'Batal' },
+        // Missing reports: filling them in is the recommended (main) action.
+        ...(missing.length ? [] : [{ label: 'Batal' }]),
         {
           label: missing.length ? 'Tetap Check-out' : 'Check-out',
           destructive: missing.length > 0,
@@ -126,6 +127,7 @@ export default function StoreVisitScreen() {
             }
           },
         },
+        ...(missing.length ? [{ label: 'Isi Dulu' }] : []),
       ],
     );
   };
@@ -153,12 +155,12 @@ export default function StoreVisitScreen() {
             />
           </View>
           <Muted style={{ marginTop: 4 }}>Check-in: {fmtDateTime(visit.checkInAt)}</Muted>
-          <Muted>Check-out: {fmtDateTime(visit.checkOutAt)}</Muted>
+          {done && <Muted>Check-out: {fmtDateTime(visit.checkOutAt)}</Muted>}
           {!done && !isStale && <VisitTimer since={visit.checkInAt} />}
           <View style={{ flexDirection: 'row', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
             <GeoValidBadge
               ok={visit.geoValid}
-              okLabel={`Geo valid (${visit.storeDistanceM ?? '-'} m)`}
+              okLabel={`Lokasi sesuai (${visit.storeDistanceM ?? '-'} m)`}
               badLabel={`Di luar radius (${visit.storeDistanceM ?? '?'} m, batas ${VISIT_VALID_RADIUS_M}m)`}
             />
           </View>

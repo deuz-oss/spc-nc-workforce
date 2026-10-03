@@ -1,7 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, View } from 'react-native';
 import WebView from 'react-native-webview';
-import { C, F, R } from '../theme';
+import { C, R, T } from '../theme';
 
 export interface MapMarker {
   lat: number;
@@ -133,7 +133,7 @@ export function MapPlaceholder({ height = 120, text }: { height?: number; text: 
         justifyContent: 'center',
       }}
     >
-      <Text style={{ color: C.muted, fontFamily: F.reg, fontSize: 13 }}>{text}</Text>
+      <Text style={[T.body, { color: C.muted }]}>{text}</Text>
     </View>
   );
 }
