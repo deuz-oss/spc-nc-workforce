@@ -321,7 +321,8 @@ The current project is a **demo/staging** project: it has the seeded demo accoun
 this repo. Production gets its own Supabase project.
 
 1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0021`
-   in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
+   in order — `npx supabase link --project-ref <prod-ref>` then `npx supabase db push --linked`, or the SQL Editor.
+   Link the CLI back to staging afterwards (`npm run gen:types` and other `--linked` commands use the link). Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
    dashboard (Authentication → Add user, email `<username>@internal.spc`), then in the SQL Editor:
