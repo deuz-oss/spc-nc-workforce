@@ -25,9 +25,11 @@ export function TrackingWatcher() {
     if (!me || me.role === 'reckitt_client' || me.role === 'super_admin') return null;
     return s.attendances.find((a) => a.userId === me.id && !a.clockOutAt)?.id ?? null;
   });
+  // The effect depends on who is signed in (by id), not on the user object.
+  const meId = me?.id ?? null;
 
   useEffect(() => {
-    if (!me || !activeId) {
+    if (!meId || !activeId) {
       void clearTrackingContext();
       if (Platform.OS !== 'web') {
         Location.hasStartedLocationUpdatesAsync(LOCATION_TASK_NAME)
@@ -37,7 +39,7 @@ export function TrackingWatcher() {
       return;
     }
 
-    const userId = me.id; // narrowed for the async closure below
+    const userId = meId; // narrowed for the async closure below
     let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
 
@@ -93,7 +95,7 @@ export function TrackingWatcher() {
       cancelled = true;
       sub?.remove();
     };
-  }, [me && me.id, activeId]);
+  }, [meId, activeId]);
 
   return null;
 }

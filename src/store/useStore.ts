@@ -148,8 +148,8 @@ export interface ManagementSummary {
   offtakeUnits: number;
   gwpGivenQty: number;
   ntgConsumers: number;
-  daily: Array<{ day: string; own: number; total: number; units: number }>;
-  channels: Array<{ channel: string; category: string; own: number; total: number }>;
+  daily: { day: string; own: number; total: number; units: number }[];
+  channels: { channel: string; category: string; own: number; total: number }[];
 }
 
 /** One admin_audit_log row (migration 0016). */
@@ -252,7 +252,7 @@ interface StoreState {
   }): Promise<string | null>;
   /** Bulk create, PRD §13 — 215-account scale needs a path beyond one-at-a-time. */
   addUsersBulk(
-    rows: Array<{ name: string; username: string; password: string; role: Role; teamId: string | null; city?: string; phone?: string }>,
+    rows: { name: string; username: string; password: string; role: Role; teamId: string | null; city?: string; phone?: string }[],
   ): Promise<{ created: number; errors: string[] }>;
   toggleUserActive(id: string): Promise<void>;
   updateUser(
@@ -291,21 +291,21 @@ interface StoreState {
   upsertProduct(p: Product): Promise<void>;
   /** Bulk create from CSV (Data Analyst/Admin Data Entry/Super Admin), mirrors addUsersBulk's shape. */
   addProductsBulk(
-    rows: Array<{ sku: string; name: string; category?: string }>,
+    rows: { sku: string; name: string; category?: string }[],
   ): Promise<{ created: number; errors: string[] }>;
 
   /** Stock Taking (PRD §5.1) — offline-queued like clock/check ops (text-primary, no required photo). */
   submitStockTaking(
     visitId: string,
     storeId: string,
-    rows: Array<{ sku: string; qtyOnHand: number; outOfStock: boolean }>,
+    rows: { sku: string; qtyOnHand: number; outOfStock: boolean }[],
     photoUri?: string,
   ): Promise<{ queued: boolean }>;
   /** Offtake (PRD §5.3) — offline-queued; outlier flag is server-computed (trigger), never set client-side. */
   submitOfftake(
     visitId: string,
     storeId: string,
-    rows: Array<{ sku: string; unitsSold: number; revenue?: number }>,
+    rows: { sku: string; unitsSold: number; revenue?: number }[],
   ): Promise<{ queued: boolean; outlierSkus: string[] }>;
 
   /** NTG & GWP consumer funnel (PRD §5.4) — online-required, like upsertStore (richer/less frequent than clock/check writes). */
@@ -318,12 +318,12 @@ interface StoreState {
   saveConsumerWithStep(c: Consumer, step: NtgGwp | null): Promise<string | null>;
   /** PJP: plans stores for an NC on WIB days (scoped by schedules_write RLS,
    * 0020). Already-planned store/day pairs are skipped. Returns an error message or null. */
-  addSchedules(ncId: string, plans: Array<{ storeId: string; plannedDate: number }>): Promise<string | null>;
+  addSchedules(ncId: string, plans: { storeId: string; plannedDate: number }[]): Promise<string | null>;
   deleteSchedule(id: string): Promise<string | null>;
   /** Bulk PJP plans (Import → Jadwal PJP) for any NCs in scope. Plans that
    * already exist are skipped server-side; `errors` describes failed chunks. */
   importSchedules(
-    plans: Array<{ ncId: string; storeId: string; plannedDate: number }>,
+    plans: { ncId: string; storeId: string; plannedDate: number }[],
   ): Promise<{ created: number; skipped: number; errors: string[] }>;
   /** Loads one consumer's complete funnel history (the store only holds the
    * recent window) and merges it in. Best-effort; returns an error message or null. */
@@ -357,7 +357,7 @@ interface StoreState {
   submitPriceMonitoring(
     visitId: string,
     storeId: string,
-    rows: Array<{ sku: string; ownPrice: number; competitorPrices: number[] }>,
+    rows: { sku: string; ownPrice: number; competitorPrices: number[] }[],
     photoUri?: string,
   ): Promise<{ queued: boolean }>;
 
@@ -370,7 +370,7 @@ interface StoreState {
   reviewReport(reportType: ReportType, reportId: string, status: ReportReviewStatus, note?: string): Promise<string | null>;
   /** Reviews several report rows at once (e.g. every SKU line of one Stock Taking) in a single write. */
   reviewReports(
-    refs: Array<{ reportType: ReportType; reportId: string }>,
+    refs: { reportType: ReportType; reportId: string }[],
     status: ReportReviewStatus,
     note?: string,
   ): Promise<string | null>;
@@ -481,9 +481,9 @@ function restoreRows(
   get: () => StoreState,
   key: keyof StoreState,
   ids: string[],
-  before: Array<{ id: string }>,
+  before: { id: string }[],
 ) {
-  const current = get()[key] as unknown as Array<{ id: string }>;
+  const current = get()[key] as unknown as { id: string }[];
   set({ [key]: rollbackRows(current, ids, before) } as unknown as Partial<StoreState>);
 }
 
@@ -919,8 +919,8 @@ async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVis
     makeOp: (localPhotoUri: string) => QueuedOp;
   },
 ): Promise<{ queued: boolean }> {
-  const rowsOf = () => get()[p.stateKey] as unknown as Array<{ id: string }>;
-  const setRows = (rows: Array<{ id: string }>) => set({ [p.stateKey]: rows } as unknown as Partial<StoreState>);
+  const rowsOf = () => get()[p.stateKey] as unknown as { id: string }[];
+  const setRows = (rows: { id: string }[]) => set({ [p.stateKey]: rows } as unknown as Partial<StoreState>);
 
   if (Platform.OS !== 'web') {
     let localPhotoUri: string;
@@ -966,7 +966,7 @@ async function submitRequiredPhotoReport<K extends 'shareOfShelfRows' | 'paidVis
 }
 
 /** SKUs (lower-cased) already reported in this visit for a per-SKU module. */
-export function reportedSkus(rows: Array<{ visitId: string; sku: string }>, visitId: string): Set<string> {
+export function reportedSkus(rows: { visitId: string; sku: string }[], visitId: string): Set<string> {
   return new Set(rows.filter((r) => r.visitId === visitId).map((r) => r.sku.toLowerCase()));
 }
 
@@ -980,7 +980,7 @@ function assertVisitOpen(get: () => StoreState, visitId: string) {
 /** One report per visit per SKU (category / visibility type for SoS / PV) —
  * a second submission would double the numbers. Mirrors the server-side
  * reject_duplicate_report trigger (0013), which also covers other devices. */
-function assertNewSkus(rows: Array<{ visitId: string; sku: string }>, visitId: string, skus: string[]) {
+function assertNewSkus(rows: { visitId: string; sku: string }[], visitId: string, skus: string[]) {
   const done = reportedSkus(rows, visitId);
   const dup = skus.filter((sku) => done.has(sku.toLowerCase()));
   if (dup.length) throw new Error(`SKU berikut sudah dilaporkan di kunjungan ini: ${dup.join(', ')}.`);
@@ -1121,7 +1121,7 @@ const SNAPSHOT_KEYS = [
   'shareOfShelfRows',
   'paidVisibilityRows',
   'priceMonitoringRows',
-] as const satisfies ReadonlyArray<keyof StoreState>;
+] as const satisfies readonly (keyof StoreState)[];
 
 function buildOfflineSnapshot(s: StoreState, userId: string): OfflineSnapshot {
   const since = Date.now() - OFFLINE_CACHE_DAYS * 86400000;
@@ -1190,7 +1190,7 @@ function subscribeRealtime(
   for (const t of SNAPSHOT_TABLES) {
     if (t.realtime === false || !loadsTable(t.table, role)) continue;
     ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t.table }, (payload) => {
-      const list = get()[t.key] as unknown as Array<{ id: string }>;
+      const list = get()[t.key] as unknown as { id: string }[];
       if (payload.eventType === 'DELETE') {
         set({ [t.key]: list.filter((r) => r.id !== (payload.old as any).id) } as unknown as Partial<StoreState>);
         return;
@@ -1298,7 +1298,7 @@ async function fetchOwnRoutePoints(userId: string, attendanceRows: any[]): Promi
  * need its whole history, is kept on the consumer row (current_stage, 0019);
  * ConsumerDetail fetches one consumer's full history when opened.
  */
-const WINDOWED_TABLES: Array<{
+const WINDOWED_TABLES: {
   table: string;
   key: keyof StoreState;
   col: string;
@@ -1306,7 +1306,7 @@ const WINDOWED_TABLES: Array<{
   map: (r: any) => any;
   /** Per-SKU report tables — by far the largest; see historyWindow(). */
   heavy?: true;
-}> = [
+}[] = [
   { table: 'visits', key: 'visits', col: 'check_in_at', keepNull: 'check_out_at', map: mapVisit },
   { table: 'attendances', key: 'attendances', col: 'clock_in_at', keepNull: 'clock_out_at', map: (a) => mapAttendance(a, []) },
   { table: 'stock_taking', key: 'stockTakingRows', col: 'created_at', map: mapStockTaking, heavy: true },
@@ -1848,7 +1848,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (failed) return failed.error!.message;
     const patch: Partial<StoreState> = { historyFrom: null };
     WINDOWED_TABLES.forEach((w, i) => {
-      const current = get()[w.key] as unknown as Array<{ id: string }>;
+      const current = get()[w.key] as unknown as { id: string }[];
       const seen = new Set(current.map((r) => r.id));
       const older = results[i].data.map(w.map).filter((r: { id: string }) => !seen.has(r.id));
       (patch as any)[w.key] = [...current, ...older];
@@ -2922,7 +2922,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     const windowed = new Set(WINDOWED_TABLES.map((w) => w.table));
     const patch: Partial<StoreState> = {};
     for (const t of SNAPSHOT_TABLES) {
-      const server = rows[t.table].map(t.map) as Array<{ id: string }>;
+      const server = rows[t.table].map(t.map) as { id: string }[];
       if (!windowed.has(t.table)) {
         // Small, fully-loaded tables: server is the whole truth, so deletions
         // and deactivations apply. Their writes are online-only, never queued.
@@ -2931,7 +2931,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       }
       // Field activity: server rows win; local-only rows are kept — they are
       // either older history (loadFullHistory) or offline ops still queued.
-      const local = get()[t.key] as unknown as Array<{ id: string }>;
+      const local = get()[t.key] as unknown as { id: string }[];
       const ids = new Set(server.map((r) => r.id));
       (patch as any)[t.key] = [...server, ...local.filter((r) => !ids.has(r.id))];
     }

@@ -17,7 +17,7 @@ export const LOCATION_TASK_NAME = 'spc-nc-background-location';
 
 /** Shared by the native background task and the web foreground watcher. */
 export async function handleLocations(
-  locations: Array<Pick<Location.LocationObject, 'coords' | 'timestamp' | 'mocked'>>,
+  locations: Pick<Location.LocationObject, 'coords' | 'timestamp' | 'mocked'>[],
 ): Promise<void> {
   // Positions from a mock-location app are not where the phone is — never record them.
   const real = locations.filter((l) => !l.mocked);
