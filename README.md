@@ -354,6 +354,9 @@ this repo. Production gets its own Supabase project.
 - **Unit tests:** `npm test` (Node's built-in runner via `tsx`, no extra dependencies) — `src/**/*.test.ts` covering
   the offline-queue replay rules (`src/store/replay.ts`), periods/month keys/history window, KPI + attrition
   helpers, geo, and CSV. Keep React Native/Supabase-free logic in plain modules so it stays testable.
+- **Lint:** `npm run lint` (ESLint 9, `eslint-config-expo`, incl. the React Compiler hook rules) — 0 errors. The
+  remaining warnings are style-only (`Array<T>`) or `exhaustive-deps` in `useStore.ts`, `locationTask.ts` and
+  `TrackingWatcher.tsx`, left untouched on purpose (offline queue / background location).
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
@@ -363,6 +366,30 @@ this repo. Production gets its own Supabase project.
 - **DB types:** `src/lib/database.types.ts` is generated from the live schema and types the Supabase client and
   the row mappers. After a migration, `npx supabase link --project-ref <ref>` (once) then `npm run gen:types`,
   and commit the result — `tsc` then flags code that no longer matches the schema.
+
+## UI conventions (field use)
+
+The app is used standing in a store, one-handed, in bright light, on low/mid-range Android, by people who fill
+in reports many times a day. These rules hold everywhere; the shared pieces enforce most of them:
+
+- **Tokens only** (`src/theme.ts`): colors from `C`, text from `T` (nothing under 12 dp), spacing `SP`, radius
+  `R`. No hex colors or font sizes in screens. Status pills use `toneOf(color)` — tint background, text >= 7:1;
+  key status text uses the `*Strong` colors (>= 7:1 on every tint).
+- **Targets:** every tappable thing is >= `TOUCH` (48 dp) — `Btn` (incl. `small`), `Chip`, tappable `ListRow`,
+  `IconButton`, dialog buttons, the 56 dp tab bar. One primary action per screen, in a `StickyFooter` (thumb zone).
+- **Status is always visible:** `StatusStrip` under every header (tabs and pushed screens) — clock-in time,
+  checked-in store, online/offline (`useOnline`), unsent count; tap = active visit.
+- **Never lose input:** report/consumer/survey/quiz forms keep a draft on the phone (`useDraft`, AsyncStorage
+  `draft:<visitId>:<form>`), restored with a `DraftNotice`; drafts are cleared on submit and at check-out.
+- **Offline:** field actions (clock, visits, reports) go through the offline queue. Screens whose saves go
+  straight to the server show `OnlineOnlyNote` and disable their save buttons while offline.
+- **States:** lists and remote loads use `Empty` (icon + optional action), `LoadingCard`/`SkeletonBlock`, and
+  `ErrorState` (with "Coba Lagi"). Dialogs: the last button is the main action (filled); others are outlined; a
+  destructive choice that isn't the recommended one is a red outline. No fade when reduce-motion is on.
+- **Accessibility:** role/label/state are built into the primitives (`ui.tsx`); status never relies on color
+  alone (icon or text too). Copy is plain Bahasa Indonesia — no PRD references or developer notes in the UI.
+- **Shared field actions:** clock in/out and store check-in live in `components/fieldActions.ts` (geofence,
+  mock-GPS and one-visit-at-a-time rules, plus the GPS/retry/maps feedback) — screens call them, not the store.
 
 ## Reused vs New (PRD §3)
 
@@ -396,8 +423,10 @@ src/
   tasks/locationTask.ts    # background GPS task -> routeBuffer (works headless)
   utils/                   # period (WIB program clock), kpi, geo, routeBuffer/routeSync, offlineQueue,
                            # offlineCache, storage (photos), wa, funnel, password, csv, export, errorReport
-  components/              # UI kit, dialog host, TrackingWatcher, SkuPicker, EvidencePhotoField,
-                           # LeafletMap, LiveTeamMap, ErrorBoundary
+  components/              # UI kit (ui.tsx), dialog host, StatusStrip, fieldActions (clock/check-in),
+                           # useDraft + DraftNotice, useOnline + OnlineOnlyNote, useNow, QtyStepper,
+                           # ProductQtyList, SkuPicker, EvidencePhotoField, ReportPhotoThumb,
+                           # TrackingWatcher, LeafletMap, LiveTeamMap, ErrorBoundary
   screens/                 # one file per screen (field reports, validation, dashboards, admin)
 supabase/
   migrations/0001…0021     # schema, RLS, triggers, RPCs — run in order (see Backend)
