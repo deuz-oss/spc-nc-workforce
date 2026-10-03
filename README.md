@@ -310,8 +310,9 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 2. **Give it to EAS builds** as a file secret (read by `app.config.js`):
    `npx eas-cli env:create --name GOOGLE_SERVICES_JSON --type file --value ./google-services.json --environment preview --environment production --visibility secret`
 3. **FCM V1 key for Expo's push service** — Firebase → Project settings → Service accounts → *Generate new private
-   key* (JSON), then `npx eas-cli credentials` → Android → the build profile → *Google Service Account* → *Manage your
-   Google Service Account Key for Push Notifications (FCM V1)* → upload it. Delete the local JSON afterwards.
+   key* (JSON), then `npx eas-cli credentials` → Android → any build profile → *Google Service Account* → *Manage your
+   Google Service Account Key for Push Notifications (FCM V1)* → upload it. Delete the local JSON afterwards. The key
+   belongs to the application identifier (`com.spc.ncworkforce`), so every profile — preview, production — uses it.
 4. Rebuild (`npx eas-cli build -p android --profile preview`). Test: log in on the phone as an NC, allow
    notifications, background the app, send it a chat message from its TL.
 
@@ -331,7 +332,7 @@ this repo. Production gets its own Supabase project.
    for `send-push`.
 4. **EAS production env**: `npx eas-cli env:create --environment production` for `EXPO_PUBLIC_SUPABASE_URL` and
    `EXPO_PUBLIC_SUPABASE_ANON_KEY` (the production values; plaintext visibility). `GOOGLE_SERVICES_JSON` is
-   already set for production; upload the FCM V1 key for the **production** profile too (`npx eas-cli credentials`).
+   already set for production; the FCM V1 key is shared with preview (it's per package, not per profile).
 5. **Real data**, in this order, as the production Super Admin: teams (Pengguna → Kelola Tim) → accounts (Import →
    Akun Pengguna CSV, then assign teams/TLs) → stores (Import → Toko CSV; set GPS pins via Store Detail → Ubah Data
    Toko) → each team's home-base pin + radius for the clock-in geofence (Pengguna → Kelola Tim) → products (Import → Master Produk) → monthly targets (Target Bulanan, CSV). Rehearse the whole sequence
