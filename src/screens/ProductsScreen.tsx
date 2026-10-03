@@ -90,7 +90,7 @@ function AddProductForm({ onDone }: { onDone: () => void }) {
 
 export default function ProductsScreen() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const products = useStore((s) => s.products);
   const upsertProduct = useStore((s) => s.upsertProduct);
   const [q, setQ] = useState('');

@@ -8,7 +8,7 @@ import { useCurrentUser, useStore, storeScope } from '../store/useStore';
 
 export default function StoresScreen() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const stores = useStore((s) => s.stores);
   const teams = useStore((s) => s.teams);
   const users = useStore((s) => s.users);

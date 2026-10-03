@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { FlatList, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Badge, Btn, Empty, Input, ListRow, SectionHeader } from '../components/ui';
 import { NTG_GWP_STAGE_LABEL } from '../config';
 import { C } from '../theme';
@@ -11,8 +12,8 @@ import { NtgGwpStage } from '../types';
  * single visit's store — when opened from StoreVisitScreen with a visitId,
  * shows a shortcut to start a new consumer tied to that visit. */
 export default function ConsumersScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'Consumers'>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const visitId: string | undefined = route.params?.visitId;
   const storeId: string | undefined = route.params?.storeId;

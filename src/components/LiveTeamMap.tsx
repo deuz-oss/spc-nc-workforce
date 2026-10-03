@@ -28,7 +28,7 @@ const STATE_META: Record<LiveState, { label: string; color: string }> = {
  * today's route.
  */
 export function LiveTeamMap({ ncUsers, visits, stores }: { ncUsers: User[]; visits: Visit[]; stores: Store[] }) {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const fetchLivePositions = useStore((s) => s.fetchLivePositions);
   const [positions, setPositions] = useState<LivePosition[] | null>(null);
   const [error, setError] = useState<string | null>(null);

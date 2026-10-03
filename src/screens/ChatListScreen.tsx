@@ -32,7 +32,7 @@ function findConversation(conversations: Conversation[], type: ConversationType,
 
 export default function ChatListScreen() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
   const conversations = useStore((s) => s.conversations);

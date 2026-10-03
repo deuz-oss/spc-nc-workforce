@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Badge, Btn, Card, GeoValidBadge, H, ListRow, Muted, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { VISIT_VALID_RADIUS_M } from '../config';
@@ -23,7 +24,9 @@ const REPORT_MODULES: Array<{ key: string; label: string; group: string; cadence
   { key: 'survey', label: 'Survey', group: 'Weekly/periodic Task', cadence: 'Ad hoc' },
 ];
 
-const MODULE_ROUTE: Record<string, string> = {
+type ModuleRoute = 'StockTaking' | 'Offtake' | 'Consumers' | 'ShareOfShelf' | 'PaidVisibility' | 'PriceMonitoring' | 'SurveyList';
+
+const MODULE_ROUTE: Record<string, ModuleRoute> = {
   stock_taking: 'StockTaking',
   offtake: 'Offtake',
   ntg_gwp: 'Consumers',
@@ -34,8 +37,8 @@ const MODULE_ROUTE: Record<string, string> = {
 };
 
 export default function StoreVisitScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'StoreVisit'>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const visitId: string | undefined = route.params?.visitId;
   const visit = useStore((s) => s.visits.find((v) => v.id === visitId));
@@ -160,7 +163,10 @@ export default function StoreVisitScreen() {
               {REPORT_MODULES.map((m) => (
                 <ListRow
                   key={m.key}
-                  onPress={() => navigation.navigate(MODULE_ROUTE[m.key], { visitId: visit.id, storeId: visit.storeId })}
+                  onPress={() =>
+                    // Every module route takes the same { visitId, storeId } params.
+                    navigation.navigate(MODULE_ROUTE[m.key] as 'StockTaking', { visitId: visit.id, storeId: visit.storeId })
+                  }
                   title={m.label}
                   subtitle={`${m.group} · ${m.cadence}`}
                   trailing={filled.has(m.key) ? <Badge label="Terisi" color={C.ok} /> : undefined}

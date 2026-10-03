@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
@@ -22,8 +23,8 @@ import { programDayKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
 
 export default function ConsumerDetailScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'ConsumerDetail'>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const consumerId: string | undefined = route.params?.consumerId;
   const visitId: string | undefined = route.params?.visitId;
@@ -255,7 +256,7 @@ export default function ConsumerDetailScreen() {
                     small
                     variant="outline"
                     title="Mulai Nutrition Quiz"
-                    onPress={() => navigation.navigate('NutritionQuiz', { consumerId: existing!.id, visitId })}
+                    onPress={() => navigation.navigate('NutritionQuiz', { consumerId: existing!.id, visitId: visit!.id })}
                   />
                 </View>
               )}

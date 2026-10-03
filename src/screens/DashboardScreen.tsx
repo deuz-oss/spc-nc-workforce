@@ -96,7 +96,7 @@ function NcStatsCard() {
   const attendances = useStore((s) => s.attendances);
   const visits = useStore((s) => s.visits);
   const scorecards = useStore((s) => s.scorecards);
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const range = getRange('monthly');
   const stat = computeNcStat(me.id, me.name, attendances, visits, range);
   const status = statusOf(stat);
@@ -128,7 +128,7 @@ function NcStatsCard() {
 /** Phase 2 (PRD §16) — same-day glance at the 3 core daily modules for an NC. */
 function TodaysReportCard() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const visits = useStore((s) => s.visits);
   const stockTakingRows = useStore((s) => s.stockTakingRows);
   const offtakeRows = useStore((s) => s.offtakeRows);
@@ -178,7 +178,7 @@ export default function DashboardScreen() {
   const refreshControl = useDataRefresh();
   const users = useStore((s) => s.users);
   const stores = useStore((s) => s.stores);
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
 
   // pm/reckitt_client/data_analyst get the full PRD §10/§11 management
   // dashboard (Phase 4a, PRD §16) as their entire screen — it's its own

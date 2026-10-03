@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
@@ -14,8 +15,8 @@ import { StoreCategory } from '../types';
 const CATEGORIES: StoreCategory[] = ['premium', 'super_premium'];
 
 export default function ShareOfShelfScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'ShareOfShelf'>();
+  const navigation = useNavigation();
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 

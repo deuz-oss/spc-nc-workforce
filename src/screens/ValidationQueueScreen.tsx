@@ -64,7 +64,7 @@ function autoFlagReason(item: ReportItem, visitGeoValid: boolean | undefined): s
 const remotePhoto = (ref?: string) => (photoStoragePath(ref) ? ref : undefined);
 
 export default function ValidationQueueScreen() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const refreshControl = useDataRefresh();
   const users = useStore((s) => s.users);

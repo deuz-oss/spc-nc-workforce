@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
@@ -7,8 +7,18 @@ import { useDataRefresh } from '../components/useDataRefresh';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { CATEGORY_LABEL, PRODUCT_MANAGER_ROLES, TARGET_MANAGER_ROLES } from '../config';
 import { C, F, T } from '../theme';
-import { useCurrentUser, useStore } from '../store/useStore';
-import { getRange, inRange, monthKey, monthLabel, PERIODS, PeriodKey, programParts, shiftMonth } from '../utils/period';
+import { ManagementSummary, useCurrentUser, useStore } from '../store/useStore';
+import {
+  getRange,
+  inRange,
+  monthKey,
+  monthLabel,
+  PERIODS,
+  PeriodKey,
+  programDayKey,
+  programParts,
+  shiftMonth,
+} from '../utils/period';
 import { toCsv } from '../utils/csv';
 import { fmtDateTime } from '../utils/format';
 import { exportCsv } from '../utils/export';
@@ -82,7 +92,7 @@ function dayBuckets(range: { from: number; to: number }, maxBuckets = 31): Array
 export default function ManagementDashboard() {
   const me = useCurrentUser()!;
   const refreshControl = useDataRefresh();
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const hidePii = me.role === 'reckitt_client'; // PRD §11 review note — structural, derived from session role
 
   const users = useStore((s) => s.users);
@@ -146,10 +156,38 @@ export default function ManagementDashboard() {
     [ntgGwps, visitsById, storeIds, range],
   );
 
-  const totalFacing = sosInRange.reduce((t, r) => t + r.totalFacingCount, 0);
-  const ownFacing = sosInRange.reduce((t, r) => t + r.ownFacingCount, 0);
+  // Figures come from the server (management_summary, 0018) for any period and
+  // filter — the device holds only a short row-level window for monitor roles.
+  // Offline (or before 0018 is applied) they fall back to the rows on the device.
+  const fetchManagementSummary = useStore((s) => s.fetchManagementSummary);
+  const filtersActive = !!(city || channel || category || tlId || storeQuery.trim());
+  const summaryKey = `${range.from}|${range.to}|${filtersActive ? [...storeIds].sort().join(',') : '*'}`;
+  const [summary, setSummary] = useState<{ key: string; data: ManagementSummary } | null>(null);
+  const [summaryFailed, setSummaryFailed] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    // Debounced: the store-name search changes the key on every keystroke.
+    const t = setTimeout(() => {
+      fetchManagementSummary(range, filtersActive ? [...storeIds] : null)
+        .then((data) => {
+          if (cancelled) return;
+          setSummary({ key: summaryKey, data });
+          setSummaryFailed(false);
+        })
+        .catch(() => !cancelled && setSummaryFailed(true));
+    }, 400);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [summaryKey, fetchManagementSummary]);
+  const server = summary?.key === summaryKey ? summary.data : null;
+
+  const totalFacing = server?.totalFacing ?? sosInRange.reduce((t, r) => t + r.totalFacingCount, 0);
+  const ownFacing = server?.ownFacing ?? sosInRange.reduce((t, r) => t + r.ownFacingCount, 0);
   const sosPct = totalFacing > 0 ? Math.round((100 * ownFacing) / totalFacing) : null;
-  const offtakeSum = offtakeInRange.reduce((t, r) => t + r.unitsSold, 0);
+  const offtakeSum = server?.offtakeUnits ?? offtakeInRange.reduce((t, r) => t + r.unitsSold, 0);
 
   const monthlyKey = month;
   const targetSum = targets
@@ -158,38 +196,54 @@ export default function ManagementDashboard() {
   const gwpAllocationSum = targets
     .filter((t) => t.periodKey === monthlyKey && (t.storeId === null || storeIds.has(t.storeId)))
     .reduce((sum, t) => sum + (t.gwpAllocation ?? 0), 0);
-  const gwpGivenSum = ntgInRange.filter((g) => g.stage === 'gwp_given').reduce((t, g) => t + (g.gwpQty ?? 0), 0);
+  const gwpGivenSum =
+    server?.gwpGivenQty ?? ntgInRange.filter((g) => g.stage === 'gwp_given').reduce((t, g) => t + (g.gwpQty ?? 0), 0);
   const gwpAbsorptionPct = gwpAllocationSum > 0 ? Math.round((100 * gwpGivenSum) / gwpAllocationSum) : null;
 
   const ntgConfirmedStages = new Set(['ntg_confirmed', 'gwp_given', 'wa_followup_scheduled']);
-  const ntgCount = new Set(ntgInRange.filter((g) => ntgConfirmedStages.has(g.stage)).map((g) => g.consumerId)).size;
+  const ntgCount =
+    server?.ntgConsumers ?? new Set(ntgInRange.filter((g) => ntgConfirmedStages.has(g.stage)).map((g) => g.consumerId)).size;
 
   const buckets = useMemo(() => dayBuckets(range), [range]);
+  const serverDays = useMemo(() => new Map((server?.daily ?? []).map((d) => [d.day, d])), [server]);
   const sosTrend = buckets.map((b) => {
-    const rows = sosInRange.filter((r) => r.createdAt >= b.from && r.createdAt < b.to);
-    const tot = rows.reduce((t, r) => t + r.totalFacingCount, 0);
-    const own = rows.reduce((t, r) => t + r.ownFacingCount, 0);
+    let own: number;
+    let tot: number;
+    if (server) {
+      const d = serverDays.get(programDayKey(b.from));
+      own = d?.own ?? 0;
+      tot = d?.total ?? 0;
+    } else {
+      const rows = sosInRange.filter((r) => r.createdAt >= b.from && r.createdAt < b.to);
+      tot = rows.reduce((t, r) => t + r.totalFacingCount, 0);
+      own = rows.reduce((t, r) => t + r.ownFacingCount, 0);
+    }
     return { label: b.label, value: tot > 0 ? Math.round((100 * own) / tot) : 0 };
   });
   const offtakeTrend = buckets.map((b) => ({
     label: b.label,
-    value: offtakeInRange.filter((r) => r.createdAt >= b.from && r.createdAt < b.to).reduce((t, r) => t + r.unitsSold, 0),
+    value: server
+      ? (serverDays.get(programDayKey(b.from))?.units ?? 0)
+      : offtakeInRange.filter((r) => r.createdAt >= b.from && r.createdAt < b.to).reduce((t, r) => t + r.unitsSold, 0),
   }));
 
   const channelBreakdown = useMemo(() => {
     const map = new Map<string, { own: number; total: number }>();
-    for (const r of sosInRange) {
+    const rows = server
+      ? server.channels
+      : sosInRange.map((r) => ({ channel: r.channel, category: r.category, own: r.ownFacingCount, total: r.totalFacingCount }));
+    for (const r of rows) {
       const key = `${r.channel || '(kosong)'} · ${CATEGORY_LABEL[r.category] ?? r.category}`;
       const agg = map.get(key) ?? { own: 0, total: 0 };
-      agg.own += r.ownFacingCount;
-      agg.total += r.totalFacingCount;
+      agg.own += r.own;
+      agg.total += r.total;
       map.set(key, agg);
     }
     return Array.from(map.entries()).map(([key, agg]) => ({
       key,
       sosPct: agg.total > 0 ? Math.round((100 * agg.own) / agg.total) : 0,
     }));
-  }, [sosInRange]);
+  }, [sosInRange, server]);
 
   const ncTrackerList = useMemo(() => {
     let list = users.filter((u) => u.role === 'nc' && u.active);
@@ -261,7 +315,14 @@ export default function ManagementDashboard() {
           <Muted style={{ marginTop: 4 }}>
             Bulan untuk periode "Bulanan", target & skorkartu{periodKey !== 'monthly' ? ' (periode harian/mingguan selalu hari/minggu ini)' : ''}.
           </Muted>
-          <HistoryNotice needsFrom={range.from} />
+          {server ? (
+            <Muted style={{ marginTop: 4 }}>Angka dihitung di server untuk seluruh periode.</Muted>
+          ) : (
+            <>
+              {summaryFailed && <Muted style={{ marginTop: 4 }}>Server tidak terjangkau — angka dari data di perangkat.</Muted>}
+              <HistoryNotice needsFrom={range.from} />
+            </>
+          )}
         </Field>
         <Field label="Kota">
           <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>

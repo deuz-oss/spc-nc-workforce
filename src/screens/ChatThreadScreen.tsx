@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { useFocusEffect, useRoute } from '@react-navigation/native';
+import { useFocusEffect } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Btn, Input, Muted, StickyFooter } from '../components/ui';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -10,7 +11,7 @@ import { fmtDateTime } from '../utils/format';
  * intentionally new, unscoped-for-now queue class per the PRD review note);
  * a failed send shows a dialog rather than silently dropping the message. */
 export default function ChatThreadScreen() {
-  const route = useRoute<any>();
+  const route = useAppRoute<'ChatThread'>();
   const me = useCurrentUser()!;
   const conversationId: string = route.params?.conversationId;
   const counterpartName: string = route.params?.counterpartName ?? '';

@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, Chip, H, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
@@ -13,8 +14,8 @@ import { ShownError, useStore } from '../store/useStore';
  * type list and checklist items aren't specified by the client brief; defaults
  * defined in config.ts, pending confirmation. */
 export default function PaidVisibilityScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'PaidVisibility'>();
+  const navigation = useNavigation();
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 

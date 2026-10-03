@@ -750,6 +750,31 @@ async function main() {
     expect((await analyst.client.rpc('compute_scorecards', { p_period_key: '2000-13' })).error, 'invalid period accepted');
   });
 
+  await check('client errors: users log their own, only super_admin reads them (0018)', async () => {
+    const msg = `smoke ${RUN}`;
+    const ins = await nc.client.from('client_errors').insert({ message: msg, context: 'smoke' });
+    if (ins.error && /client_errors/.test(ins.error.message)) throw new Error('client_errors missing — run migration 0018');
+    expectOk(ins, 'NC error report');
+    const spoof = await nc.client.from('client_errors').insert({ message: msg, user_id: tl.id });
+    expect(spoof.error, "an NC filed an error report as another user");
+    expect(!(await nc.client.from('client_errors').select('id').eq('message', msg)).data?.length, 'an NC can read the error log');
+    expect((await superadmin.client.from('client_errors').select('id').eq('message', msg)).data?.length === 1, 'super_admin cannot read the error log');
+    await admin.from('client_errors').delete().eq('message', msg);
+  });
+
+  await check('management_summary returns server-side dashboard figures (0018)', async () => {
+    const res = await pm.client.rpc('management_summary', {
+      p_from: new Date(Date.now() - 7 * 86400000).toISOString(),
+      p_to: new Date().toISOString(),
+      p_store_ids: null,
+    });
+    if (res.error && /management_summary/.test(res.error.message)) throw new Error('management_summary() missing — run migration 0018');
+    expectOk(res, 'PM management_summary');
+    const d = res.data as any;
+    expect(d && 'offtake_units' in d && Array.isArray(d.daily) && Array.isArray(d.channels), `unexpected shape: ${JSON.stringify(d)}`);
+    expectOk(await reckitt.client.rpc('management_summary', { p_from: new Date(0).toISOString(), p_to: new Date().toISOString() }), 'Reckitt management_summary');
+  });
+
   await check('compute_scorecards: forbidden for NC, allowed for Data Analyst', async () => {
     const denied = await nc.client.rpc('compute_scorecards', { p_period_key: TEST_PERIOD });
     expect(denied.error, 'NC ran compute_scorecards');

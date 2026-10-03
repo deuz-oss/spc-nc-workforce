@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Badge, Btn, Card, Chip, Empty, GeoValidBadge, H, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { CATEGORY_LABEL, STORE_MANAGER_ROLES, VISIT_VALID_RADIUS_M } from '../config';
 import { showDialog } from '../components/dialog';
@@ -18,8 +19,8 @@ import {
 } from '../utils/location';
 
 export default function StoreDetailScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'StoreDetail'>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const store = useStore((s) => s.stores.find((m) => m.id === route.params.storeId));
   const stores = useStore((s) => s.stores);

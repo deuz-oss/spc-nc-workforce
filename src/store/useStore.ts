@@ -8,8 +8,8 @@ import { supabase } from '../lib/supabase';
 import { showDialog } from '../components/dialog';
 import {
   CONSENT_VERSION,
-  DEFAULT_TEAM_BASE_RADIUS_M,
   HISTORY_DAYS,
+  NON_FIELD_REPORT_HISTORY_DAYS,
   isUnder1Bracket,
   TRACK_MIN_STEP_M,
   UNDER1_MESSAGE,
@@ -58,6 +58,41 @@ import { flushRouteBuffer } from '../utils/routeSync';
 import { funnelStepError } from '../utils/funnel';
 import { isValidWa, normalizeWa } from '../utils/wa';
 import { passwordProblem } from '../utils/password';
+import {
+  mapAttendance,
+  mapCertification,
+  mapCoachingLog,
+  mapConsumer,
+  mapConversation,
+  mapMessage,
+  mapNtgGwp,
+  mapOfftake,
+  mapPaidVisibility,
+  mapPriceMonitoring,
+  mapProduct,
+  mapProfile,
+  mapReportReview,
+  mapScorecard,
+  mapShareOfShelf,
+  mapStockTaking,
+  mapStore,
+  mapSurvey,
+  mapSurveyResponse,
+  mapTarget,
+  mapTeam,
+  mapVisit,
+  offtakeRow,
+  paidVisibilityRow,
+  priceMonitoringRow,
+  shareOfShelfRow,
+  stockTakingRow,
+  storeRow,
+  targetRow,
+  teamRow,
+  upsertById,
+  visitRow,
+} from './mappers';
+import { rollbackRows } from './rows';
 import { drainQueue, isNetworkError, OP_LABEL, QueueReason, queueReason, ReplayResult, settle } from './replay';
 
 /** Thrown by actions that have already explained the failure to the user via
@@ -99,6 +134,18 @@ export interface NewStoreInput {
   category: Store['category'];
   lat: number | null;
   lng: number | null;
+}
+
+/** management_summary() result (migration 0018) — the management dashboard's
+ * figures computed server-side. `daily[].day` is a WIB date 'YYYY-MM-DD'. */
+export interface ManagementSummary {
+  ownFacing: number;
+  totalFacing: number;
+  offtakeUnits: number;
+  gwpGivenQty: number;
+  ntgConsumers: number;
+  daily: Array<{ day: string; own: number; total: number; units: number }>;
+  channels: Array<{ channel: string; category: string; own: number; total: number }>;
 }
 
 /** One admin_audit_log row (migration 0016). */
@@ -344,6 +391,11 @@ interface StoreState {
   /** GPS route of one attendance session (RLS-scoped), oldest first. For viewing
    * another user's day — the store only mirrors the viewer's own routes. */
   fetchRoute(attendanceId: string): Promise<RoutePoint[]>;
+  /** Management dashboard figures for [from, to) and the given stores (null =
+   * all the caller can see), computed in Postgres — the row-level history on
+   * the device isn't needed for them. Throws on failure (incl. migration 0018
+   * not applied) so the dashboard can fall back to local rows. */
+  fetchManagementSummary(range: { from: number; to: number }, storeIds: string[] | null): Promise<ManagementSummary>;
   /** Newest-first page of the admin audit log (super_admin / PM, RLS), older than
    * `before` when given. Fetched on demand, not kept in state. Throws on failure. */
   fetchAuditLog(limit: number, before?: number): Promise<AuditEntry[]>;
@@ -397,305 +449,16 @@ function serverRuleMessage(error: { code?: string; message: string }): string | 
   return error.code?.startsWith('P0') ? error.message : null;
 }
 
-const optTime = (v: string | null | undefined) => (v ? new Date(v).getTime() : undefined);
-
-function upsertById<T extends { id: string | number }>(list: T[], row: T): T[] {
-  const i = list.findIndex((x) => x.id === row.id);
-  return i === -1 ? [row, ...list] : list.map((x, idx) => (idx === i ? row : x));
-}
-
-// --- Supabase row <-> app type mapping -------------------------------------
-
-function mapProfile(p: any): User {
-  return {
-    id: p.id,
-    name: p.name,
-    username: p.username,
-    role: p.role,
-    teamId: p.team_id,
-    city: p.city ?? undefined,
-    phone: p.phone ?? undefined,
-    active: p.active,
-    createdAt: new Date(p.created_at).getTime(),
-  };
-}
-
-function mapTeam(t: any): Team {
-  return {
-    id: t.id,
-    name: t.name,
-    city: t.city,
-    tlId: t.tl_id,
-    arcoId: t.arco_id,
-    baseLat: t.base_lat ?? null,
-    baseLng: t.base_lng ?? null,
-    baseRadiusM: t.base_radius_m ?? DEFAULT_TEAM_BASE_RADIUS_M,
-  };
-}
-
-function mapStore(m: any): Store {
-  return {
-    id: m.id,
-    name: m.name,
-    address: m.address,
-    city: m.city,
-    channel: m.channel,
-    account: m.account ?? undefined,
-    category: m.category,
-    lat: m.lat,
-    lng: m.lng,
-    assignedNcId: m.assigned_nc_id,
-    teamId: m.team_id,
-    source: m.source,
-    createdAt: new Date(m.created_at).getTime(),
-  };
-}
-
-function mapVisit(v: any): Visit {
-  return {
-    id: v.id,
-    storeId: v.store_id,
-    ncId: v.nc_id,
-    checkInAt: new Date(v.check_in_at).getTime(),
-    checkOutAt: v.check_out_at ? new Date(v.check_out_at).getTime() : null,
-    lat: v.lat,
-    lng: v.lng,
-    storeDistanceM: v.store_distance_m,
-    geoValid: v.geo_valid,
-    locationMocked: v.location_mocked ?? false,
-    autoClosed: v.auto_closed ?? false,
-  };
-}
-
-function mapAttendance(a: any, route: RoutePoint[]): Attendance {
-  return {
-    id: a.id,
-    userId: a.user_id,
-    clockInAt: new Date(a.clock_in_at).getTime(),
-    clockInLat: a.clock_in_lat,
-    clockInLng: a.clock_in_lng,
-    clockOutAt: a.clock_out_at ? new Date(a.clock_out_at).getTime() : null,
-    clockOutLat: a.clock_out_lat ?? undefined,
-    clockOutLng: a.clock_out_lng ?? undefined,
-    route,
-    geoFenceOk: a.geo_fence_ok,
-    locationMocked: a.location_mocked ?? false,
-    autoClosed: a.auto_closed ?? false,
-    nonMarketMs: a.non_market_ms ?? undefined,
-  };
-}
-
-function mapProduct(p: any): Product {
-  return {
-    id: p.id,
-    sku: p.sku,
-    name: p.name,
-    category: p.category ?? undefined,
-    active: p.active,
-    createdAt: new Date(p.created_at).getTime(),
-  };
-}
-
-function mapStockTaking(r: any): StockTakingRow {
-  return {
-    id: r.id,
-    visitId: r.visit_id,
-    storeId: r.store_id,
-    sku: r.sku,
-    qtyOnHand: r.qty_on_hand,
-    outOfStock: r.out_of_stock,
-    photoUrl: r.photo_url ?? undefined,
-    createdAt: new Date(r.created_at).getTime(),
-    receivedAt: optTime(r.received_at),
-  };
-}
-
-function mapOfftake(r: any): OfftakeRow {
-  return {
-    id: r.id,
-    visitId: r.visit_id,
-    storeId: r.store_id,
-    sku: r.sku,
-    unitsSold: r.units_sold,
-    revenue: r.revenue ?? undefined,
-    isOutlier: r.is_outlier,
-    createdAt: new Date(r.created_at).getTime(),
-    receivedAt: optTime(r.received_at),
-  };
-}
-
-function mapConsumer(c: any): Consumer {
-  return {
-    id: c.id,
-    name: c.name,
-    waContact: c.wa_contact,
-    consent: c.consent,
-    childAgeBracket: c.child_age_bracket ?? '',
-    currentBrand: c.current_brand ?? undefined,
-    quizResult: c.quiz_result ?? undefined,
-    createdByNcId: c.created_by_nc_id,
-    createdAt: new Date(c.created_at).getTime(),
-    consentAt: optTime(c.consent_at),
-    consentVersion: c.consent_version ?? undefined,
-    erasedAt: optTime(c.erased_at),
-  };
-}
-
-function mapNtgGwp(g: any): NtgGwp {
-  return {
-    id: g.id,
-    consumerId: g.consumer_id,
-    visitId: g.visit_id,
-    stage: g.stage,
-    gwpItem: g.gwp_item ?? undefined,
-    gwpQty: g.gwp_qty ?? undefined,
-    offtakeId: g.offtake_id ?? undefined,
-    createdAt: new Date(g.created_at).getTime(),
-    receivedAt: optTime(g.received_at),
-  };
-}
-
-function mapShareOfShelf(r: any): ShareOfShelfRow {
-  return {
-    id: r.id,
-    visitId: r.visit_id,
-    storeId: r.store_id,
-    channel: r.channel,
-    category: r.category,
-    ownFacingCount: r.own_facing_count,
-    totalFacingCount: r.total_facing_count,
-    photoUrl: r.photo_url,
-    createdAt: new Date(r.created_at).getTime(),
-    receivedAt: optTime(r.received_at),
-  };
-}
-
-function mapPaidVisibility(r: any): PaidVisibilityRow {
-  return {
-    id: r.id,
-    visitId: r.visit_id,
-    storeId: r.store_id,
-    visibilityType: r.visibility_type,
-    complianceChecklist: r.compliance_checklist ?? {},
-    photoUrl: r.photo_url,
-    createdAt: new Date(r.created_at).getTime(),
-    receivedAt: optTime(r.received_at),
-  };
-}
-
-function mapPriceMonitoring(r: any): PriceMonitoringRow {
-  return {
-    id: r.id,
-    visitId: r.visit_id,
-    storeId: r.store_id,
-    sku: r.sku,
-    ownPrice: r.own_price,
-    competitorPrices: r.competitor_prices ?? [],
-    photoUrl: r.photo_url ?? undefined,
-    createdAt: new Date(r.created_at).getTime(),
-    receivedAt: optTime(r.received_at),
-  };
-}
-
-function mapSurvey(s: any): Survey {
-  return {
-    id: s.id,
-    title: s.title,
-    questions: s.questions ?? [],
-    campaignTag: s.campaign_tag ?? undefined,
-    createdBy: s.created_by,
-    createdAt: new Date(s.created_at).getTime(),
-  };
-}
-
-function mapSurveyResponse(r: any): SurveyResponse {
-  return {
-    id: r.id,
-    surveyId: r.survey_id,
-    visitId: r.visit_id ?? null,
-    consumerId: r.consumer_id ?? null,
-    answers: r.answers ?? {},
-    createdAt: new Date(r.created_at).getTime(),
-  };
-}
-
-function mapTarget(t: any): Target {
-  return {
-    id: t.id,
-    storeId: t.store_id ?? null,
-    ncId: t.nc_id ?? null,
-    periodKey: t.period_key,
-    offtakeTarget: t.offtake_target ?? undefined,
-    gwpAllocation: t.gwp_allocation ?? undefined,
-    setBy: t.set_by,
-  };
-}
-
-function mapReportReview(r: any): ReportReview {
-  return {
-    id: r.id,
-    reportType: r.report_type,
-    reportId: r.report_id,
-    status: r.status,
-    reviewedBy: r.reviewed_by ?? undefined,
-    reviewedAt: r.reviewed_at ? new Date(r.reviewed_at).getTime() : undefined,
-    note: r.note ?? undefined,
-  };
-}
-
-function mapCoachingLog(l: any): CoachingLog {
-  return {
-    id: l.id,
-    tlId: l.tl_id,
-    ncId: l.nc_id,
-    date: new Date(l.date).getTime(),
-    note: l.note,
-    createdAt: new Date(l.created_at).getTime(),
-  };
-}
-
-function mapScorecard(s: any): Scorecard {
-  return {
-    id: s.id,
-    subjectId: s.subject_id,
-    role: s.role,
-    periodKey: s.period_key,
-    score: s.score,
-    status: s.status,
-    breakdown: s.breakdown ?? {},
-    computedAt: new Date(s.computed_at).getTime(),
-  };
-}
-
-function mapCertification(c: any): Certification {
-  return {
-    id: c.id,
-    userId: c.user_id,
-    certType: c.cert_type,
-    date: new Date(c.date).getTime(),
-    passed: c.passed,
-  };
-}
-
-function mapConversation(c: any): Conversation {
-  return {
-    id: c.id,
-    type: c.type,
-    participantA: c.participant_a,
-    participantB: c.participant_b,
-    createdAt: new Date(c.created_at).getTime(),
-  };
-}
-
-function mapMessage(m: any): Message {
-  return {
-    id: m.id,
-    conversationId: m.conversation_id,
-    senderId: m.sender_id,
-    body: m.body,
-    createdAt: new Date(m.created_at).getTime(),
-    readAt: m.read_at ? new Date(m.read_at).getTime() : null,
-  };
+/** Rolls back a failed optimistic write for exactly the rows it touched — see rollbackRows. */
+function restoreRows(
+  set: (p: Partial<StoreState>) => void,
+  get: () => StoreState,
+  key: keyof StoreState,
+  ids: string[],
+  before: Array<{ id: string }>,
+) {
+  const current = get()[key] as unknown as Array<{ id: string }>;
+  set({ [key]: rollbackRows(current, ids, before) } as unknown as Partial<StoreState>);
 }
 
 /** Re-applies a queued op's optimistic local effect after a cold restart, before it's synced. */
@@ -769,125 +532,6 @@ function applyQueuedOpLocally(set: (p: Partial<StoreState>) => void, get: () => 
     }
   }
 }
-
-function targetRow(t: Target) {
-  return {
-    id: t.id,
-    store_id: t.storeId,
-    nc_id: t.ncId,
-    period_key: t.periodKey,
-    offtake_target: t.offtakeTarget ?? null,
-    gwp_allocation: t.gwpAllocation ?? null,
-    set_by: t.setBy,
-  };
-}
-
-/** Mutable store columns (id/created_at are set once on insert). */
-function storeRow(m: Store) {
-  return {
-    name: m.name,
-    address: m.address,
-    city: m.city,
-    channel: m.channel,
-    account: m.account ?? null,
-    category: m.category,
-    lat: m.lat,
-    lng: m.lng,
-    assigned_nc_id: m.assignedNcId,
-    team_id: m.teamId,
-    source: m.source,
-  };
-}
-
-function teamRow(t: Team) {
-  return {
-    name: t.name,
-    city: t.city,
-    tl_id: t.tlId,
-    arco_id: t.arcoId,
-    base_lat: t.baseLat,
-    base_lng: t.baseLng,
-    base_radius_m: t.baseRadiusM,
-  };
-}
-
-function visitRow(v: Visit) {
-  return {
-    lat: v.lat,
-    lng: v.lng,
-    // Recomputed server-side (visits_server_checks, 0014) — sent only for older backends.
-    store_distance_m: v.storeDistanceM,
-    geo_valid: v.geoValid,
-    location_mocked: v.locationMocked ?? false,
-  };
-}
-
-function stockTakingRow(r: StockTakingRow) {
-  return {
-    id: r.id,
-    visit_id: r.visitId,
-    store_id: r.storeId,
-    sku: r.sku,
-    qty_on_hand: r.qtyOnHand,
-    out_of_stock: r.outOfStock,
-    photo_url: r.photoUrl ?? null,
-    created_at: new Date(r.createdAt).toISOString(),
-  };
-}
-
-/** `is_outlier` deliberately omitted — the server trigger (offtake_flag_outlier,
- * 0003 migration) sets it on insert; the client never writes this column. */
-function offtakeRow(r: OfftakeRow) {
-  return {
-    id: r.id,
-    visit_id: r.visitId,
-    store_id: r.storeId,
-    sku: r.sku,
-    units_sold: r.unitsSold,
-    revenue: r.revenue ?? null,
-    created_at: new Date(r.createdAt).toISOString(),
-  };
-}
-
-function shareOfShelfRow(r: ShareOfShelfRow) {
-  return {
-    id: r.id,
-    visit_id: r.visitId,
-    store_id: r.storeId,
-    channel: r.channel,
-    category: r.category,
-    own_facing_count: r.ownFacingCount,
-    total_facing_count: r.totalFacingCount,
-    photo_url: r.photoUrl,
-    created_at: new Date(r.createdAt).toISOString(),
-  };
-}
-
-function paidVisibilityRow(r: PaidVisibilityRow) {
-  return {
-    id: r.id,
-    visit_id: r.visitId,
-    store_id: r.storeId,
-    visibility_type: r.visibilityType,
-    compliance_checklist: r.complianceChecklist,
-    photo_url: r.photoUrl,
-    created_at: new Date(r.createdAt).toISOString(),
-  };
-}
-
-function priceMonitoringRow(r: PriceMonitoringRow) {
-  return {
-    id: r.id,
-    visit_id: r.visitId,
-    store_id: r.storeId,
-    sku: r.sku,
-    own_price: r.ownPrice,
-    competitor_prices: r.competitorPrices,
-    photo_url: r.photoUrl ?? null,
-    created_at: new Date(r.createdAt).toISOString(),
-  };
-}
-
 
 /** Message of the last server error seen by replayOp — runOrQueue surfaces it
  * when a write sent straight to the server is rejected. */
@@ -1124,6 +768,9 @@ async function enqueueOp(set: (p: Partial<StoreState>) => void, get: () => Store
   if (userId) await saveQueue(userId, next);
 }
 
+let lastOfflineNoticeAt = 0;
+const OFFLINE_NOTICE_COALESCE_MS = 5000;
+
 /** Ops queued silently behind a backlog (see runOrQueue) — their sync isn't announced. */
 const silentOpIds = new Set<string>();
 
@@ -1180,12 +827,16 @@ async function runOrQueue(
     } else {
       scheduleQueueRetry(set, get); // transient failure while "online" — no NetInfo event will come
     }
-    showDialog(
-      'Tersimpan Offline',
-      reason === 'offline'
-        ? `${label} tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.`
-        : `Koneksi internet tidak stabil. ${label} tersimpan di HP dan akan dikirim otomatis.`,
-    );
+    // One notice per burst: "check-out & clock out" queues two ops back to back.
+    if (Date.now() - lastOfflineNoticeAt > OFFLINE_NOTICE_COALESCE_MS) {
+      showDialog(
+        'Tersimpan Offline',
+        reason === 'offline'
+          ? `${label} tersimpan di HP dan akan otomatis disinkron saat koneksi kembali.`
+          : `Koneksi internet tidak stabil. ${label} tersimpan di HP dan akan dikirim otomatis.`,
+      );
+    }
+    lastOfflineNoticeAt = Date.now();
   }
   return { queued: reason !== 'backlog' };
 }
@@ -1486,47 +1137,24 @@ function teardownRealtime() {
 
 function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () => StoreState, userId: string) {
   teardownRealtime();
-  channel = supabase
-    .channel('app-sync')
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, (payload) => {
+  let ch = supabase.channel('app-sync');
+  // One generic handler per mirrored table (SNAPSHOT_TABLES): INSERT/UPDATE
+  // upsert the mapped row, DELETE removes it. Messages arriving here are the
+  // live path for ChatThreadScreen (new messages and read_at updates).
+  for (const t of SNAPSHOT_TABLES) {
+    if (t.realtime === false) continue;
+    ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t.table }, (payload) => {
+      const list = get()[t.key] as unknown as Array<{ id: string }>;
       if (payload.eventType === 'DELETE') {
-        set({ users: get().users.filter((u) => u.id !== (payload.old as any).id) });
-      } else {
-        // profiles no longer carries the phone (profile_contacts, 0015) — keep the known one.
-        const u = mapProfile(payload.new);
-        const known = get().users.find((x) => x.id === u.id);
-        set({ users: upsertById(get().users, { ...u, phone: u.phone ?? known?.phone }) });
+        set({ [t.key]: list.filter((r) => r.id !== (payload.old as any).id) } as unknown as Partial<StoreState>);
+        return;
       }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'teams' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ teams: get().teams.filter((t) => t.id !== (payload.old as any).id) });
-      } else {
-        set({ teams: upsertById(get().teams, mapTeam(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'stores' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ stores: get().stores.filter((m) => m.id !== (payload.old as any).id) });
-      } else {
-        set({ stores: upsertById(get().stores, mapStore(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'visits' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ visits: get().visits.filter((v) => v.id !== (payload.old as any).id) });
-      } else {
-        set({ visits: upsertById(get().visits, mapVisit(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'attendances' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ attendances: get().attendances.filter((a) => a.id !== (payload.old as any).id) });
-      } else {
-        const existing = get().attendances.find((a) => a.id === (payload.new as any).id);
-        set({ attendances: upsertById(get().attendances, mapAttendance(payload.new, existing?.route ?? [])) });
-      }
-    })
+      const fresh = t.map(payload.new);
+      const row = t.keepLocal ? t.keepLocal(fresh, list.find((r) => r.id === fresh.id)) : fresh;
+      set({ [t.key]: upsertById(list, row) } as unknown as Partial<StoreState>);
+    });
+  }
+  channel = ch
     // Own points only — see hydrateAll's route_points comment. Unfiltered, a
     // monitor role would receive every NC's GPS ping (~13 events/s program-wide).
     .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'route_points', filter: `user_id=eq.${userId}` }, (payload) => {
@@ -1540,113 +1168,6 @@ function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () 
             : a,
         ),
       });
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'products' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ products: get().products.filter((p) => p.id !== (payload.old as any).id) });
-      } else {
-        set({ products: upsertById(get().products, mapProduct(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'stock_taking' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ stockTakingRows: get().stockTakingRows.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ stockTakingRows: upsertById(get().stockTakingRows, mapStockTaking(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'offtake' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ offtakeRows: get().offtakeRows.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ offtakeRows: upsertById(get().offtakeRows, mapOfftake(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'consumers' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ consumers: get().consumers.filter((c) => c.id !== (payload.old as any).id) });
-      } else {
-        set({ consumers: upsertById(get().consumers, mapConsumer(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'ntg_gwp' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ ntgGwps: get().ntgGwps.filter((g) => g.id !== (payload.old as any).id) });
-      } else {
-        set({ ntgGwps: upsertById(get().ntgGwps, mapNtgGwp(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'share_of_shelf' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ shareOfShelfRows: get().shareOfShelfRows.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ shareOfShelfRows: upsertById(get().shareOfShelfRows, mapShareOfShelf(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'paid_visibility' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ paidVisibilityRows: get().paidVisibilityRows.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ paidVisibilityRows: upsertById(get().paidVisibilityRows, mapPaidVisibility(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'price_monitoring' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ priceMonitoringRows: get().priceMonitoringRows.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ priceMonitoringRows: upsertById(get().priceMonitoringRows, mapPriceMonitoring(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'surveys' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ surveys: get().surveys.filter((s) => s.id !== (payload.old as any).id) });
-      } else {
-        set({ surveys: upsertById(get().surveys, mapSurvey(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'survey_responses' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ surveyResponses: get().surveyResponses.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ surveyResponses: upsertById(get().surveyResponses, mapSurveyResponse(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'report_reviews' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ reportReviews: get().reportReviews.filter((r) => r.id !== (payload.old as any).id) });
-      } else {
-        set({ reportReviews: upsertById(get().reportReviews, mapReportReview(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'coaching_logs' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ coachingLogs: get().coachingLogs.filter((l) => l.id !== (payload.old as any).id) });
-      } else {
-        set({ coachingLogs: upsertById(get().coachingLogs, mapCoachingLog(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'targets' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ targets: get().targets.filter((t) => t.id !== (payload.old as any).id) });
-      } else {
-        set({ targets: upsertById(get().targets, mapTarget(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'conversations' }, (payload) => {
-      if (payload.eventType === 'DELETE') {
-        set({ conversations: get().conversations.filter((c) => c.id !== (payload.old as any).id) });
-      } else {
-        set({ conversations: upsertById(get().conversations, mapConversation(payload.new)) });
-      }
-    })
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'messages' }, (payload) => {
-      // This is the live-update path for ChatThreadScreen: new incoming
-      // messages and read_at updates both arrive here.
-      if (payload.eventType === 'DELETE') {
-        set({ messages: get().messages.filter((m) => m.id !== (payload.old as any).id) });
-      } else {
-        set({ messages: upsertById(get().messages, mapMessage(payload.new)) });
-      }
     })
     .subscribe();
 }
@@ -1730,14 +1251,22 @@ async function fetchOwnRoutePoints(userId: string, attendanceRows: any[]): Promi
  * consumer's current funnel stage is its latest row, however old, and a gap
  * would let an NC re-record an earlier stage.
  */
-const WINDOWED_TABLES: Array<{ table: string; key: keyof StoreState; col: string; keepNull?: string; map: (r: any) => any }> = [
+const WINDOWED_TABLES: Array<{
+  table: string;
+  key: keyof StoreState;
+  col: string;
+  keepNull?: string;
+  map: (r: any) => any;
+  /** Per-SKU report tables — by far the largest; see historyWindow(). */
+  heavy?: true;
+}> = [
   { table: 'visits', key: 'visits', col: 'check_in_at', keepNull: 'check_out_at', map: mapVisit },
   { table: 'attendances', key: 'attendances', col: 'clock_in_at', keepNull: 'clock_out_at', map: (a) => mapAttendance(a, []) },
-  { table: 'stock_taking', key: 'stockTakingRows', col: 'created_at', map: mapStockTaking },
-  { table: 'offtake', key: 'offtakeRows', col: 'created_at', map: mapOfftake },
-  { table: 'share_of_shelf', key: 'shareOfShelfRows', col: 'created_at', map: mapShareOfShelf },
-  { table: 'paid_visibility', key: 'paidVisibilityRows', col: 'created_at', map: mapPaidVisibility },
-  { table: 'price_monitoring', key: 'priceMonitoringRows', col: 'created_at', map: mapPriceMonitoring },
+  { table: 'stock_taking', key: 'stockTakingRows', col: 'created_at', map: mapStockTaking, heavy: true },
+  { table: 'offtake', key: 'offtakeRows', col: 'created_at', map: mapOfftake, heavy: true },
+  { table: 'share_of_shelf', key: 'shareOfShelfRows', col: 'created_at', map: mapShareOfShelf, heavy: true },
+  { table: 'paid_visibility', key: 'paidVisibilityRows', col: 'created_at', map: mapPaidVisibility, heavy: true },
+  { table: 'price_monitoring', key: 'priceMonitoringRows', col: 'created_at', map: mapPriceMonitoring, heavy: true },
   { table: 'survey_responses', key: 'surveyResponses', col: 'created_at', map: mapSurveyResponse },
   { table: 'report_reviews', key: 'reportReviews', col: 'reviewed_at', keepNull: 'reviewed_at', map: mapReportReview },
   { table: 'coaching_logs', key: 'coachingLogs', col: 'date', map: mapCoachingLog },
@@ -1745,9 +1274,29 @@ const WINDOWED_TABLES: Array<{ table: string; key: keyof StoreState; col: string
 ];
 
 
-function windowFilter(table: string, since: number): TimeFilter | undefined {
-  const w = WINDOWED_TABLES.find((t) => t.table === table);
-  return w && { col: w.col, since: new Date(since).toISOString(), keepNull: w.keepNull };
+interface HistoryWindow {
+  /** Start of the login window for field-activity tables. */
+  since: number;
+  /** Start for the heavy per-SKU report tables (later than `since` for non-field roles). */
+  reportsSince: number;
+}
+
+/**
+ * Field roles (NC/TL/ARCO) load the full HISTORY_DAYS of everything in their
+ * (small) scope. Every other role sees the whole program, and the per-SKU
+ * report tables are where the volume is (hundreds of thousands of rows at 195
+ * NCs) — their dashboard figures come from management_summary (0018), so the
+ * device only keeps NON_FIELD_REPORT_HISTORY_DAYS of those rows for drill-downs.
+ */
+function historyWindow(role: Role | undefined, now = new Date()): HistoryWindow {
+  const since = historyWindowStart(now, HISTORY_DAYS);
+  const field = role === 'nc' || role === 'tl' || role === 'arco';
+  return { since, reportsSince: field ? since : historyWindowStart(now, NON_FIELD_REPORT_HISTORY_DAYS) };
+}
+
+function windowFilter(table: string, w: HistoryWindow): TimeFilter | undefined {
+  const t = WINDOWED_TABLES.find((x) => x.table === table);
+  return t && { col: t.col, since: new Date(t.heavy ? w.reportsSince : w.since).toISOString(), keepNull: t.keepNull };
 }
 
 /**
@@ -1756,12 +1305,29 @@ function windowFilter(table: string, since: number): TimeFilter | undefined {
  * the rest in full. Shared by hydrateAll (login) and refreshData (resume /
  * pull-to-refresh) so the two can never drift apart.
  */
-const SNAPSHOT_TABLES: Array<{ table: string; key: keyof StoreState; map: (r: any) => any }> = [
-  { table: 'profiles', key: 'users', map: mapProfile },
+interface MirroredTable {
+  table: string;
+  key: keyof StoreState;
+  map: (r: any) => any;
+  /** false = not subscribed to realtime (see the table's own comment). */
+  realtime?: false;
+  /** Merges a realtime row with the locally held one (fields the row lacks). */
+  keepLocal?: (fresh: any, local: any) => any;
+}
+
+const SNAPSHOT_TABLES: MirroredTable[] = [
+  // profiles no longer carries the phone (profile_contacts, 0015) — keep the known one.
+  { table: 'profiles', key: 'users', map: mapProfile, keepLocal: (u: User, l?: User) => ({ ...u, phone: u.phone ?? l?.phone }) },
   { table: 'teams', key: 'teams', map: mapTeam },
   { table: 'stores', key: 'stores', map: mapStore },
   { table: 'visits', key: 'visits', map: mapVisit },
-  { table: 'attendances', key: 'attendances', map: (a) => mapAttendance(a, []) },
+  // The route is mirrored separately (route_points) — keep the local one.
+  {
+    table: 'attendances',
+    key: 'attendances',
+    map: (a) => mapAttendance(a, []),
+    keepLocal: (a: Attendance, l?: Attendance) => ({ ...a, route: l?.route ?? a.route }),
+  },
   { table: 'products', key: 'products', map: mapProduct },
   { table: 'stock_taking', key: 'stockTakingRows', map: mapStockTaking },
   { table: 'offtake', key: 'offtakeRows', map: mapOfftake },
@@ -1775,15 +1341,17 @@ const SNAPSHOT_TABLES: Array<{ table: string; key: keyof StoreState; map: (r: an
   { table: 'report_reviews', key: 'reportReviews', map: mapReportReview },
   { table: 'coaching_logs', key: 'coachingLogs', map: mapCoachingLog },
   { table: 'targets', key: 'targets', map: mapTarget },
-  { table: 'scorecards', key: 'scorecards', map: mapScorecard },
+  // One compute run upserts 200+ rows — refetched explicitly instead (computeScorecards).
+  { table: 'scorecards', key: 'scorecards', map: mapScorecard, realtime: false },
   { table: 'conversations', key: 'conversations', map: mapConversation },
   { table: 'messages', key: 'messages', map: mapMessage },
-  { table: 'certifications', key: 'certifications', map: mapCertification },
+  // Not in the realtime publication; writers update local state directly.
+  { table: 'certifications', key: 'certifications', map: mapCertification, realtime: false },
 ];
 
 /** Fetches every SNAPSHOT_TABLES table (windowed ones from `since`). Raw rows, keyed by table. */
-async function fetchSnapshot(since: number): Promise<{ rows: Record<string, any[]>; error: { message: string; code?: string } | null }> {
-  const results = await Promise.all(SNAPSHOT_TABLES.map((t) => fetchAll(t.table, windowFilter(t.table, since))));
+async function fetchSnapshot(w: HistoryWindow): Promise<{ rows: Record<string, any[]>; error: { message: string; code?: string } | null }> {
+  const results = await Promise.all(SNAPSHOT_TABLES.map((t) => fetchAll(t.table, windowFilter(t.table, w))));
   const rows: Record<string, any[]> = {};
   SNAPSHOT_TABLES.forEach((t, i) => (rows[t.table] = results[i].data));
   return { rows, error: results.find((r) => r.error)?.error ?? null };
@@ -1817,8 +1385,8 @@ async function hydrateAll(
   if (meErr) return meErr.code === 'PGRST116' ? 'inactive' : 'offline';
   if (!me?.active) return 'inactive';
 
-  const since = historyWindowStart(new Date(), HISTORY_DAYS);
-  const { rows, error: snapErr } = await fetchSnapshot(since);
+  const w = historyWindow(me.role);
+  const { rows, error: snapErr } = await fetchSnapshot(w);
   if (snapErr) {
     // Connection dropped mid-load: keep whatever the caller already has rather
     // than replacing it with a partial snapshot.
@@ -1835,7 +1403,8 @@ async function hydrateAll(
   }
   for (const arr of routesByAttendance.values()) arr.sort((a, b) => a.t - b.t);
 
-  const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: since, offlineSnapshotAt: null };
+  // historyFrom = the latest window start, so "load older history" covers every table.
+  const patch: Partial<StoreState> = { sessionUserId: userId, historyFrom: w.reportsSince, offlineSnapshotAt: null };
   for (const t of SNAPSHOT_TABLES) (patch as any)[t.key] = rows[t.table].map(t.map);
   patch.attendances = rows.attendances.map((a: any) => mapAttendance(a, routesByAttendance.get(a.id) ?? []));
   patch.users = await withContacts(patch.users ?? []);
@@ -2466,9 +2035,9 @@ export const useStore = create<StoreState>()((set, get) => ({
       const nc = get().users.find((u) => u.id === ncId);
       teamId = nc?.teamId ?? null;
     }
-    const before = get().stores;
+    const before = get().stores.filter((m) => ids.includes(m.id));
     set({
-      stores: before.map((m) =>
+      stores: get().stores.map((m) =>
         ids.includes(m.id) ? { ...m, assignedNcId: ncId, teamId: ncId ? teamId! : m.teamId } : m,
       ),
     });
@@ -2476,7 +2045,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     if (ncId) patch.team_id = teamId;
     const { error } = await supabase.from('stores').update(patch).in('id', ids);
     if (error) {
-      set({ stores: before });
+      restoreRows(set, get, 'stores', ids, before);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan assignment toko. Periksa koneksi internet dan coba lagi.');
     }
   },
@@ -2526,7 +2095,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       created_at: new Date(p.createdAt).toISOString(),
     });
     if (error) {
-      set({ products: list });
+      restoreRows(set, get, 'products', [p.id], list);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan produk ke server. Periksa koneksi internet dan coba lagi.');
     }
   },
@@ -2889,7 +2458,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       created_at: new Date(s.createdAt).toISOString(),
     });
     if (error) {
-      set({ surveys: list });
+      restoreRows(set, get, 'surveys', [s.id], list);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan survey ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
@@ -2949,7 +2518,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       note: row.note,
     });
     if (error) {
-      set({ reportReviews: before });
+      restoreRows(set, get, 'reportReviews', [row.id], before);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan status review. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
@@ -2969,7 +2538,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       created_at: new Date(log.createdAt).toISOString(),
     });
     if (error) {
-      set({ coachingLogs: list });
+      restoreRows(set, get, 'coachingLogs', [log.id], list);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan catatan coaching ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
@@ -2982,7 +2551,7 @@ export const useStore = create<StoreState>()((set, get) => ({
     set({ targets: exists ? list.map((x) => (x.id === t.id ? t : x)) : [t, ...list] });
     const { error } = await supabase.from('targets').upsert(targetRow(t));
     if (error) {
-      set({ targets: list });
+      restoreRows(set, get, 'targets', [t.id], list);
       showDialog('Gagal Menyimpan', 'Tidak dapat menyimpan target ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
@@ -3002,7 +2571,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       !upErr && deleteIds.length ? await supabase.from('targets').delete().in('id', deleteIds) : { error: null };
     const error = upErr ?? delErr;
     if (error) {
-      set({ targets: before });
+      restoreRows(set, get, 'targets', [...rows.map((r) => r.id), ...deleteIds], before);
       showDialog(
         'Gagal Menyimpan',
         error.code === '23505'
@@ -3165,8 +2734,8 @@ export const useStore = create<StoreState>()((set, get) => ({
       await resumeSession(set, get);
       return resumeUserId ? 'Masih offline.' : null;
     }
-    const since = historyWindowStart(new Date(), HISTORY_DAYS);
-    const { rows, error } = await fetchSnapshot(since);
+    const role = get().users.find((u) => u.id === get().sessionUserId)?.role;
+    const { rows, error } = await fetchSnapshot(historyWindow(role));
     if (error) return error.message; // partial data would drop rows from the merge below — keep what we have
     const windowed = new Set(WINDOWED_TABLES.map((w) => w.table));
     const patch: Partial<StoreState> = {};
@@ -3221,6 +2790,26 @@ export const useStore = create<StoreState>()((set, get) => ({
     }
   },
 
+  fetchManagementSummary: async (range, storeIds) => {
+    const { data, error } = await supabase.rpc('management_summary', {
+      p_from: new Date(range.from).toISOString(),
+      p_to: new Date(range.to).toISOString(),
+      p_store_ids: storeIds,
+    });
+    if (error) throw new Error(error.message);
+    const d = data as any;
+    const n = (v: unknown) => Number(v ?? 0);
+    return {
+      ownFacing: n(d.own_facing),
+      totalFacing: n(d.total_facing),
+      offtakeUnits: n(d.offtake_units),
+      gwpGivenQty: n(d.gwp_given_qty),
+      ntgConsumers: n(d.ntg_consumers),
+      daily: (d.daily ?? []).map((x: any) => ({ day: String(x.day), own: n(x.own), total: n(x.total), units: n(x.units) })),
+      channels: (d.channels ?? []).map((x: any) => ({ channel: x.channel ?? '', category: x.category, own: n(x.own), total: n(x.total) })),
+    };
+  },
+
   fetchAuditLog: async (limit, before) => {
     let q = supabase.from('admin_audit_log').select('*').order('at', { ascending: false }).limit(limit);
     if (before != null) q = q.lt('at', new Date(before).toISOString());
@@ -3238,10 +2827,11 @@ export const useStore = create<StoreState>()((set, get) => ({
   },
 
   refreshChat: async () => {
-    const since = get().historyFrom ?? historyWindowStart(new Date(), HISTORY_DAYS);
+    // Messages use the field-activity window (or everything once full history is loaded).
+    const since = get().historyFrom == null ? 0 : historyWindowStart(new Date(), HISTORY_DAYS);
     const [convos, msgs] = await Promise.all([
       fetchAll('conversations'),
-      fetchAll('messages', windowFilter('messages', since)),
+      fetchAll('messages', windowFilter('messages', { since, reportsSince: since })),
     ]);
     if (convos.error || msgs.error) {
       console.warn('refreshChat failed (non-fatal):', (convos.error ?? msgs.error)!.message);

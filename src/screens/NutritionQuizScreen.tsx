@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader } from '../components/ui';
 import { showDialog } from '../components/dialog';
@@ -86,8 +87,8 @@ function computeSegmentTag(answers: Record<string, string>): string {
 type Step = 'consent' | 'age' | 'under1' | 'done_under1' | 'done' | number;
 
 export default function NutritionQuizScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'NutritionQuiz'>();
+  const navigation = useNavigation();
   const consumerId: string = route.params?.consumerId;
   const visitId: string = route.params?.visitId;
 

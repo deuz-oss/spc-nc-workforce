@@ -1,8 +1,10 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
+import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { C, F } from '../theme';
 import { fmtIDR } from '../utils/format';
@@ -21,18 +23,13 @@ interface DraftRow {
 
 /** Price Monitoring (PRD §5.6) — optional photo, up to 3 competitor prices per SKU. */
 export default function PriceMonitoringScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'PriceMonitoring'>();
+  const navigation = useNavigation();
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 
-  const allProducts = useStore((s) => s.products);
-  // Filter outside the selector — a selector returning a new array each call is an unstable snapshot under zustand v5.
-  const products = useMemo(() => allProducts.filter((p) => p.active), [allProducts]);
   const submitPriceMonitoring = useStore((s) => s.submitPriceMonitoring);
 
-  const [query, setQuery] = useState('');
-  const [manualSku, setManualSku] = useState('');
   const [rows, setRows] = useState<DraftRow[]>([]);
   const [photoUri, setPhotoUri] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -43,29 +40,10 @@ export default function PriceMonitoringScreen() {
   const allReported = useStore((s) => s.priceMonitoringRows);
   const reportedList = useMemo(() => allReported.filter((r) => r.visitId === visitId), [allReported, visitId]);
   const reported = useMemo(() => reportedSkus(reportedList, visitId), [reportedList, visitId]);
-  const suggestions = useMemo(() => {
-    const needle = query.trim().toLowerCase();
-    return products
-      .filter((p) => !pickedSkus.has(p.sku.toLowerCase()) && !reported.has(p.sku.toLowerCase()))
-      .filter((p) => !needle || p.sku.toLowerCase().includes(needle) || p.name.toLowerCase().includes(needle))
-      .slice(0, 8);
-  }, [products, query, pickedSkus, reported]);
 
+  // SkuPicker only offers SKUs that are neither in the form nor already reported.
   const addProduct = (sku: string, label: string, manual: boolean) => {
-    if (pickedSkus.has(sku.toLowerCase())) return;
-    if (reported.has(sku.toLowerCase())) {
-      showDialog('Sudah Dilaporkan', `SKU ${sku} sudah dilaporkan di kunjungan ini.`);
-      return;
-    }
     setRows((r) => [...r, { key: sku + Date.now(), sku, label, ownPrice: '', competitor1: '', competitor2: '', competitor3: '', manual }]);
-    setQuery('');
-  };
-
-  const addManual = () => {
-    const sku = manualSku.trim();
-    if (!sku) return;
-    addProduct(sku, sku, true);
-    setManualSku('');
   };
 
   const updateRow = (key: string, patch: Partial<DraftRow>) => setRows((r) => r.map((x) => (x.key === key ? { ...x, ...patch } : x)));
@@ -81,6 +59,8 @@ export default function PriceMonitoringScreen() {
       showDialog('Belum lengkap', 'Isi minimal satu SKU dengan harga sendiri (boleh 0) sebelum menyimpan.');
       return;
     }
+    const skipped = rows.filter((r) => !validRows.includes(r)).map((r) => r.sku);
+    if (!(await confirmSkippedRows(skipped))) return;
     setBusy(true);
     try {
       const { queued } = await submitPriceMonitoring(
@@ -123,45 +103,7 @@ export default function PriceMonitoringScreen() {
           </Card>
         )}
 
-        <Card>
-          <Field label="Cari SKU dari master produk">
-            <Input placeholder="Cari kode SKU atau nama produk..." value={query} onChangeText={setQuery} />
-          </Field>
-          {query.trim().length > 0 && (
-            <View style={{ marginTop: 8, gap: 6 }}>
-              {suggestions.length === 0 ? (
-                <Muted>Tidak ditemukan di master produk.</Muted>
-              ) : (
-                suggestions.map((p) => (
-                  <TouchableOpacity
-                    key={p.id}
-                    onPress={() => addProduct(p.sku, p.name, false)}
-                    style={{
-                      flexDirection: 'row',
-                      justifyContent: 'space-between',
-                      paddingVertical: 8,
-                      paddingHorizontal: 10,
-                      borderRadius: 10,
-                      borderWidth: 1,
-                      borderColor: C.border,
-                    }}
-                  >
-                    <Text style={{ fontFamily: F.semi, fontSize: 13, color: C.text }}>{p.name}</Text>
-                    <Text style={{ fontFamily: F.reg, fontSize: 12, color: C.muted }}>{p.sku}</Text>
-                  </TouchableOpacity>
-                ))
-              )}
-            </View>
-          )}
-          <View style={{ flexDirection: 'row', gap: 8, marginTop: 10, alignItems: 'flex-end' }}>
-            <View style={{ flex: 1 }}>
-              <Field label="SKU tidak terdaftar di master produk">
-                <Input placeholder="Ketik kode SKU manual..." value={manualSku} onChangeText={setManualSku} />
-              </Field>
-            </View>
-            <Btn small variant="outline" title="Tambah" onPress={addManual} />
-          </View>
-        </Card>
+        <SkuPicker picked={pickedSkus} reported={reported} onAdd={addProduct} />
 
         <Card>
           <H>SKU Dipilih ({rows.length})</H>

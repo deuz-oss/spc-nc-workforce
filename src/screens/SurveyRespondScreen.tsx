@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter } from '../components/ui';
 import { showDialog } from '../components/dialog';
 import { useStore } from '../store/useStore';
@@ -11,8 +12,8 @@ import { uid } from '../utils/uuid';
  * mandatory consent/branching rules the generic renderer doesn't model — see
  * NutritionQuizScreen. */
 export default function SurveyRespondScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'SurveyRespond'>();
+  const navigation = useNavigation();
   const surveyId: string = route.params?.surveyId;
   const visitId: string | undefined = route.params?.visitId;
 

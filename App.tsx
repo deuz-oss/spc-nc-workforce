@@ -9,7 +9,6 @@ import {
   PlusJakartaSans_800ExtraBold,
 } from '@expo-google-fonts/plus-jakarta-sans';
 import {
-  DarkTheme,
   DefaultTheme,
   NavigationContainer,
 } from '@react-navigation/native';
@@ -36,7 +35,6 @@ import ImportScreen from './src/screens/ImportScreen';
 import AttendanceScreen from './src/screens/AttendanceScreen';
 import UsersScreen from './src/screens/UsersScreen';
 import ProfileScreen from './src/screens/ProfileScreen';
-import ComingSoonScreen from './src/screens/ComingSoonScreen';
 import StockTakingScreen from './src/screens/StockTakingScreen';
 import OfftakeScreen from './src/screens/OfftakeScreen';
 import ConsumersScreen from './src/screens/ConsumersScreen';
@@ -60,8 +58,13 @@ import ChatListScreen from './src/screens/ChatListScreen';
 import ChatThreadScreen from './src/screens/ChatThreadScreen';
 import AuditLogScreen from './src/screens/AuditLogScreen';
 import { TrackingWatcher } from './src/components/TrackingWatcher';
+import type { RootStackParamList } from './src/navigation';
+import { ErrorBoundary } from './src/components/ErrorBoundary';
+import { installGlobalErrorHandlers } from './src/utils/errorReport';
 
-const Stack = createNativeStackNavigator();
+installGlobalErrorHandlers();
+
+const Stack = createNativeStackNavigator<RootStackParamList>();
 const Tabs = createBottomTabNavigator();
 
 const TAB_ICON: Record<string, keyof typeof Ionicons.glyphMap> = {
@@ -308,9 +311,7 @@ function ResponsiveTabBar({
   );
 }
 
-/** Per-role tab set. Phase 1 wires every role into a coherent navigation shell;
- * several tabs route to ComingSoonScreen for modules deferred to later phases
- * (PRD §16) — see each screen's own comments for what's stubbed vs real. */
+/** Per-role tab set (PRD §2); every other screen is pushed on the stack. */
 function tabsForRole(role: Role): string[] {
   switch (role) {
     case 'nc':
@@ -333,12 +334,6 @@ function tabsForRole(role: Role): string[] {
       return ['Dashboard', 'Profil'];
   }
 }
-
-// Every tab now routes to a real screen (Phase 4b closes out the last two
-// ComingSoonScreen stubs — Validasi in Phase 4a, Chat here). ComingSoon
-// remains registered in the Stack.Navigator below for any future deferred
-// module, just no tab points at it anymore.
-const COMING_SOON_PARAMS: Record<string, { title: string; phase: string; note: string }> = {};
 
 function screenFor(name: string) {
   switch (name) {
@@ -410,7 +405,6 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
           key={name}
           name={name}
           component={screenFor(name)}
-          initialParams={COMING_SOON_PARAMS[name]}
         />
       ))}
     </Tabs.Navigator>
@@ -484,77 +478,72 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer theme={navTheme}>
-        <StatusBar style="light" />
-        {!user ? (
-          <Stack.Navigator screenOptions={stackOpts}>
-            <Stack.Screen
-              name="Login"
-              component={LoginScreen}
-              options={{ title: APP_NAME, headerShown: false }}
-            />
-          </Stack.Navigator>
-        ) : (
-          <Stack.Navigator screenOptions={stackOpts}>
-            <Stack.Screen name="Main" options={{ headerShown: false }}>
-              {() => <MainTabs role={user.role} me={user} />}
-            </Stack.Screen>
-            <Stack.Screen
-              name="StoreDetail"
-              component={StoreDetailScreen}
-              options={{ title: 'Detail Toko' }}
-            />
-            <Stack.Screen
-              name="Import"
-              component={ImportScreen}
-              options={{ title: 'Impor Data' }}
-            />
-            <Stack.Screen
-              name="StoreVisit"
-              component={StoreVisitScreen}
-              options={{ title: 'Kunjungan Toko', headerBackTitle: 'Tutup' }}
-            />
-            <Stack.Screen name="StockTaking" component={StockTakingScreen} options={{ title: 'Stock Taking' }} />
-            <Stack.Screen name="Offtake" component={OfftakeScreen} options={{ title: 'Offtake' }} />
-            <Stack.Screen name="Consumers" component={ConsumersScreen} options={{ title: 'Konsumen NTG & GWP' }} />
-            <Stack.Screen
-              name="ConsumerDetail"
-              component={ConsumerDetailScreen}
-              options={{ title: 'Detail Konsumen' }}
-            />
-            <Stack.Screen name="NutritionQuiz" component={NutritionQuizScreen} options={{ title: 'Quick Nutrition Check' }} />
-            <Stack.Screen name="ShareOfShelf" component={ShareOfShelfScreen} options={{ title: 'Share of Shelf' }} />
-            <Stack.Screen name="PaidVisibility" component={PaidVisibilityScreen} options={{ title: 'Paid Visibility' }} />
-            <Stack.Screen name="PriceMonitoring" component={PriceMonitoringScreen} options={{ title: 'Price Monitoring' }} />
-            <Stack.Screen name="SurveyList" component={SurveyListScreen} options={{ title: 'Survey' }} />
-            <Stack.Screen name="SurveyRespond" component={SurveyRespondScreen} options={{ title: 'Isi Survey' }} />
-            <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
-            <Stack.Screen name="SurveyResults" component={SurveyResultsScreen} options={{ title: 'Hasil Survey' }} />
-            <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
-            <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
-            <Stack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Skorkartu' }} />
-            <Stack.Screen name="Targets" component={TargetsScreen} options={{ title: 'Target Bulanan' }} />
-            <Stack.Screen name="Certifications" component={CertificationsScreen} options={{ title: 'Sertifikasi' }} />
-            <Stack.Screen name="Products" component={ProductsScreen} options={{ title: 'Master Produk' }} />
-            <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Log Aktivitas' }} />
-            <Stack.Screen
-              name="ChatThread"
-              component={ChatThreadScreen}
-              options={({ route }: any) => ({ title: route.params?.counterpartName || 'Pesan' })}
-            />
-            <Stack.Screen
-              name="ComingSoon"
-              component={ComingSoonScreen}
-              options={{ title: 'Segera Hadir' }}
-            />
-          </Stack.Navigator>
-        )}
-        <DialogHost />
-        <TrackingWatcher />
-      </NavigationContainer>
+      <ErrorBoundary>
+        <NavigationContainer theme={navTheme}>
+          <StatusBar style="light" />
+          {!user ? (
+            <Stack.Navigator screenOptions={stackOpts}>
+              <Stack.Screen
+                name="Login"
+                component={LoginScreen}
+                options={{ title: APP_NAME, headerShown: false }}
+              />
+            </Stack.Navigator>
+          ) : (
+            <Stack.Navigator screenOptions={stackOpts}>
+              <Stack.Screen name="Main" options={{ headerShown: false }}>
+                {() => <MainTabs role={user.role} me={user} />}
+              </Stack.Screen>
+              <Stack.Screen
+                name="StoreDetail"
+                component={StoreDetailScreen}
+                options={{ title: 'Detail Toko' }}
+              />
+              <Stack.Screen
+                name="Import"
+                component={ImportScreen}
+                options={{ title: 'Impor Data' }}
+              />
+              <Stack.Screen
+                name="StoreVisit"
+                component={StoreVisitScreen}
+                options={{ title: 'Kunjungan Toko', headerBackTitle: 'Tutup' }}
+              />
+              <Stack.Screen name="StockTaking" component={StockTakingScreen} options={{ title: 'Stock Taking' }} />
+              <Stack.Screen name="Offtake" component={OfftakeScreen} options={{ title: 'Offtake' }} />
+              <Stack.Screen name="Consumers" component={ConsumersScreen} options={{ title: 'Konsumen NTG & GWP' }} />
+              <Stack.Screen
+                name="ConsumerDetail"
+                component={ConsumerDetailScreen}
+                options={{ title: 'Detail Konsumen' }}
+              />
+              <Stack.Screen name="NutritionQuiz" component={NutritionQuizScreen} options={{ title: 'Quick Nutrition Check' }} />
+              <Stack.Screen name="ShareOfShelf" component={ShareOfShelfScreen} options={{ title: 'Share of Shelf' }} />
+              <Stack.Screen name="PaidVisibility" component={PaidVisibilityScreen} options={{ title: 'Paid Visibility' }} />
+              <Stack.Screen name="PriceMonitoring" component={PriceMonitoringScreen} options={{ title: 'Price Monitoring' }} />
+              <Stack.Screen name="SurveyList" component={SurveyListScreen} options={{ title: 'Survey' }} />
+              <Stack.Screen name="SurveyRespond" component={SurveyRespondScreen} options={{ title: 'Isi Survey' }} />
+              <Stack.Screen name="SurveyBuilder" component={SurveyBuilderScreen} options={{ title: 'Kelola Survey' }} />
+              <Stack.Screen name="SurveyResults" component={SurveyResultsScreen} options={{ title: 'Hasil Survey' }} />
+              <Stack.Screen name="CoachingLog" component={CoachingLogScreen} options={{ title: 'Coaching Log' }} />
+              <Stack.Screen name="NcTracker" component={NcTrackerScreen} options={{ title: 'NC Tracker' }} />
+              <Stack.Screen name="Scorecard" component={ScorecardScreen} options={{ title: 'Skorkartu' }} />
+              <Stack.Screen name="Targets" component={TargetsScreen} options={{ title: 'Target Bulanan' }} />
+              <Stack.Screen name="Certifications" component={CertificationsScreen} options={{ title: 'Sertifikasi' }} />
+              <Stack.Screen name="Products" component={ProductsScreen} options={{ title: 'Master Produk' }} />
+              <Stack.Screen name="AuditLog" component={AuditLogScreen} options={{ title: 'Log Aktivitas' }} />
+              <Stack.Screen
+                name="ChatThread"
+                component={ChatThreadScreen}
+                options={({ route }) => ({ title: route.params.counterpartName || 'Pesan' })}
+              />
+            </Stack.Navigator>
+          )}
+          <DialogHost />
+          <TrackingWatcher />
+        </NavigationContainer>
+      </ErrorBoundary>
     </SafeAreaProvider>
   );
 }
 
-// tema gelap tidak dipakai eksplisit namun disiapkan bila dibutuhkan
-void DarkTheme;

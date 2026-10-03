@@ -531,19 +531,3 @@ export function ErrorState({ text, onRetry }: { text: string; onRetry?: () => vo
     </View>
   );
 }
-
-/** Placeholder kartu utk fitur yang belum diimplementasikan (Phase 2/3/4 — lihat README). */
-export function ComingSoon({ title, phase, note }: { title: string; phase: string; note?: string }) {
-  return (
-    <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center', padding: 32, gap: 10 }}>
-      <Ionicons name="construct-outline" size={28} color={C.faint} />
-      <Text style={{ ...T.h2, textAlign: 'center' }}>{title}</Text>
-      <Badge label={phase} color={C.info} />
-      {note ? (
-        <Text style={{ color: C.muted, fontSize: 12.5, textAlign: 'center', maxWidth: 320, fontFamily: F.reg }}>
-          {note}
-        </Text>
-      ) : null}
-    </View>
-  );
-}

@@ -1,6 +1,7 @@
 import React, { useMemo } from 'react';
 import { FlatList, View } from 'react-native';
-import { useNavigation, useRoute } from '@react-navigation/native';
+import { useNavigation } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Empty, ListRow, SectionHeader } from '../components/ui';
 import { NUTRITION_QUIZ_CAMPAIGN_TAG } from '../config';
 import { useStore } from '../store/useStore';
@@ -10,8 +11,8 @@ import { useStore } from '../store/useStore';
  * active store check-in"). The Nutrition Quiz (§6) is a separate, dedicated
  * flow (NutritionQuizScreen) reached from a consumer's funnel, not this list. */
 export default function SurveyListScreen() {
-  const route = useRoute<any>();
-  const navigation = useNavigation<any>();
+  const route = useAppRoute<'SurveyList'>();
+  const navigation = useNavigation();
   const visitId: string = route.params?.visitId;
   const storeId: string = route.params?.storeId;
 

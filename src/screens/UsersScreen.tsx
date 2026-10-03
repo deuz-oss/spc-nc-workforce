@@ -234,7 +234,7 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
 }
 
 export default function UsersScreen() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const users = useStore((s) => s.users);
   const teams = useStore((s) => s.teams);
   const toggleUserActive = useStore((s) => s.toggleUserActive);

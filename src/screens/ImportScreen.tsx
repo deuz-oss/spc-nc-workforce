@@ -38,7 +38,7 @@ function pick(row: Record<string, string>, keys: string[]): string {
 }
 
 function StoreImportSection() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const users = useStore((s) => s.users);
   const addStoresBulk = useStore((s) => s.addStoresBulk);
@@ -241,7 +241,7 @@ const VALID_ROLES: Role[] = [
 ];
 
 function UserImportSection() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const addUsersBulk = useStore((s) => s.addUsersBulk);
 
@@ -391,7 +391,7 @@ ENF-A-400,Enfagrow A+ 400g,Premium
 ENF-A-900,Enfagrow A+ 900g,Premium`;
 
 function ProductImportSection() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const addProductsBulk = useStore((s) => s.addProductsBulk);
 

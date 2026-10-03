@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Empty, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { LeafletMap, MapMarker } from '../components/LeafletMap';
@@ -123,7 +123,7 @@ function RouteCard({ ncId, initialAttendanceId }: { ncId: string; initialAttenda
 export default function NcTrackerScreen() {
   const me = useCurrentUser()!;
   const hidePii = me.role === 'reckitt_client';
-  const route = useRoute<any>();
+  const route = useAppRoute<'NcTracker'>();
   const ncId: string = route.params?.ncId;
 
   const users = useStore((s) => s.users);

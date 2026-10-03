@@ -1,6 +1,6 @@
 import React, { useMemo } from 'react';
 import { ScrollView, Text, View } from 'react-native';
-import { useRoute } from '@react-navigation/native';
+import { useAppRoute } from '../navigation';
 import { Card, Empty, H, Muted, SectionHeader, StatCard } from '../components/ui';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { C, F } from '../theme';
@@ -18,7 +18,7 @@ import { summarizeSurvey, surveyCsvRows } from '../utils/survey';
  * HistoryNotice offers the rest.
  */
 export default function SurveyResultsScreen() {
-  const route = useRoute<any>();
+  const route = useAppRoute<'SurveyResults'>();
   const surveyId: string = route.params?.surveyId;
   const survey = useStore((s) => s.surveys.find((x) => x.id === surveyId));
   const responses = useStore((s) => s.surveyResponses);

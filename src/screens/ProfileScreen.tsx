@@ -68,7 +68,7 @@ function ChangePasswordCard() {
 
 export default function ProfileScreen() {
   const me = useCurrentUser()!;
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const teams = useStore((s) => s.teams);
   const logout = useStore((s) => s.logout);
   const pendingCount = useStore((s) => s.pendingOps.length);

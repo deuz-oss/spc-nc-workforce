@@ -17,7 +17,7 @@ interface DraftQuestion extends SurveyQuestion {
  * multiple choice or free text, no conditional branching (that's what makes
  * the Nutrition Quiz its own dedicated screen rather than a config here). */
 export default function SurveyBuilderScreen() {
-  const navigation = useNavigation<any>();
+  const navigation = useNavigation();
   const me = useCurrentUser()!;
   const allSurveys = useStore((s) => s.surveys);
   // Filter outside the selector: a selector returning a fresh array every call
