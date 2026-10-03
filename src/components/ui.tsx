@@ -272,20 +272,26 @@ export function Empty({
   );
 }
 
-/** Header halaman: judul + subjudul + aksi opsional (dipakai di dalam ScrollView, bukan header navigasi) */
+/**
+ * Judul + subjudul + aksi opsional. `level="page"` (default) is the screen's
+ * own title; `level="card"` is a section inside a card — one step smaller, so
+ * the page title stays the clear top of the hierarchy.
+ */
 export function SectionHeader({
   title,
   subtitle,
   action,
+  level = 'page',
 }: {
   title: string;
   subtitle?: string;
   action?: { label: string; onPress: () => void };
+  level?: 'page' | 'card';
 }) {
   return (
     <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', gap: SP.sm }}>
       <View style={{ flexShrink: 1 }}>
-        <Text role="heading" style={T.h1}>
+        <Text role="heading" style={level === 'page' ? T.h1 : T.h2}>
           {title}
         </Text>
         {subtitle ? <Muted style={{ marginTop: 2 }}>{subtitle}</Muted> : null}

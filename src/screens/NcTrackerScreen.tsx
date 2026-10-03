@@ -55,7 +55,7 @@ function RouteCard({ ncId, initialAttendanceId }: { ncId: string; initialAttenda
   if (!sessions.length) {
     return (
       <Card>
-        <SectionHeader title="Rute" />
+        <SectionHeader level="card" title="Rute" />
         <Empty icon="map-outline" text="Belum ada sesi absensi dalam periode yang dimuat." />
       </Card>
     );
@@ -85,7 +85,7 @@ function RouteCard({ ncId, initialAttendanceId }: { ncId: string; initialAttenda
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title="Rute" subtitle="Jalur GPS selama sesi absensi" />
+      <SectionHeader level="card" title="Rute" subtitle="Jalur GPS selama sesi absensi" />
       <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
         {sessions.map((a) => (
           <Chip
@@ -172,15 +172,15 @@ export default function NcTrackerScreen() {
 
       <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
         <StatCard title="Kunjungan Tercatat" value={String(ncVisits.length)} />
-        <StatCard title="Total Facing" value={String(totalFacing)} />
-        <StatCard title="SOS %" value={sosPct != null ? `${sosPct}%` : '-'} />
+        <StatCard title="Total facing" value={String(totalFacing)} />
+        <StatCard title="Porsi rak (SOS)" value={sosPct != null ? `${sosPct}%` : '-'} />
       </View>
 
       {/* GPS trails aren't shared with the client role (route_points RLS, 0015). */}
       {!hidePii && <RouteCard ncId={ncId} initialAttendanceId={route.params?.attendanceId} />}
 
       <Card>
-        <SectionHeader title="Share of Shelf" subtitle="Facing counts + foto bukti" />
+        <SectionHeader level="card" title="Share of Shelf" subtitle="Facing counts + foto bukti" />
         {ncSos.length === 0 ? (
           <Empty text="Belum ada laporan Share of Shelf." />
         ) : (
@@ -201,7 +201,7 @@ export default function NcTrackerScreen() {
       </Card>
 
       <Card>
-        <SectionHeader title="Log Kunjungan" />
+        <SectionHeader level="card" title="Log Kunjungan" />
         <HistoryNotice />
         {ncVisits.length === 0 ? (
           <Empty text="Belum ada kunjungan." />

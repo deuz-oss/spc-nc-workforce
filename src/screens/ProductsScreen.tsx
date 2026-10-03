@@ -70,7 +70,7 @@ function AddProductForm({ onDone }: { onDone: () => void }) {
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title="Tambah Produk" subtitle="Untuk banyak SKU sekaligus, gunakan Impor CSV" />
+      <SectionHeader level="card" title="Tambah Produk" subtitle="Untuk banyak SKU sekaligus, gunakan Impor CSV" />
       <Field label="Kode SKU (tidak bisa diubah setelah disimpan)">
         <Input value={sku} onChangeText={setSku} autoCapitalize="characters" placeholder="mis. ENF-A-400" />
       </Field>

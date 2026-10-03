@@ -10,6 +10,7 @@ import { parseSessionDate, passRate, toSessionDateText } from '../utils/certific
 import { fmtDate, MONTHS_ID } from '../utils/format';
 import { monthKey, shiftMonth } from '../utils/period';
 import { uid } from '../utils/uuid';
+import { useNow } from '../components/useNow';
 
 /**
  * Training certification results (PRD §9, Lead Trainer KPIs). Entry is per
@@ -43,6 +44,7 @@ export default function CertificationsScreen() {
 
   // --- session entry state ---
   const [certType, setCertType] = useState(CERT_TYPES[0].key);
+  const now = useNow();
   const [dateText, setDateText] = useState(() => toSessionDateText(Date.now()));
   const [teamFilter, setTeamFilter] = useState<string | null>(null);
   const [q, setQ] = useState('');
@@ -154,8 +156,22 @@ export default function CertificationsScreen() {
                 ))}
               </View>
             </Field>
-            <Field label="Tanggal Sesi (YYYY-MM-DD)">
-              <Input value={dateText} onChangeText={setDateText} placeholder="2026-09-24" autoCapitalize="none" />
+            <Field label="Tanggal sesi" error={dateText.trim() && sessionDate == null ? 'Tulis tanggal sebagai TTTT-BB-HH, mis. 2026-09-24.' : null}>
+              {/* Most sessions are today or yesterday — one tap; other dates are typed. */}
+              <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+                {[0, 1, 2].map((daysAgo) => {
+                  const text = toSessionDateText(now - daysAgo * 86400000);
+                  return (
+                    <Chip
+                      key={daysAgo}
+                      label={daysAgo === 0 ? 'Hari ini' : daysAgo === 1 ? 'Kemarin' : '2 hari lalu'}
+                      active={dateText === text}
+                      onPress={() => setDateText(text)}
+                    />
+                  );
+                })}
+              </View>
+              <Input value={dateText} onChangeText={setDateText} placeholder="2026-09-24" autoCapitalize="none" accessibilityLabel="Tanggal sesi, format tahun-bulan-hari" />
             </Field>
             {sessionDate == null && (
               <Muted style={{ color: C.accent }}>Tanggal tidak valid atau di masa depan.</Muted>

@@ -72,7 +72,7 @@ export default function CoachingLogScreen() {
       </Card>
 
       <Card>
-        <SectionHeader title="Riwayat" />
+        <SectionHeader level="card" title="Riwayat" />
         {myLogs.length === 0 ? (
           <Empty text="Belum ada catatan coaching." />
         ) : (

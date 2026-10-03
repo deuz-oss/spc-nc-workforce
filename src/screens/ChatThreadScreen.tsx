@@ -7,7 +7,8 @@ import { Btn, Empty, Input, OfflineNote, StickyFooter } from '../components/ui';
 import { useOnline } from '../components/useOnline';
 import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
-import { fmtDateTime } from '../utils/format';
+import { fmtDate, fmtTime } from '../utils/format';
+import { programDayKey } from '../utils/period';
 
 /** Message thread (PRD §17). Online-required send (no offline queue — an
  * intentionally new, unscoped-for-now queue class per the PRD review note);
@@ -74,24 +75,37 @@ export default function ChatThreadScreen() {
         {thread.length === 0 ? (
           <Empty icon="chatbubbles-outline" text={`Belum ada pesan dengan ${counterpartName || 'lawan bicara'}. Tulis pesan pertama di bawah.`} />
         ) : (
-          thread.map((m) => {
+          thread.map((m, i) => {
             const mine = m.senderId === me.id;
+            // A date line wherever the day changes, so "kemarin" vs "hari ini" is clear.
+            const day = programDayKey(m.createdAt);
+            const newDay = i === 0 || programDayKey(thread[i - 1].createdAt) !== day;
             return (
-              <View key={m.id} style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
-                <View
-                  style={{
-                    maxWidth: '80%',
-                    backgroundColor: mine ? C.primary : C.card,
-                    borderWidth: mine ? 0 : 1,
-                    borderColor: C.border,
-                    borderRadius: 14,
-                    paddingHorizontal: 12,
-                    paddingVertical: 8,
-                  }}
-                >
-                  <Text style={[T.body, { color: mine ? C.onPrimary : C.text }]}>{m.body}</Text>
+              <View key={m.id} style={{ gap: 8 }}>
+                {newDay && (
+                  <Text role="heading" style={[T.caption, { textAlign: 'center', marginTop: i ? 8 : 0 }]}>
+                    {fmtDate(m.createdAt)}
+                  </Text>
+                )}
+                <View style={{ alignItems: mine ? 'flex-end' : 'flex-start' }}>
+                  <View
+                    style={{
+                      maxWidth: '80%',
+                      backgroundColor: mine ? C.primary : C.card,
+                      borderWidth: mine ? 0 : 1,
+                      borderColor: C.border,
+                      borderRadius: 14,
+                      paddingHorizontal: 12,
+                      paddingVertical: 8,
+                    }}
+                  >
+                    <Text style={[T.body, { color: mine ? C.onPrimary : C.text }]}>{m.body}</Text>
+                  </View>
+                  <Text style={[T.meta, { marginTop: 2 }]}>
+                    {fmtTime(m.createdAt)}
+                    {mine ? (m.readAt ? ' · Dibaca' : ' · Terkirim') : ''}
+                  </Text>
                 </View>
-                <Text style={[T.meta, { marginTop: 2 }]}>{fmtDateTime(m.createdAt)}</Text>
               </View>
             );
           })

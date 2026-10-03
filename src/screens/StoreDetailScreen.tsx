@@ -147,7 +147,7 @@ export default function StoreDetailScreen() {
         )}
 
         <Card>
-          <SectionHeader title={`Riwayat Kunjungan (${storeVisits.length})`} />
+          <SectionHeader level="card" title={`Riwayat Kunjungan (${storeVisits.length})`} />
           <HistoryNotice />
           {storeVisits.length === 0 ? (
             <Empty icon="storefront-outline" text="Belum ada kunjungan ke toko ini." />

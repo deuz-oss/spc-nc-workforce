@@ -201,7 +201,7 @@ function NcStatsCard() {
 
   return (
     <Card>
-      <SectionHeader title="Ringkasan Bulan Ini" subtitle={status.label} />
+      <SectionHeader level="card" title="Ringkasan Bulan Ini" subtitle={status.label} />
       <Muted style={{ marginTop: 2 }}>
         {official
           ? `Skorkartu resmi bulan ini: ${Math.round(official.score)} (dihitung server tiap malam)`
@@ -293,7 +293,7 @@ function TeamSummaryCard() {
 
   return (
     <Card>
-      <SectionHeader
+      <SectionHeader level="card"
         title={me.role === 'arco' ? 'Tim di Bawah Koordinasi Anda' : 'Tim Saya'}
         subtitle={`${stats.ncCount} NC`}
         action={{ label: 'Buka Validasi', onPress: () => navigation.navigate('Validasi') }}
@@ -337,7 +337,7 @@ function TodayPlanCard({
 
   return (
     <Card>
-      <SectionHeader
+      <SectionHeader level="card"
         title="Jadwal hari ini"
         subtitle={plans.length ? `${visited} dari ${plans.length} toko dikunjungi` : undefined}
         action={{ label: 'Jadwal minggu ini', onPress: () => navigation.navigate('Pjp') }}
@@ -436,7 +436,7 @@ export default function DashboardScreen() {
 
       {me.role === 'super_admin' && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Ringkasan Program"
             subtitle={`${users.filter((u) => u.active).length} akun aktif · ${new Set(stores.map((s) => s.city).filter(Boolean)).size} kota`}
           />
@@ -452,7 +452,7 @@ export default function DashboardScreen() {
 
       {PJP_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Jadwal Kunjungan (PJP)"
             subtitle="Rencana toko per hari untuk setiap NC"
             action={{ label: 'Atur', onPress: () => navigation.navigate('Pjp') }}
@@ -462,7 +462,7 @@ export default function DashboardScreen() {
 
       {CERT_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Sertifikasi"
             subtitle="Catat hasil sesi sertifikasi NC dan TL"
             action={{ label: 'Buka', onPress: () => navigation.navigate('Certifications') }}
@@ -472,7 +472,7 @@ export default function DashboardScreen() {
 
       {PRODUCT_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Master Produk"
             subtitle="SKU untuk pilihan laporan NC — tambah, ubah, nonaktifkan"
             action={{ label: 'Kelola', onPress: () => navigation.navigate('Products') }}
@@ -482,7 +482,7 @@ export default function DashboardScreen() {
 
       {TARGET_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Target Bulanan"
             subtitle="Target offtake dan alokasi GWP per NC"
             action={{ label: 'Atur Target', onPress: () => navigation.navigate('Targets') }}
@@ -492,7 +492,7 @@ export default function DashboardScreen() {
 
       {SURVEY_BUILDER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Survey"
             subtitle="Buat dan kelola pertanyaan survey untuk NC"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
@@ -501,7 +501,7 @@ export default function DashboardScreen() {
       )}
 
       <Card>
-        <SectionHeader
+        <SectionHeader level="card"
           title="Toko"
           action={{ label: 'Lihat semua', onPress: () => navigation.navigate('Toko') }}
         />

@@ -43,7 +43,7 @@ function AddUserForm({ onDone }: { onDone: () => void }) {
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title="Tambah Pengguna" />
+      <SectionHeader level="card" title="Tambah Pengguna" />
       <Field label="Nama"><Input value={name} onChangeText={setName} /></Field>
       <Field label="Username"><Input value={username} onChangeText={setUsername} autoCapitalize="none" /></Field>
       <Field label="Password"><Input value={password} onChangeText={setPassword} secureTextEntry /></Field>
@@ -101,7 +101,7 @@ function EditUserPanel({ user, onDone }: { user: User; onDone: () => void }) {
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title={`Ubah ${user.name}`} subtitle={user.username} />
+      <SectionHeader level="card" title={`Ubah ${user.name}`} subtitle={user.username} />
       <Field label="Peran">
         <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
           {ROLE_OPTIONS.map((r) => (
@@ -189,7 +189,7 @@ function TeamForm({ team, onDone }: { team?: Team; onDone: () => void }) {
 
   return (
     <Card style={{ gap: 10 }}>
-      <SectionHeader title={team ? `Ubah ${team.name}` : 'Tambah Tim'} subtitle="Satu TL per tim; ARCO boleh memegang beberapa tim" />
+      <SectionHeader level="card" title={team ? `Ubah ${team.name}` : 'Tambah Tim'} subtitle="Satu TL per tim; ARCO boleh memegang beberapa tim" />
       <Field label="Nama Tim"><Input value={name} onChangeText={setName} placeholder="mis. Tim Bandung 1" /></Field>
       <Field label="Kota"><Input value={city} onChangeText={setCity} /></Field>
       <Field label="Team Leader">
@@ -264,7 +264,7 @@ export default function UsersScreen() {
         {showAddTeam && !editingTeam && <TeamForm onDone={() => setShowAddTeam(false)} />}
         {showAddTeam && teams.length > 0 && (
           <Card style={{ gap: 8 }}>
-            <SectionHeader title={`Tim (${teams.length})`} />
+            <SectionHeader level="card" title={`Tim (${teams.length})`} />
             {teams.map((t) => (
               <ListRow
                 key={t.id}

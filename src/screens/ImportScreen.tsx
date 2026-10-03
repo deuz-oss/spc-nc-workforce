@@ -174,7 +174,7 @@ function StoreImportSection() {
       {rows && (
         <>
           <Card>
-            <SectionHeader
+            <SectionHeader level="card"
               title={`${rows.length} toko terbaca`}
               subtitle={assignable.length > 0 ? 'Pilih NC tujuan sebelum mengimpor (opsional)' : undefined}
             />
@@ -348,7 +348,7 @@ function UserImportSection() {
 
       {rows && (
         <Card>
-          <SectionHeader title={`${rows.length} akun terbaca`} />
+          <SectionHeader level="card" title={`${rows.length} akun terbaca`} />
           <View style={{ marginTop: 10 }}>
             <Btn title={`Buat ${rows.length} Akun`} onPress={doImport} disabled={importing} loading={importing} />
           </View>
@@ -486,7 +486,7 @@ function ProductImportSection() {
 
       {rows && (
         <Card>
-          <SectionHeader title={`${rows.length} produk terbaca`} />
+          <SectionHeader level="card" title={`${rows.length} produk terbaca`} />
           <View style={{ marginTop: 10 }}>
             <Btn title={`Impor ${rows.length} Produk`} onPress={doImport} disabled={importing} loading={importing} />
           </View>
@@ -615,7 +615,7 @@ function PjpImportSection() {
       {parsed && (
         <>
           <Card>
-            <SectionHeader
+            <SectionHeader level="card"
               title={`${parsed.plans.length} jadwal siap diimpor`}
               subtitle={`${parsed.read} baris terbaca${parsed.errors.length ? ` · ${parsed.errors.length} dilewati` : ''}`}
             />

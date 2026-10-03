@@ -4,7 +4,7 @@ import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, Touchable
 import { Btn, Card, Field, Input, Muted } from '../components/ui';
 import { announce } from '../components/dialog';
 import { APP_NAME } from '../config';
-import { C, T, TOUCH } from '../theme';
+import { C, SP, T, TOUCH } from '../theme';
 import { useBreakpoint } from '../utils/responsive';
 import { useStore } from '../store/useStore';
 
@@ -22,19 +22,23 @@ const DEMO_ACCOUNTS = [
   { role: 'Nutrition Consultant', u: 'nc.budi', p: 'nc123456' },
 ];
 
-function BrandPane() {
+/** Brand block. On a phone it stays compact so username and password are on
+ * screen without scrolling; the feature points are for the wide (desktop) layout. */
+function BrandPane({ compact }: { compact?: boolean }) {
   return (
-    <View style={{ alignItems: 'center', gap: 14 }}>
-      <View style={styles.brandMark}>
-        <Ionicons name="nutrition-outline" size={38} color={C.onGold} />
+    <View style={{ alignItems: 'center', gap: compact ? 8 : 14 }}>
+      <View style={[styles.brandMark, compact && styles.brandMarkCompact]}>
+        <Ionicons name="nutrition-outline" size={compact ? 28 : 38} color={C.onGold} />
       </View>
       <Text style={styles.brandTitle}>{APP_NAME}</Text>
       <Text style={styles.brandSub}>Enfagrow A+ Nutrition Consultant Service Provider</Text>
-      <View style={styles.trustRow}>
-        <TrustPoint icon="shield-checkmark-outline" label="Geo-fence & audit trail" />
-        <TrustPoint icon="analytics-outline" label="Skorkartu KPI otomatis tiap malam" />
-        <TrustPoint icon="cloud-offline-outline" label="Offline-first di lapangan" />
-      </View>
+      {!compact && (
+        <View style={styles.trustRow}>
+          <TrustPoint icon="shield-checkmark-outline" label="Lokasi kunjungan terverifikasi" />
+          <TrustPoint icon="analytics-outline" label="Skorkartu KPI otomatis tiap malam" />
+          <TrustPoint icon="cloud-offline-outline" label="Tetap bisa dipakai tanpa sinyal" />
+        </View>
+      )}
     </View>
   );
 }
@@ -86,7 +90,7 @@ export default function LoginScreen() {
 
   const formPane = (
     <View style={{ width: '100%', maxWidth: 380 }}>
-      <Card>
+      <Card style={{ gap: SP.md }}>
         <Field label="Username">
           <Input
             value={username}
@@ -104,7 +108,7 @@ export default function LoginScreen() {
             value={password}
             onChangeText={setPassword}
             secureTextEntry
-            placeholder="••••••"
+            placeholder="password"
             autoComplete="current-password"
             aria-label="Password"
             aria-invalid={!!err}
@@ -173,8 +177,8 @@ export default function LoginScreen() {
         contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', padding: 24 }}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={{ marginBottom: 28 }}>
-          <BrandPane />
+        <View style={{ marginBottom: 20 }}>
+          <BrandPane compact />
         </View>
         {formPane}
       </ScrollView>
@@ -191,6 +195,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 40,
   },
+  brandMarkCompact: { width: 56, height: 56, borderRadius: 16 },
   brandMark: {
     width: 76,
     height: 76,

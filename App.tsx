@@ -19,7 +19,7 @@ import Ionicons from '@expo/vector-icons/Ionicons';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { APP_NAME, ROLE_LABEL } from './src/config';
-import { C, F, T } from './src/theme';
+import { C, F, T, TOUCH } from './src/theme';
 import { useBreakpoint } from './src/utils/responsive';
 import { DialogHost } from './src/components/dialog';
 import { useCurrentUser, useStore } from './src/store/useStore';
@@ -219,8 +219,8 @@ function ResponsiveTabBar({
               accessibilityRole="button"
               accessibilityState={focused ? { selected: true } : {}}
               style={{
-                width: 52,
-                height: 44,
+                width: 56,
+                height: TOUCH,
                 borderRadius: 10,
                 alignItems: 'center',
                 justifyContent: 'center',
@@ -268,7 +268,7 @@ function ResponsiveTabBar({
                 flexDirection: 'row',
                 alignItems: 'center',
                 gap: 12,
-                paddingVertical: 11,
+                minHeight: TOUCH,
                 paddingHorizontal: 10,
                 borderRadius: 10,
                 backgroundColor: focused ? C.darkActive : 'transparent',
@@ -359,26 +359,6 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
           <View role="banner">
             <Header {...options} layout={layout} title={getHeaderTitle(options, r.name)} />
             <StatusStrip />
-          </View>
-        ),
-        headerRight: () => (
-          <View
-            style={{
-              marginRight: 16,
-              maxWidth: 170,
-              paddingHorizontal: 10,
-              paddingVertical: 4,
-              borderRadius: 999,
-              backgroundColor: C.darkChip,
-            }}
-          >
-            <Text
-              numberOfLines={1}
-              ellipsizeMode="tail"
-              style={[T.badge, { color: C.onDark }]}
-            >
-              {ROLE_LABEL[role]}
-            </Text>
           </View>
         ),
         tabBarIcon: ({ color, size }) =>

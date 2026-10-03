@@ -48,13 +48,14 @@ function TrendBars({ title, data }: { title: string; data: Array<{ label: string
   return (
     <View style={{ gap: 8 }}>
       <Text style={T.label}>{title}</Text>
+      {data.length > 0 && <Text style={T.meta}>{`Tertinggi ${max} · geser ke samping untuk hari lain`}</Text>}
       {data.length === 0 ? (
         <Empty text="Belum ada data pada periode ini." />
       ) : (
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={{ flexDirection: 'row', alignItems: 'flex-end', gap: 6, height: 90, paddingVertical: 4 }}>
             {data.map((d, i) => (
-              <View key={i} style={{ alignItems: 'center', width: 38 }}>
+              <View key={i} style={{ alignItems: 'center', width: 38 }} accessible accessibilityLabel={`${d.label}: ${d.value}`}>
                 <View
                   style={{
                     width: 16,
@@ -113,6 +114,9 @@ export default function ManagementDashboard() {
   const [category, setCategory] = useState<string | null>(null);
   const [tlId, setTlId] = useState<string | null>(null);
   const [storeQuery, setStoreQuery] = useState('');
+  // Filters fold away: the numbers come first, the 47-city chip wall only on request.
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const activeFilters = [city, channel, category, tlId, storeQuery.trim() || null].filter(Boolean).length;
 
   // The month shown by "Bulanan" and used for targets / scorecards — any month,
   // any year (older months load via the history notice below).
@@ -296,7 +300,7 @@ export default function ManagementDashboard() {
     >
       <SectionHeader
         title="Dashboard Manajemen"
-        subtitle={hidePii ? 'Tampilan Reckitt (read-only, agregat)' : 'Program-wide'}
+        subtitle={hidePii ? 'Tampilan Reckitt (hanya baca, angka agregat)' : 'Seluruh program'}
         action={{ label: 'Ekspor CSV', onPress: doExport }}
       />
 
@@ -325,46 +329,96 @@ export default function ManagementDashboard() {
             </>
           )}
         </Field>
-        <Field label="Kota">
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Chip label="Semua" active={!city} onPress={() => setCity(null)} />
-            {cities.map((c) => (
-              <Chip key={c} label={c} active={city === c} onPress={() => setCity(c)} />
+        <View style={{ alignSelf: 'flex-start' }}>
+          <Btn
+            small
+            variant="outline"
+            title={`${filtersOpen ? 'Tutup filter' : 'Filter'}${activeFilters ? ` (${activeFilters} aktif)` : ''}`}
+            onPress={() => setFiltersOpen((v) => !v)}
+          />
+        </View>
+        {filtersOpen && (
+          <>
+          <Field label="Kota">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <Chip label="Semua" active={!city} onPress={() => setCity(null)} />
+              {cities.map((c) => (
+                <Chip key={c} label={c} active={city === c} onPress={() => setCity(c)} />
+              ))}
+            </ScrollView>
+          </Field>
+          <Field label="Channel">
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <Chip label="Semua" active={!channel} onPress={() => setChannel(null)} />
+              {channels.map((c) => (
+                <Chip key={c} label={c} active={channel === c} onPress={() => setChannel(c)} />
+              ))}
+            </View>
+          </Field>
+          <Field label="Kategori">
+            <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
+              <Chip label="Semua" active={!category} onPress={() => setCategory(null)} />
+              {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
+                <Chip key={k} label={label} active={category === k} onPress={() => setCategory(k)} />
+              ))}
+            </View>
+          </Field>
+          <Field label="Team Leader">
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+              <Chip label="Semua" active={!tlId} onPress={() => setTlId(null)} />
+              {tls.map((tl) => (
+                <Chip key={tl.id} label={tl.name} active={tlId === tl.id} onPress={() => setTlId(tl.id)} />
+              ))}
+            </ScrollView>
+          </Field>
+          <Field label="Cari Toko">
+            <Input placeholder="Nama toko..." value={storeQuery} onChangeText={setStoreQuery} />
+          </Field>
+          </>
+        )}
+      </Card>
+
+      <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
+        <KPICard title="Total facing" value={String(totalFacing)} />
+        <KPICard title="Porsi rak (SOS)" value={sosPct != null ? `${sosPct}%` : '-'} />
+        <KPICard
+          title="Offtake vs target"
+          value={String(offtakeSum)}
+          target={targetSum ? `Target: ${targetSum}` : 'Target belum diset'}
+          status={targetSum ? (offtakeSum >= targetSum ? 'ok' : 'warn') : 'neutral'}
+        />
+        <KPICard title="Konsumen NTG" value={String(ntgCount)} />
+        <KPICard title="Serapan GWP" value={gwpAbsorptionPct != null ? `${gwpAbsorptionPct}%` : '-'} />
+      </View>
+
+      <Card style={{ gap: 16 }}>
+        <SectionHeader level="card" title="Tren" />
+        <TrendBars title="Porsi rak (SOS %) per hari" data={sosTrend} />
+        <TrendBars title="Offtake (unit) per hari" data={offtakeTrend} />
+      </Card>
+
+      <Card>
+        <SectionHeader level="card" title="Rincian per channel & kategori" subtitle="Porsi rak (SOS %)" />
+        {channelBreakdown.length === 0 ? (
+          <Empty text="Belum ada data Share of Shelf pada filter ini." />
+        ) : (
+          <View style={{ marginTop: 10 }}>
+            {channelBreakdown.map((row) => (
+              <View
+                key={row.key}
+                style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: C.divider }}
+              >
+                <Text style={{ ...T.body, flexShrink: 1 }}>{row.key}</Text>
+                <Text style={{ ...T.h3 }}>{row.sosPct}%</Text>
+              </View>
             ))}
           </View>
-        </Field>
-        <Field label="Channel">
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Chip label="Semua" active={!channel} onPress={() => setChannel(null)} />
-            {channels.map((c) => (
-              <Chip key={c} label={c} active={channel === c} onPress={() => setChannel(c)} />
-            ))}
-          </View>
-        </Field>
-        <Field label="Kategori">
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Chip label="Semua" active={!category} onPress={() => setCategory(null)} />
-            {Object.entries(CATEGORY_LABEL).map(([k, label]) => (
-              <Chip key={k} label={label} active={category === k} onPress={() => setCategory(k)} />
-            ))}
-          </View>
-        </Field>
-        <Field label="Team Leader">
-          <View style={{ flexDirection: 'row', gap: 8, flexWrap: 'wrap' }}>
-            <Chip label="Semua" active={!tlId} onPress={() => setTlId(null)} />
-            {tls.map((tl) => (
-              <Chip key={tl.id} label={tl.name} active={tlId === tl.id} onPress={() => setTlId(tl.id)} />
-            ))}
-          </View>
-        </Field>
-        <Field label="Cari Toko">
-          <Input placeholder="Nama toko..." value={storeQuery} onChangeText={setStoreQuery} />
-        </Field>
+        )}
       </Card>
 
       {me.role === 'data_analyst' && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Survey"
             subtitle="Buat dan kelola pertanyaan survey untuk NC"
             action={{ label: 'Kelola Survey', onPress: () => navigation.navigate('SurveyBuilder') }}
@@ -374,7 +428,7 @@ export default function ManagementDashboard() {
 
       {PRODUCT_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Master Produk"
             subtitle="SKU untuk pilihan laporan NC — tambah, ubah, nonaktifkan"
             action={{ label: 'Kelola', onPress: () => navigation.navigate('Products') }}
@@ -384,7 +438,7 @@ export default function ManagementDashboard() {
 
       {me.role === 'pm' && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Log Aktivitas Admin"
             subtitle="Siapa mengubah akun, tim, pin toko, target, review & bobot skorkartu"
             action={{ label: 'Buka', onPress: () => navigation.navigate('AuditLog') }}
@@ -394,7 +448,7 @@ export default function ManagementDashboard() {
 
       {TARGET_MANAGER_ROLES.includes(me.role) && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Target Bulanan"
             subtitle={
               targetSum
@@ -408,15 +462,15 @@ export default function ManagementDashboard() {
 
       {(me.role === 'pm' || me.role === 'data_analyst') && (
         <Card>
-          <SectionHeader
+          <SectionHeader level="card"
             title="Skorkartu Program"
             subtitle={`Periode ${monthlyKey}`}
             action={{ label: 'Lihat Detail', onPress: () => navigation.navigate('Scorecard') }}
           />
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
-            <KPICard title="On Track" value={String(scorecardCounts.onTrack)} status="ok" />
-            <KPICard title="Perlu Perhatian" value={String(scorecardCounts.needsAttention)} status="warn" />
-            <KPICard title="Di Bawah Target" value={String(scorecardCounts.belowTarget)} status={scorecardCounts.belowTarget > 0 ? 'warn' : 'neutral'} />
+            <KPICard title="Sesuai target" value={String(scorecardCounts.onTrack)} status="ok" />
+            <KPICard title="Perlu perhatian" value={String(scorecardCounts.needsAttention)} status="warn" />
+            <KPICard title="Di bawah target" value={String(scorecardCounts.belowTarget)} status={scorecardCounts.belowTarget > 0 ? 'warn' : 'neutral'} />
           </View>
           {scorecardCounts.total === 0 && (
             <Muted style={{ marginTop: 8 }}>Belum ada skorkartu untuk periode ini — hitung dulu di bawah.</Muted>
@@ -440,46 +494,8 @@ export default function ManagementDashboard() {
         </Card>
       )}
 
-      <View style={{ flexDirection: 'row', gap: 10, flexWrap: 'wrap' }}>
-        <KPICard title="Total Facing" value={String(totalFacing)} />
-        <KPICard title="SOS %" value={sosPct != null ? `${sosPct}%` : '-'} />
-        <KPICard
-          title="Offtake vs Target"
-          value={String(offtakeSum)}
-          target={targetSum ? `Target: ${targetSum}` : 'Target belum diset'}
-          status={targetSum ? (offtakeSum >= targetSum ? 'ok' : 'warn') : 'neutral'}
-        />
-        <KPICard title="NTG Count" value={String(ntgCount)} />
-        <KPICard title="GWP Absorption %" value={gwpAbsorptionPct != null ? `${gwpAbsorptionPct}%` : '-'} />
-      </View>
-
-      <Card style={{ gap: 16 }}>
-        <SectionHeader title="Tren" />
-        <TrendBars title="SOS % dari waktu ke waktu" data={sosTrend} />
-        <TrendBars title="Offtake dari waktu ke waktu" data={offtakeTrend} />
-      </Card>
-
       <Card>
-        <SectionHeader title="Breakdown Channel × Kategori" subtitle="SOS %" />
-        {channelBreakdown.length === 0 ? (
-          <Empty text="Belum ada data Share of Shelf pada filter ini." />
-        ) : (
-          <View style={{ marginTop: 10 }}>
-            {channelBreakdown.map((row) => (
-              <View
-                key={row.key}
-                style={{ flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 8, borderBottomWidth: 1, borderColor: C.divider }}
-              >
-                <Text style={{ ...T.body, flexShrink: 1 }}>{row.key}</Text>
-                <Text style={{ ...T.h3 }}>{row.sosPct}%</Text>
-              </View>
-            ))}
-          </View>
-        )}
-      </Card>
-
-      <Card>
-        <SectionHeader title="NC Tracker" subtitle="Drill-down per NC" />
+        <SectionHeader level="card" title="NC Tracker" subtitle="Rincian kunjungan, facing, dan rute per NC" />
         <View style={{ gap: 8, marginTop: 10 }}>
           {ncTrackerList.length === 0 ? (
             <Empty text="Tidak ada NC pada filter ini." />
