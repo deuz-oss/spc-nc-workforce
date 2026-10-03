@@ -5,7 +5,7 @@ import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
 import { isAuthRetryableFetchError, type RealtimeChannel } from '@supabase/supabase-js';
 import { supabase } from '../lib/supabase';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import {
   CONSENT_VERSION,
   HISTORY_DAYS,
@@ -1759,7 +1759,7 @@ export const useStore = create<StoreState>()((set, get) => ({
         `Data berikut tidak bisa disimpan dan perlu diisi ulang: ${failed.join(', ')}. Hubungi TL/admin bila berulang.`,
       );
     } else if (synced > silentSynced && !get().pendingOps.length) {
-      showDialog('Tersinkron', 'Data yang tersimpan offline berhasil dikirim ke server.');
+      showToast('Data offline berhasil dikirim ke server');
     }
   },
 

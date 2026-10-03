@@ -22,6 +22,13 @@ export const C = {
   card: '#FFFFFF',
   surfaceElevated: '#FFFFFF',
   railBg: '#0B1B3A', // side-rail nav (web/tablet) — deep navy
+  // Content on the dark navy surfaces (rail, header, login brand pane)
+  onDark: '#FFFFFF',
+  onDarkMuted: 'rgba(255,255,255,0.7)',
+  onDarkFaint: 'rgba(255,255,255,0.55)',
+  darkActive: 'rgba(255,255,255,0.08)', // selected rail item
+  darkDivider: 'rgba(255,255,255,0.08)',
+  darkChip: 'rgba(255,255,255,0.16)', // role pill in the header
   text: '#1E293B',
   muted: '#475569',
   faint: '#94A3B8',

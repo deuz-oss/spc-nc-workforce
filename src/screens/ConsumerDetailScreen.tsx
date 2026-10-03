@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import {
   CHILD_AGE_BRACKETS,
   CONSENT_TEXT,
@@ -85,7 +85,8 @@ export default function ConsumerDetailScreen() {
           destructive: true,
           onPress: async () => {
             if (!(await eraseConsumer(existing!.id))) {
-              showDialog('Data Konsumen Dihapus', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+              showToast('Data konsumen dihapus');
+              navigation.goBack();
             }
           },
         },
@@ -141,9 +142,8 @@ export default function ConsumerDetailScreen() {
       // One transaction: the consumer never ends up saved without its step.
       if (await saveConsumerWithStep(consumer, step)) return; // dialog already shown
 
-      showDialog(isCreate ? 'Konsumen Tersimpan' : 'Perubahan Tersimpan', undefined, [
-        { label: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      showToast(isCreate ? 'Konsumen tersimpan' : 'Perubahan tersimpan');
+      navigation.goBack();
     } finally {
       setBusy(false);
     }

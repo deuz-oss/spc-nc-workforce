@@ -3,7 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { C, F } from '../theme';
@@ -76,8 +76,9 @@ export default function PriceMonitoringScreen() {
         })),
         photoUri ?? undefined,
       );
-      if (queued) navigation.goBack(); // saved offline — the store already told the user
-      else showDialog('Price Monitoring Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      // Saved offline: the store already told the user — no second message.
+      if (!queued) showToast('Price Monitoring tersimpan');
+      navigation.goBack();
     } catch (e: any) {
       if (!(e instanceof ShownError)) {
         showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');

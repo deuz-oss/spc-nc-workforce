@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, Chip, H, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { COMPLIANCE_CHECKLIST_ITEMS, VISIBILITY_TYPES } from '../config';
 import { C, F } from '../theme';
@@ -50,8 +50,9 @@ export default function PaidVisibilityScreen() {
     setBusy(true);
     try {
       const { queued } = await submitPaidVisibility(visitId, storeId, { visibilityType, complianceChecklist: checklist }, photoUri);
-      if (queued) navigation.goBack(); // saved offline — the store already told the user
-      else showDialog('Paid Visibility Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      // Saved offline: the store already told the user — no second message.
+      if (!queued) showToast('Paid Visibility tersimpan');
+      navigation.goBack();
     } catch (e: any) {
       if (!(e instanceof ShownError)) {
         showDialog('Gagal Menyimpan', e?.message ?? 'Coba lagi.');

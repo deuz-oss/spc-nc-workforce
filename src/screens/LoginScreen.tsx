@@ -32,7 +32,7 @@ function BrandPane() {
       <Text style={styles.brandSub}>Enfagrow A+ Nutrition Consultant Service Provider</Text>
       <View style={styles.trustRow}>
         <TrustPoint icon="shield-checkmark-outline" label="Geo-fence & audit trail" />
-        <TrustPoint icon="analytics-outline" label="Skorkartu KPI real-time" />
+        <TrustPoint icon="analytics-outline" label="Skorkartu KPI otomatis tiap malam" />
         <TrustPoint icon="cloud-offline-outline" label="Offline-first di lapangan" />
       </View>
     </View>
@@ -43,7 +43,7 @@ function TrustPoint({ icon, label }: { icon: React.ComponentProps<typeof Ionicon
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
       <Ionicons name={icon} size={15} color={C.gold} />
-      <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 12.5, fontFamily: F.reg }}>{label}</Text>
+      <Text style={{ color: C.onDarkMuted, fontSize: 12.5, fontFamily: F.reg }}>{label}</Text>
     </View>
   );
 }
@@ -82,7 +82,7 @@ export default function LoginScreen() {
     setShowDemo(true);
   };
 
-  const toggleColor = isDesktop ? C.muted : 'rgba(255,255,255,0.8)';
+  const toggleColor = isDesktop ? C.muted : C.onDarkMuted;
 
   const formPane = (
     <View style={{ width: '100%', maxWidth: 380 }}>
@@ -199,11 +199,11 @@ const styles = StyleSheet.create({
   },
   brandTitle: {
     ...T.display,
-    color: '#FFFFFF',
+    color: C.onDark,
   },
   brandSub: {
     textAlign: 'center',
-    color: 'rgba(255,255,255,0.85)',
+    color: C.onDarkMuted,
     fontSize: 12.5,
     lineHeight: 18,
     fontFamily: F.reg,
@@ -223,7 +223,7 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   demoToggleText: {
-    color: 'rgba(255,255,255,0.8)',
+    color: C.onDarkMuted,
     fontSize: 12,
     fontFamily: F.semi,
   },

@@ -3,7 +3,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { useDataRefresh } from '../components/useDataRefresh';
 import ManagementDashboard from './ManagementDashboard';
 import {
@@ -71,7 +71,7 @@ function ClockCard() {
       // Outside the team's home-base radius is allowed but flagged (geo_fence_ok,
       // computed by the server — migration 0014).
       const queued = await clockIn(pos);
-      if (!queued) showDialog('Clock In berhasil');
+      if (!queued) showToast('Clock in berhasil');
     } catch (e) {
       // Connectivity problems never land here (they go to the offline queue) —
       // this is the server rejecting the clock-in.
@@ -300,7 +300,10 @@ export default function DashboardScreen() {
 
       {me.role === 'super_admin' && (
         <Card>
-          <SectionHeader title="Ringkasan Program" subtitle="215 akun · 47 kota (target)" />
+          <SectionHeader
+            title="Ringkasan Program"
+            subtitle={`${users.filter((u) => u.active).length} akun aktif · ${new Set(stores.map((s) => s.city).filter(Boolean)).size} kota`}
+          />
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 10, flexWrap: 'wrap' }}>
             <StatCard title="Total Pengguna Aktif" value={String(users.filter((u) => u.active).length)} />
             <StatCard title="Toko Terdaftar" value={String(stores.length)} />
@@ -358,7 +361,7 @@ export default function DashboardScreen() {
         />
         <Muted style={{ marginTop: 4 }}>
           {stores.length === 0
-            ? 'Belum ada data toko. Admin/TL/ARCO dapat mengimpor via tab Impor.'
+            ? 'Belum ada data toko. Super Admin, Admin Data Entry, TL, dan ARCO dapat mengimpor dari tab Toko → Impor CSV.'
             : `${stores.length} toko tercatat.`}
         </Muted>
       </Card>

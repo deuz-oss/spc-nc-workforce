@@ -215,6 +215,9 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   render in pages (`ShowMore`).
 - ✅ Store assignment has a searchable NC picker (own team / city first); the bottom tab bar and form footers clear
   the phone's home indicator (safe-area insets).
+- ✅ UI polish: success confirmations are non-blocking toasts (`showToast`) — dialogs are kept for errors,
+  decisions and things to read; colours on the navy surfaces are theme tokens (`onDark*`, `dark*`); Share of
+  Shelf pre-fills channel/category from the store; no hard-coded "215 akun · 47 kota" figures.
 - ✅ **Login loads a bounded history.** Field-activity tables (visits, attendance, the report modules, reviews,
   coaching logs, messages) load only the last `HISTORY_DAYS` (62, `src/config.ts`) at login — enough for every
   daily/weekly/monthly view — plus anything still open (not clocked/checked out). Screens that can reach further

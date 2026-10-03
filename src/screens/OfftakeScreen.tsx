@@ -3,7 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { Btn, Card, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { C, F } from '../theme';
 import { reportedSkus, ShownError, useStore } from '../store/useStore';
@@ -73,7 +73,8 @@ export default function OfftakeScreen() {
           [{ label: 'OK', onPress: () => navigation.goBack() }],
         );
       } else {
-        showDialog('Offtake Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+        showToast('Offtake tersimpan');
+        navigation.goBack();
       }
     } catch (e: any) {
       if (!(e instanceof ShownError)) showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Offtake. Coba lagi.');

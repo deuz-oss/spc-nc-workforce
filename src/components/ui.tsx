@@ -81,7 +81,7 @@ export function Chip({
   onPress?: () => void;
   color?: string;
 }) {
-  const activeText = color === C.primary ? C.onPrimary : '#FFFFFF';
+  const activeText = C.onPrimary; // white on every chip fill colour
   return (
     <TouchableOpacity
       onPress={onPress}
@@ -134,7 +134,7 @@ export function Btn({
       : variant === 'ok'
       ? C.ok
       : 'transparent';
-  const fg = variant === 'outline' ? C.primaryText : variant === 'primary' ? C.onPrimary : '#FFFFFF';
+  const fg = variant === 'outline' ? C.primaryText : C.onPrimary;
   return (
     <TouchableOpacity
       onPress={onPress}

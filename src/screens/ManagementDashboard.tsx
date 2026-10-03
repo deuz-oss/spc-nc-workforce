@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Chip, Empty, Field, Input, KPICard, ListRow, Muted, SectionHeader } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showToast } from '../components/dialog';
 import { useDataRefresh } from '../components/useDataRefresh';
 import { HistoryNotice } from '../components/HistoryNotice';
 import { ShowMore } from '../components/ShowMore';
@@ -267,7 +267,7 @@ export default function ManagementDashboard() {
     setComputingScorecards(true);
     try {
       const err = await computeScorecards(monthlyKey);
-      if (!err) showDialog('Skorkartu Dihitung', `Skorkartu periode ${monthlyKey} berhasil dihitung ulang untuk semua posisi.`);
+      if (!err) showToast(`Skorkartu ${monthlyKey} dihitung ulang`);
     } finally {
       setComputingScorecards(false);
     }

@@ -1,5 +1,7 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import Ionicons from '@expo/vector-icons/Ionicons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { C, ELEV, F, R, SP, T } from '../theme';
 
 export interface DialogButton {
@@ -35,6 +37,21 @@ export function announce(message: string) {
   announceListener?.(message);
 }
 
+let toastListener: ((t: { message: string; kind: ToastKind }) => void) | null = null;
+
+export type ToastKind = 'success' | 'info';
+
+/**
+ * Brief, non-blocking confirmation ("Stock Taking tersimpan") that disappears
+ * by itself — for outcomes the user needs to see but not acknowledge. Errors,
+ * decisions and anything the user must read keep using showDialog.
+ */
+export function showToast(message: string, kind: ToastKind = 'success') {
+  toastListener?.({ message, kind });
+}
+
+const TOAST_MS = 2600;
+
 export function DialogHost() {
   // FIFO queue — a dialog raised while another is open (e.g. the background
   // offline-sync "Tersinkron" notice) waits its turn instead of replacing the
@@ -61,6 +78,23 @@ export function DialogHost() {
     };
   }, []);
 
+  // Toast: one at a time, the newest replaces the current one.
+  const insets = useSafeAreaInsets();
+  const [toast, setToast] = useState<{ message: string; kind: ToastKind; n: number } | null>(null);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    toastListener = ({ message, kind }) => {
+      setToast((t) => ({ message, kind, n: (t?.n ?? 0) + 1 }));
+      announceListener?.(message);
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+      toastTimer.current = setTimeout(() => setToast(null), TOAST_MS);
+    };
+    return () => {
+      toastListener = null;
+      if (toastTimer.current) clearTimeout(toastTimer.current);
+    };
+  }, []);
+
   const close = (fn?: () => void) => {
     setQueue((q) => q.slice(1));
     fn?.();
@@ -71,6 +105,19 @@ export function DialogHost() {
       <Text aria-live="polite" role="status" style={styles.visuallyHidden}>
         {liveMessage}
       </Text>
+      {toast && (
+        // Above the bottom tab bar / form footer; never blocks touches.
+        <View pointerEvents="none" style={[styles.toastWrap, { bottom: insets.bottom + 84 }]}>
+          <View key={toast.n} style={styles.toast}>
+            <Ionicons
+              name={toast.kind === 'success' ? 'checkmark-circle' : 'information-circle'}
+              size={18}
+              color={toast.kind === 'success' ? C.okBg : C.infoBg}
+            />
+            <Text style={styles.toastText}>{toast.message}</Text>
+          </View>
+        </View>
+      )}
       <Modal
         visible={!!state}
         transparent
@@ -93,8 +140,7 @@ export function DialogHost() {
                     { backgroundColor: b.destructive ? C.accent : C.primary },
                   ]}
                 >
-                  {/* primary fill uses onPrimary text; the red destructive fill keeps white */}
-                  <Text style={[styles.btnLabel, { color: b.destructive ? '#fff' : C.onPrimary }]}>
+                          <Text style={[styles.btnLabel, { color: C.onPrimary }]}>
                     {b.label}
                   </Text>
                 </TouchableOpacity>
@@ -134,4 +180,17 @@ const styles = StyleSheet.create({
   buttonsRow: { flexDirection: 'row', justifyContent: 'flex-end', gap: SP.sm, marginTop: 18 },
   btn: { paddingVertical: 9, paddingHorizontal: 14, borderRadius: R.btn },
   btnLabel: { fontWeight: '700', fontFamily: F.bold, fontSize: 13 },
+  toastWrap: { position: 'absolute', left: 16, right: 16, alignItems: 'center' },
+  toast: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    maxWidth: 420,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: R.btn,
+    backgroundColor: C.primary,
+    ...ELEV[2],
+  },
+  toastText: { flexShrink: 1, color: C.onPrimary, fontFamily: F.semi, fontSize: 13 },
 });

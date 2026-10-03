@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { ScrollView, View } from 'react-native';
 import { Btn, Card, Empty, Field, Input, ListRow, SectionHeader } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { useCurrentUser, useStore, scopeUsers } from '../store/useStore';
 import { CoachingLog } from '../types';
 import { uid } from '../utils/uuid';
@@ -36,7 +36,7 @@ export default function CoachingLogScreen() {
       const err = await upsertCoachingLog(log);
       if (!err) {
         setNote('');
-        showDialog('Tersimpan', 'Catatan coaching berhasil disimpan.');
+        showToast('Catatan coaching tersimpan');
       }
     } finally {
       setBusy(false);

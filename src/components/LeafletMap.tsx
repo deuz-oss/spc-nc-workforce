@@ -63,7 +63,7 @@ export function LeafletMap({
 <link rel="stylesheet" href="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.css" integrity="${LEAFLET_CSS_SRI}" crossorigin=""/>
 <script src="https://unpkg.com/leaflet@${LEAFLET_VERSION}/dist/leaflet.js" integrity="${LEAFLET_JS_SRI}" crossorigin=""></script>
 <style>html,body,#m{height:100%;margin:0;padding:0}
-.off{display:flex;height:100%;align-items:center;justify-content:center;font:13px sans-serif;color:#475569;text-align:center;padding:0 16px}
+.off{display:flex;height:100%;align-items:center;justify-content:center;font:13px sans-serif;color:${C.muted};text-align:center;padding:0 16px}
 .leaflet-control-attribution{font-size:9px}</style></head>
 <body><div id="m"></div><script>
 if(!window.L){document.body.innerHTML='<div class="off">Peta tidak dapat dimuat — butuh koneksi internet.</div>';}else{
@@ -73,7 +73,7 @@ var map=L.map('m',{zoomControl:false,attributionControl:true});
 map.attributionControl.setPrefix(false);
 L.tileLayer(T.url,{maxZoom:19,attribution:T.attribution}).addTo(map);
 D.markers.forEach(function(mk){
-  L.circleMarker([mk.lat,mk.lng],{radius:7,color:'#FFFFFF',weight:2,fillColor:mk.color||'${C.accent}',fillOpacity:1})
+  L.circleMarker([mk.lat,mk.lng],{radius:7,color:'${C.card}',weight:2,fillColor:mk.color||'${C.accent}',fillOpacity:1})
    .addTo(map).bindTooltip(mk.label||'',{permanent:false,direction:'top'});
 });
 if(D.polyline.length>1){

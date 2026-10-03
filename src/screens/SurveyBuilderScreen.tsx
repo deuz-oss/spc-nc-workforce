@@ -2,7 +2,7 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { Btn, Card, Empty, Field, H, Input, ListRow, Muted, SectionHeader, StickyFooter } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { NUTRITION_QUIZ_CAMPAIGN_TAG, SURVEY_BUILDER_ROLES } from '../config';
 import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
@@ -88,7 +88,8 @@ export default function SurveyBuilderScreen() {
         createdAt: Date.now(),
       });
       if (err) return;
-      showDialog('Survey Tersimpan', undefined, [{ label: 'OK', onPress: resetForm }]);
+      showToast('Survey tersimpan');
+      resetForm();
     } finally {
       setBusy(false);
     }

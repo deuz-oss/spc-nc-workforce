@@ -130,13 +130,13 @@ function RailHeader({ me }: { me: User }) {
         >
           <Ionicons name="nutrition" size={18} color={C.onGold} />
         </View>
-        <Text style={{ color: '#fff', fontFamily: F.xbold, fontSize: 15 }}>{APP_NAME}</Text>
+        <Text style={{ color: C.onDark, fontFamily: F.xbold, fontSize: 15 }}>{APP_NAME}</Text>
       </View>
-      <View style={{ marginTop: 18, borderTopWidth: 1, borderColor: 'rgba(255,255,255,0.08)', paddingTop: 14 }}>
-        <Text style={{ color: '#fff', fontFamily: F.bold, fontSize: 13 }} numberOfLines={1}>
+      <View style={{ marginTop: 18, borderTopWidth: 1, borderColor: C.darkDivider, paddingTop: 14 }}>
+        <Text style={{ color: C.onDark, fontFamily: F.bold, fontSize: 13 }} numberOfLines={1}>
           {me.name}
         </Text>
-        <Text style={{ color: 'rgba(255,255,255,0.55)', fontFamily: F.reg, fontSize: 11.5, marginTop: 1 }}>
+        <Text style={{ color: C.onDarkFaint, fontFamily: F.reg, fontSize: 11.5, marginTop: 1 }}>
           {ROLE_LABEL[me.role]}
         </Text>
       </View>
@@ -239,7 +239,7 @@ function ResponsiveTabBar({
                 borderRadius: 10,
                 alignItems: 'center',
                 justifyContent: 'center',
-                backgroundColor: focused ? 'rgba(255,255,255,0.08)' : 'transparent',
+                backgroundColor: focused ? C.darkActive : 'transparent',
                 borderLeftWidth: 3,
                 borderLeftColor: focused ? C.gold : 'transparent',
               }}
@@ -247,7 +247,7 @@ function ResponsiveTabBar({
               <Ionicons
                 name={TAB_ICON[route.name] ?? 'ellipse-outline'}
                 size={20}
-                color={focused ? C.gold : 'rgba(255,255,255,0.6)'}
+                color={focused ? C.gold : C.onDarkMuted}
               />
             </TouchableOpacity>
           );
@@ -286,7 +286,7 @@ function ResponsiveTabBar({
                 paddingVertical: 11,
                 paddingHorizontal: 10,
                 borderRadius: 10,
-                backgroundColor: focused ? 'rgba(255,255,255,0.07)' : 'transparent',
+                backgroundColor: focused ? C.darkActive : 'transparent',
                 borderLeftWidth: 3,
                 borderLeftColor: focused ? C.gold : 'transparent',
               }}
@@ -294,13 +294,13 @@ function ResponsiveTabBar({
               <Ionicons
                 name={TAB_ICON[route.name] ?? 'ellipse-outline'}
                 size={19}
-                color={focused ? C.gold : 'rgba(255,255,255,0.7)'}
+                color={focused ? C.gold : C.onDarkMuted}
               />
               <Text
                 style={{
                   fontSize: 13.5,
                   fontFamily: focused ? F.bold : F.semi,
-                  color: focused ? '#FFFFFF' : 'rgba(255,255,255,0.7)',
+                  color: focused ? C.onDark : C.onDarkMuted,
                 }}
               >
                 {route.name}
@@ -368,7 +368,7 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
       tabBar={(props) => <ResponsiveTabBar {...props} isTablet={isTablet} isDesktop={isDesktop} me={me} />}
       screenOptions={({ route }) => ({
         headerStyle: { backgroundColor: C.railBg, shadowOpacity: 0, borderBottomWidth: 0 },
-        headerTintColor: '#FFFFFF',
+        headerTintColor: C.onDark,
         headerTitleStyle: { fontFamily: F.bold, fontSize: 17 },
         headerShadowVisible: false,
         sceneStyle: railWidth ? { marginLeft: railWidth } : undefined,
@@ -386,13 +386,13 @@ function MainTabs({ role, me }: { role: Role; me: User }) {
               paddingHorizontal: 10,
               paddingVertical: 4,
               borderRadius: 999,
-              backgroundColor: 'rgba(255,255,255,0.16)',
+              backgroundColor: C.darkChip,
             }}
           >
             <Text
               numberOfLines={1}
               ellipsizeMode="tail"
-              style={{ color: '#fff', fontFamily: F.semi, fontSize: 11.5 }}
+              style={{ color: C.onDark, fontFamily: F.semi, fontSize: 11.5 }}
             >
               {ROLE_LABEL[role]}
             </Text>
@@ -468,12 +468,12 @@ export default function App() {
 
   const navTheme = {
     ...DefaultTheme,
-    colors: { ...DefaultTheme.colors, primary: C.primaryDark, background: C.bg, card: '#fff' },
+    colors: { ...DefaultTheme.colors, primary: C.primaryDark, background: C.bg, card: C.card },
   };
 
   const stackOpts = {
     headerStyle: { backgroundColor: C.railBg, shadowOpacity: 0, borderBottomWidth: 0 },
-    headerTintColor: '#FFFFFF',
+    headerTintColor: C.onDark,
     headerTitleStyle: { fontFamily: F.bold, fontSize: 17 },
     headerShadowVisible: false,
   };

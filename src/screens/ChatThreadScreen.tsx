@@ -83,7 +83,7 @@ export default function ChatThreadScreen() {
                     paddingVertical: 8,
                   }}
                 >
-                  <Text style={{ color: mine ? '#fff' : C.text, fontFamily: F.reg, fontSize: 14 }}>{m.body}</Text>
+                  <Text style={{ color: mine ? C.onPrimary : C.text, fontFamily: F.reg, fontSize: 14 }}>{m.body}</Text>
                 </View>
                 <Text style={{ fontSize: 10.5, color: C.muted, fontFamily: F.reg, marginTop: 2 }}>{fmtDateTime(m.createdAt)}</Text>
               </View>

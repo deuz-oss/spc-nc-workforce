@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { FlatList, Text, View } from 'react-native';
 import { Badge, Btn, Card, Empty, GeoValidBadge, H, ListRow, Muted } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { C, T } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { fmtDate, fmtDurClock, fmtDurShort, fmtKm, fmtTime } from '../utils/format';
@@ -50,7 +50,7 @@ function LiveSessionCard({ me }: { me: ReturnType<typeof useCurrentUser> }) {
       const fix = await getCurrentCoords();
       const pos = fix && !fix.mocked ? { lat: fix.lat, lng: fix.lng } : last;
       const queued = await clockOutStore(pos);
-      if (!queued) showDialog('Clock Out berhasil');
+      if (!queued) showToast('Clock out berhasil');
     } catch (e) {
       // Connectivity problems are queued offline, never thrown — this is a server rejection.
       showDialog('Gagal Clock Out', e instanceof Error ? e.message : 'Coba lagi.');

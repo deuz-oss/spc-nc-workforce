@@ -4,7 +4,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { Badge, Btn, Card, Chip, Field, H, Input, Muted, SectionHeader, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showToast } from '../components/dialog';
 import { CHILD_AGE_BRACKETS, NUTRITION_QUIZ_SURVEY_ID } from '../config';
 import { C, F } from '../theme';
 import { useStore } from '../store/useStore';
@@ -187,9 +187,8 @@ export default function NutritionQuizScreen() {
         createdAt: Date.now(),
       });
       if (err) return;
-      showDialog('Tahap NTG & GWP Diperbarui', 'Tahap funnel konsumen ini sekarang "Nutrition Quiz Selesai".', [
-        { label: 'OK', onPress: () => navigation.goBack() },
-      ]);
+      showToast('Tahap funnel: Nutrition Quiz Selesai');
+      navigation.goBack();
     } finally {
       setBusy(false);
     }

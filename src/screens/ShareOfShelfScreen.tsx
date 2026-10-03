@@ -3,7 +3,7 @@ import { ScrollView, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { Btn, Card, Chip, Field, H, Input, KPICard, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { CATEGORY_LABEL } from '../config';
 import { C } from '../theme';
@@ -22,7 +22,9 @@ export default function ShareOfShelfScreen() {
 
   const submitShareOfShelf = useStore((s) => s.submitShareOfShelf);
 
-  const [channel, setChannel] = useState('');
+  // Defaults from the store's master data — the NC only types it when it differs.
+  const store = useStore((s) => s.stores.find((x) => x.id === storeId));
+  const [channel, setChannel] = useState(store?.channel ?? '');
   // One Share of Shelf per category per visit — categories already reported can't be picked again.
   const allSos = useStore((s) => s.shareOfShelfRows);
   const doneCategories = useMemo(
@@ -30,7 +32,9 @@ export default function ShareOfShelfScreen() {
     [allSos, visitId],
   );
   const [category, setCategory] = useState<StoreCategory>(() =>
-    CATEGORIES.find((c) => !doneCategories.has(c)) ?? 'premium',
+    store && !doneCategories.has(store.category)
+      ? store.category
+      : (CATEGORIES.find((c) => !doneCategories.has(c)) ?? 'premium'),
   );
   const allDone = CATEGORIES.every((c) => doneCategories.has(c));
   const [ownFacing, setOwnFacing] = useState('');
@@ -77,8 +81,9 @@ export default function ShareOfShelfScreen() {
         { channel: channel.trim(), category, ownFacingCount: Number(ownFacing), totalFacingCount: Number(totalFacing) },
         photoUri,
       );
-      if (queued) navigation.goBack(); // saved offline — the store already told the user
-      else showDialog('Share of Shelf Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      // Saved offline: the store already told the user — no second message.
+      if (!queued) showToast('Share of Shelf tersimpan');
+      navigation.goBack();
     } catch (e: any) {
       // store action already showed a dialog for offline/upload-failure cases
       if (!(e instanceof ShownError)) {
@@ -102,6 +107,9 @@ export default function ShareOfShelfScreen() {
           <Field label="Account / Channel">
             <Input placeholder="mis. DMS, LMT, MTI (definisi menunggu konfirmasi client)" value={channel} onChangeText={setChannel} />
           </Field>
+          {!!store?.channel && (
+            <Muted style={{ marginTop: 4 }}>Diisi dari data toko ({store.channel}); ubah hanya bila berbeda.</Muted>
+          )}
           <View style={{ height: 10 }} />
           <Field label="Kategori">
             <View style={{ flexDirection: 'row', gap: 8 }}>

@@ -3,7 +3,7 @@ import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
 import { Badge, Btn, Card, Chip, Empty, Field, H, Input, Muted, SectionHeader, StickyFooter, STICKY_FOOTER_SPACE } from '../components/ui';
-import { showDialog } from '../components/dialog';
+import { showDialog, showToast } from '../components/dialog';
 import { confirmSkippedRows, SkuPicker } from '../components/SkuPicker';
 import { EvidencePhotoField } from '../components/EvidencePhotoField';
 import { C, F } from '../theme';
@@ -71,8 +71,9 @@ export default function StockTakingScreen() {
         photoUri ?? undefined,
       );
       // Saved offline: the store already told the user — just leave the form.
-      if (queued) navigation.goBack();
-      else showDialog('Stock Taking Tersimpan', undefined, [{ label: 'OK', onPress: () => navigation.goBack() }]);
+      // Saved offline: the store already told the user — no second message.
+      if (!queued) showToast('Stock Taking tersimpan');
+      navigation.goBack();
     } catch (e: any) {
       if (!(e instanceof ShownError)) showDialog('Gagal Menyimpan', e?.message ?? 'Tidak dapat menyimpan Stock Taking. Coba lagi.');
     } finally {
