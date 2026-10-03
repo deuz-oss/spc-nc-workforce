@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import Ionicons from '@expo/vector-icons/Ionicons';
 import { KeyboardAvoidingView, Platform, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Btn, Card, Field, Input, Muted } from '../components/ui';
 import { announce } from '../components/dialog';
 import { APP_NAME } from '../config';
@@ -87,6 +88,7 @@ export default function LoginScreen() {
   };
 
   const toggleColor = isDesktop ? C.muted : C.onDarkMuted;
+  const insets = useSafeAreaInsets();
 
   const formPane = (
     <View style={{ width: '100%', maxWidth: 380 }}>
@@ -174,7 +176,16 @@ export default function LoginScreen() {
       <ScrollView
         tabIndex={0}
         role="main"
-        contentContainerStyle={{ flexGrow: 1, justifyContent: 'flex-end', padding: 24 }}
+        // Centered, not pinned to the bottom: on a tall phone (S24 Ultra, ~915 dp)
+        // flex-end left a large empty band above the brand and form.
+        contentContainerStyle={{
+          flexGrow: 1,
+          justifyContent: 'center',
+          alignItems: 'center',
+          paddingHorizontal: SP.xl,
+          paddingTop: SP.xl + insets.top,
+          paddingBottom: SP.xl + insets.bottom,
+        }}
         keyboardShouldPersistTaps="handled"
       >
         <View style={{ marginBottom: 20 }}>
