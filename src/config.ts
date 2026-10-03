@@ -109,6 +109,10 @@ export const COMPLIANCE_CHECKLIST_ITEMS: Array<{ key: string; label: string }> =
   { key: 'periode_berlaku', label: 'Berlaku dalam periode kampanye' },
 ];
 
+/** Posisi yang boleh menyusun jadwal kunjungan PJP — TL/ARCO hanya untuk NC di timnya
+ * (matches can_manage_schedule, migration 0020). */
+export const PJP_MANAGER_ROLES: Role[] = ['tl', 'arco', 'super_admin', 'admin_data_entry'];
+
 /** Posisi yang boleh mengatur target offtake/alokasi GWP per NC (matches targets RLS write policy, 0001 migration). */
 export const TARGET_MANAGER_ROLES: Role[] = ['data_analyst', 'super_admin'];
 

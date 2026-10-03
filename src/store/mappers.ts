@@ -13,6 +13,7 @@ import type {
   Product,
   ReportReview,
   RoutePoint,
+  Schedule,
   Scorecard,
   ShareOfShelfRow,
   StockTakingRow,
@@ -301,6 +302,26 @@ export function mapScorecard(s: any): Scorecard {
     status: s.status,
     breakdown: s.breakdown ?? {},
     computedAt: new Date(s.computed_at).getTime(),
+  };
+}
+
+export function mapSchedule(s: any): Schedule {
+  return {
+    id: s.id,
+    ncId: s.nc_id,
+    storeId: s.store_id,
+    plannedDate: new Date(s.planned_date).getTime(),
+    actualVisitId: s.actual_visit_id ?? undefined,
+  };
+}
+
+/** actual_visit_id is server-owned (schedules_server_checks, 0020) — never written. */
+export function scheduleRow(s: Schedule) {
+  return {
+    id: s.id,
+    nc_id: s.ncId,
+    store_id: s.storeId,
+    planned_date: new Date(s.plannedDate).toISOString(),
   };
 }
 

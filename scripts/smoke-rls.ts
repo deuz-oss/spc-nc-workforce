@@ -86,6 +86,7 @@ const created = {
   ntgGwp: [] as string[],
   surveyResponses: [] as string[],
   pushTokens: [] as string[],
+  schedules: [] as string[],
   consumers: [] as string[],
   conversations: [] as string[],
   targets: [] as string[],
@@ -104,6 +105,7 @@ async function cleanup() {
     if (error) console.warn(`  cleanup photos: ${error.message}`);
   }
   await del('conversations', created.conversations); // messages cascade
+  await del('schedules', created.schedules);
   await del('stock_taking', created.stockTaking);
   await del('ntg_gwp', created.ntgGwp);
   await del('survey_responses', created.surveyResponses);
@@ -354,6 +356,29 @@ async function main() {
     expect(dup.error.code === 'P0001', `duplicate SKU rejected with ${dup.error.code}, expected P0001 (app must not read it as "already saved")`);
     const replay = await nc.client.from('stock_taking').insert({ id: stkId, visit_id: visitId, store_id: 'st_demo1', sku: 'SMOKE', qty_on_hand: 5 });
     expect(replay.error?.code === '23505', `replaying the same row gave ${replay.error?.code ?? 'success'}, expected 23505`);
+  });
+
+  await check('PJP: TL plans own team NC; the visit link is server-owned; outsiders refused (0020)', async () => {
+    const id = `${RUN}_pjp`;
+    const ins = await tl.client.from('schedules').insert({
+      id, nc_id: nc.id, store_id: 'st_demo1', planned_date: checkIn.toISOString(), actual_visit_id: 'forged',
+    });
+    if (!ins.error) created.schedules.push(id);
+    expectOk(ins, 'TL schedules own team NC');
+    const { data: row } = await admin.from('schedules').select('actual_visit_id').eq('id', id).single();
+    expect(row?.actual_visit_id === visitId, `actual_visit_id is ${row?.actual_visit_id}, expected the NC's check-in ${visitId} — run migration 0020`);
+
+    const dup = await tl.client.from('schedules').insert({ id: `${RUN}_pjp_dup`, nc_id: nc.id, store_id: 'st_demo1', planned_date: checkIn.toISOString() });
+    if (!dup.error) created.schedules.push(`${RUN}_pjp_dup`);
+    expect(dup.error, 'the same store was planned twice for one NC on one day');
+
+    const outside = await tl.client.from('schedules').insert({ id: `${RUN}_pjp_pm`, nc_id: pm.id, store_id: 'st_demo1', planned_date: checkIn.toISOString() });
+    if (!outside.error) created.schedules.push(`${RUN}_pjp_pm`);
+    expect(outside.error, 'TL planned a non-NC / out-of-team user');
+
+    const byNc = await nc.client.from('schedules').insert({ id: `${RUN}_pjp_nc`, nc_id: nc.id, store_id: 'st_demo2', planned_date: checkIn.toISOString() });
+    if (!byNc.error) created.schedules.push(`${RUN}_pjp_nc`);
+    expect(byNc.error, 'an NC edited their own PJP');
   });
 
   await check('NC cannot file a report under a different store than the visit', async () => {

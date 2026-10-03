@@ -44,6 +44,7 @@ export type RootStackParamList = {
   Certifications: undefined;
   Products: undefined;
   AuditLog: undefined;
+  Pjp: { ncId?: string } | undefined;
   ChatThread: { conversationId: string; counterpartName?: string };
 };
 

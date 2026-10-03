@@ -2,13 +2,14 @@ import React, { useMemo, useState } from 'react';
 import { ScrollView, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import Ionicons from '@expo/vector-icons/Ionicons';
-import { Btn, Card, H, Muted, SectionHeader, StatCard } from '../components/ui';
+import { Badge, Btn, Card, H, ListRow, Muted, SectionHeader, StatCard } from '../components/ui';
 import { showDialog, showToast } from '../components/dialog';
 import { useDataRefresh } from '../components/useDataRefresh';
 import ManagementDashboard from './ManagementDashboard';
 import {
   CERT_MANAGER_ROLES,
   MANAGEMENT_DASHBOARD_ROLES,
+  PJP_MANAGER_ROLES,
   PRODUCT_MANAGER_ROLES,
   ROLE_LABEL,
   SURVEY_BUILDER_ROLES,
@@ -19,6 +20,7 @@ import { scopeUsers, useCurrentUser, useStore } from '../store/useStore';
 import { attritionSignal, computeNcStat, statusOf, todaysReportStatus } from '../utils/kpi';
 import { getRange, inRange, monthKey, monthRange, programDayKey } from '../utils/period';
 import { buildReportItems, groupReports, reviewKey } from '../utils/validation';
+import { planCompliance, scheduleStatus } from '../utils/pjp';
 import { fmtDurShort, fmtKm } from '../utils/format';
 import {
   Coords,
@@ -147,6 +149,7 @@ function TeamSummaryCard() {
   const ntgGwps = useStore((s) => s.ntgGwps);
   const reportReviews = useStore((s) => s.reportReviews);
   const targets = useStore((s) => s.targets);
+  const schedules = useStore((s) => s.schedules);
 
   const stats = useMemo(() => {
     const ncs = scopeUsers({ users, teams }, me).filter((u) => u.role === 'nc');
@@ -189,10 +192,11 @@ function TeamSummaryCard() {
       reportsComplete,
       atRisk,
       exceptions: groups.filter((g) => g.isException).length,
+      pjp: planCompliance(schedules, visits, ncIds, getRange('weekly')),
       offtakeMonth,
       target,
     };
-  }, [me, users, teams, attendances, visits, stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, ntgGwps, reportReviews, targets]);
+  }, [me, users, teams, attendances, visits, stockTakingRows, offtakeRows, shareOfShelfRows, paidVisibilityRows, priceMonitoringRows, ntgGwps, reportReviews, targets, schedules]);
 
   return (
     <Card>
@@ -212,11 +216,57 @@ function TeamSummaryCard() {
         />
         <StatCard title="NC Berisiko" value={String(stats.atRisk)} sub="absen / tak lapor ≥3 dari 7 hari" color={stats.atRisk ? C.warn : undefined} />
         <StatCard
+          title="Kepatuhan PJP"
+          value={stats.pjp.due ? `${Math.round((100 * stats.pjp.visited) / stats.pjp.due)}%` : '-'}
+          sub={stats.pjp.due ? `${stats.pjp.visited}/${stats.pjp.due} jadwal minggu ini` : 'belum ada jadwal minggu ini'}
+        />
+        <StatCard
           title="Offtake Bulan Ini"
           value={String(stats.offtakeMonth)}
           sub={stats.target ? `target ${stats.target} (${Math.round((100 * stats.offtakeMonth) / stats.target)}%)` : 'target belum diset'}
         />
       </View>
+    </Card>
+  );
+}
+
+/** The NC's PJP for today: which stores, and which are already visited. */
+function TodayPlanCard() {
+  const me = useCurrentUser()!;
+  const navigation = useNavigation();
+  const schedules = useStore((s) => s.schedules);
+  const visits = useStore((s) => s.visits);
+  const stores = useStore((s) => s.stores);
+  const today = programDayKey(Date.now());
+  const plans = schedules.filter((s) => s.ncId === me.id && programDayKey(s.plannedDate) === today);
+  const visited = plans.filter((s) => scheduleStatus(s, visits) === 'visited').length;
+
+  return (
+    <Card>
+      <SectionHeader
+        title="Rencana Kunjungan Hari Ini"
+        subtitle={plans.length ? `${visited}/${plans.length} toko dikunjungi` : 'PJP'}
+        action={{ label: 'Minggu ini', onPress: () => navigation.navigate('Pjp') }}
+      />
+      {plans.length === 0 ? (
+        <Muted style={{ marginTop: 6 }}>Tidak ada toko dijadwalkan untuk hari ini.</Muted>
+      ) : (
+        <View style={{ gap: 8, marginTop: 10 }}>
+          {plans.map((s) => {
+            const store = stores.find((x) => x.id === s.storeId);
+            const done = scheduleStatus(s, visits) === 'visited';
+            return (
+              <ListRow
+                key={s.id}
+                title={store?.name ?? s.storeId}
+                subtitle={store?.address || store?.city}
+                trailing={<Badge label={done ? 'Dikunjungi' : 'Belum'} color={done ? C.ok : C.info} />}
+                onPress={store ? () => navigation.navigate('StoreDetail', { storeId: store.id }) : undefined}
+              />
+            );
+          })}
+        </View>
+      )}
     </Card>
   );
 }
@@ -296,6 +346,7 @@ export default function DashboardScreen() {
 
       {(me.role === 'nc' || me.role === 'tl' || me.role === 'arco') && <ClockCard />}
       {me.role === 'nc' && <NcStatsCard />}
+      {me.role === 'nc' && <TodayPlanCard />}
       {me.role === 'nc' && <TodaysReportCard />}
 
       {me.role === 'super_admin' && (
@@ -313,6 +364,16 @@ export default function DashboardScreen() {
       )}
 
       {(me.role === 'tl' || me.role === 'arco') && <TeamSummaryCard />}
+
+      {PJP_MANAGER_ROLES.includes(me.role) && (
+        <Card>
+          <SectionHeader
+            title="Jadwal Kunjungan (PJP)"
+            subtitle="Rencana toko per hari untuk setiap NC"
+            action={{ label: 'Atur', onPress: () => navigation.navigate('Pjp') }}
+          />
+        </Card>
+      )}
 
       {CERT_MANAGER_ROLES.includes(me.role) && (
         <Card>

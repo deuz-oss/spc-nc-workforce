@@ -34,6 +34,7 @@ import {
   Role,
   RoutePoint,
   LivePosition,
+  Schedule,
   Scorecard,
   ShareOfShelfRow,
   StockTakingRow,
@@ -50,7 +51,7 @@ import { clockInGeoFenceOk, haversineM } from '../utils/geo';
 import { loadQueue, saveQueue, QueuedOp } from '../utils/offlineQueue';
 import { discardLocalPhoto, extFromUri, localPhotoExists, persistPhotoLocally, uploadReportMedia } from '../utils/storage';
 import { fmtDate } from '../utils/format';
-import { historyWindowStart } from '../utils/period';
+import { historyWindowStart, programDayKey, programDayStart } from '../utils/period';
 import { uid } from '../utils/uuid';
 import { deleteSnapshot, getLastUser, loadSnapshot, OfflineSnapshot, saveSnapshot, setLastUser } from '../utils/offlineCache';
 import { BufferedPoint, onPointsRecorded, readBufferedPoints } from '../utils/routeBuffer';
@@ -72,6 +73,7 @@ import {
   mapProduct,
   mapProfile,
   mapReportReview,
+  mapSchedule,
   mapScorecard,
   mapShareOfShelf,
   mapStockTaking,
@@ -84,6 +86,7 @@ import {
   offtakeRow,
   paidVisibilityRow,
   priceMonitoringRow,
+  scheduleRow,
   shareOfShelfRow,
   stockTakingRow,
   storeRow,
@@ -208,6 +211,10 @@ interface StoreState {
    * the realtime publication — writers update local state directly, other
    * viewers pick changes up on next login. */
   certifications: Certification[];
+  /** PJP — planned store visits per NC per WIB day (schedules, 0020). Loaded
+   * for the roles that plan or follow them, from the history window onward
+   * (future plans included). */
+  schedules: Schedule[];
   /** Phase 4b (PRD §16) — in-app messaging (PRD §17). */
   conversations: Conversation[];
   messages: Message[];
@@ -308,6 +315,10 @@ interface StoreState {
    * transaction (save_consumer_with_step, 0017) — never a consumer without its
    * step or the reverse. Returns an error message (already shown) or null. */
   saveConsumerWithStep(c: Consumer, step: NtgGwp | null): Promise<string | null>;
+  /** PJP: plans stores for an NC on WIB days (scoped by schedules_write RLS,
+   * 0020). Already-planned store/day pairs are skipped. Returns an error message or null. */
+  addSchedules(ncId: string, plans: Array<{ storeId: string; plannedDate: number }>): Promise<string | null>;
+  deleteSchedule(id: string): Promise<string | null>;
   /** Loads one consumer's complete funnel history (the store only holds the
    * recent window) and merges it in. Best-effort; returns an error message or null. */
   fetchConsumerHistory(consumerId: string): Promise<string | null>;
@@ -1302,6 +1313,8 @@ const WINDOWED_TABLES: Array<{
   { table: 'report_reviews', key: 'reportReviews', col: 'reviewed_at', keepNull: 'reviewed_at', map: mapReportReview },
   { table: 'coaching_logs', key: 'coachingLogs', col: 'date', map: mapCoachingLog },
   { table: 'messages', key: 'messages', col: 'created_at', map: mapMessage },
+  // Plans from the window start on — future days included (no upper bound).
+  { table: 'schedules', key: 'schedules', col: 'planned_date', map: mapSchedule },
 ];
 
 
@@ -1392,6 +1405,8 @@ const SNAPSHOT_TABLES: MirroredTable[] = [
   { table: 'messages', key: 'messages', map: mapMessage },
   // Not in the realtime publication; writers update local state directly.
   { table: 'certifications', key: 'certifications', map: mapCertification, realtime: false },
+  // PJP: the NC follows their plan; TL/ARCO/admins plan it.
+  { table: 'schedules', key: 'schedules', map: mapSchedule, roles: ['nc', 'tl', 'arco', 'super_admin', 'admin_data_entry'] },
 ];
 
 /** Fetches every SNAPSHOT_TABLES table (windowed ones from `since`). Raw rows, keyed by table. */
@@ -1657,6 +1672,7 @@ const SIGNED_OUT_STATE: Partial<StoreState> = {
   conversations: [],
   messages: [],
   certifications: [],
+  schedules: [],
   pendingOps: [],
   historyFrom: null,
   offlineSnapshotAt: null,
@@ -1687,6 +1703,7 @@ export const useStore = create<StoreState>()((set, get) => ({
   conversations: [],
   messages: [],
   certifications: [],
+  schedules: [],
   pendingOps: [],
   historyFrom: null,
   offlineSnapshotAt: null,
@@ -2380,6 +2397,48 @@ export const useStore = create<StoreState>()((set, get) => ({
       return error.message;
     }
     if (step) raiseConsumerStage(set, get, step);
+    return null;
+  },
+
+  addSchedules: async (ncId, plans) => {
+    const dayKey = (ts: number) => programDayKey(ts);
+    const existing = new Set(get().schedules.filter((x) => x.ncId === ncId).map((x) => `${x.storeId}|${dayKey(x.plannedDate)}`));
+    const rows: Schedule[] = [];
+    for (const p of plans) {
+      const key = `${p.storeId}|${dayKey(p.plannedDate)}`;
+      if (existing.has(key)) continue;
+      existing.add(key);
+      rows.push({ id: uid('pjp_'), ncId, storeId: p.storeId, plannedDate: programDayStart(p.plannedDate) });
+    }
+    if (!rows.length) return null;
+    const ids = rows.map((r) => r.id);
+    set({ schedules: [...rows, ...get().schedules] });
+    const { error } = await supabase.from('schedules').insert(rows.map(scheduleRow));
+    if (error) {
+      restoreRows(set, get, 'schedules', ids, []);
+      showDialog(
+        'Gagal Menyimpan Jadwal',
+        error.code === '23505'
+          ? 'Sebagian toko sudah dijadwalkan di hari itu (mungkin oleh pengguna lain). Tarik untuk memuat ulang lalu coba lagi.'
+          : error.code === '42501'
+            ? 'Anda tidak bisa mengatur jadwal NC ini (di luar tim Anda).'
+            : 'Tidak dapat menyimpan jadwal. Periksa koneksi internet dan coba lagi.',
+      );
+      return error.message;
+    }
+    return null;
+  },
+
+  deleteSchedule: async (id) => {
+    const before = get().schedules.filter((x) => x.id === id);
+    set({ schedules: get().schedules.filter((x) => x.id !== id) });
+    // .select() so an RLS-refused delete (no error, 0 rows) isn't mistaken for success.
+    const { data, error } = await supabase.from('schedules').delete().eq('id', id).select('id');
+    if (error || !data?.length) {
+      restoreRows(set, get, 'schedules', [id], before);
+      showDialog('Gagal Menghapus Jadwal', 'Tidak dapat menghapus jadwal ini. Periksa koneksi internet dan coba lagi.');
+      return error?.message ?? 'not permitted';
+    }
     return null;
   },
 
