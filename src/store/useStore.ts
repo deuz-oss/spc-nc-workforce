@@ -55,7 +55,7 @@ import { uid } from '../utils/uuid';
 import { deleteSnapshot, getLastUser, loadSnapshot, OfflineSnapshot, saveSnapshot, setLastUser } from '../utils/offlineCache';
 import { BufferedPoint, onPointsRecorded, readBufferedPoints } from '../utils/routeBuffer';
 import { flushRouteBuffer } from '../utils/routeSync';
-import { funnelStepError } from '../utils/funnel';
+import { funnelStepError, highestStage } from '../utils/funnel';
 import { isValidWa, normalizeWa } from '../utils/wa';
 import { passwordProblem } from '../utils/password';
 import {
@@ -308,6 +308,9 @@ interface StoreState {
    * transaction (save_consumer_with_step, 0017) — never a consumer without its
    * step or the reverse. Returns an error message (already shown) or null. */
   saveConsumerWithStep(c: Consumer, step: NtgGwp | null): Promise<string | null>;
+  /** Loads one consumer's complete funnel history (the store only holds the
+   * recent window) and merges it in. Best-effort; returns an error message or null. */
+  fetchConsumerHistory(consumerId: string): Promise<string | null>;
   /** Data subject deletion request (UU PDP): blanks the consumer's personal data
    * server-side (erase_consumer RPC, 0015); funnel counts stay. Creator NC,
    * super_admin or PM. Returns an error message or null. */
@@ -991,8 +994,11 @@ function ntgStepProblem(get: () => StoreState, n: NtgGwp, ageBracket: string | u
     showVisitPendingDialog();
     return 'visit not synced yet';
   }
+  // The loaded rows are only a recent window: the consumer row's current_stage
+  // (0019) stands for everything older.
+  const known = get().consumers.find((c) => c.id === n.consumerId)?.currentStage;
   const stepErr = funnelStepError(
-    get().ntgGwps.filter((g) => g.consumerId === n.consumerId).map((g) => g.stage),
+    [...get().ntgGwps.filter((g) => g.consumerId === n.consumerId).map((g) => g.stage), ...(known ? [known] : [])],
     n.stage,
   );
   if (stepErr) {
@@ -1004,6 +1010,18 @@ function ntgStepProblem(get: () => StoreState, n: NtgGwp, ageBracket: string | u
     return 'under-1 consumer';
   }
   return null;
+}
+
+/** Mirrors ntg_gwp_sync_consumer_stage (0019) locally after a step is saved,
+ * so the consumer list shows the new stage before the realtime echo arrives. */
+function raiseConsumerStage(set: (p: Partial<StoreState>) => void, get: () => StoreState, n: NtgGwp) {
+  set({
+    consumers: get().consumers.map((c) => {
+      if (c.id !== n.consumerId) return c;
+      const next = highestStage([c.currentStage, n.stage]);
+      return next === c.currentStage ? c : { ...c, currentStage: next, currentStageAt: n.createdAt };
+    }),
+  });
 }
 
 /** True while this visit's own check-in is still in the offline queue — the
@@ -1141,14 +1159,19 @@ function teardownRealtime() {
   }
 }
 
-function subscribeRealtime(set: (partial: Partial<StoreState>) => void, get: () => StoreState, userId: string) {
+function subscribeRealtime(
+  set: (partial: Partial<StoreState>) => void,
+  get: () => StoreState,
+  userId: string,
+  role: Role | undefined,
+) {
   teardownRealtime();
   let ch = supabase.channel('app-sync');
   // One generic handler per mirrored table (SNAPSHOT_TABLES): INSERT/UPDATE
   // upsert the mapped row, DELETE removes it. Messages arriving here are the
   // live path for ChatThreadScreen (new messages and read_at updates).
   for (const t of SNAPSHOT_TABLES) {
-    if (t.realtime === false) continue;
+    if (t.realtime === false || !loadsTable(t.table, role)) continue;
     ch = ch.on('postgres_changes', { event: '*', schema: 'public', table: t.table }, (payload) => {
       const list = get()[t.key] as unknown as Array<{ id: string }>;
       if (payload.eventType === 'DELETE') {
@@ -1251,11 +1274,12 @@ async function fetchOwnRoutePoints(userId: string, attendanceRows: any[]): Promi
 /**
  * Field-activity tables that grow every day (~195 NCs x visits/reports/pings)
  * and are only loaded for the last HISTORY_DAYS at login — see config.ts.
- * Everything else (profiles, teams, stores, products, consumers, ntg_gwp,
- * surveys, targets, scorecards, conversations) is small or needs full history
- * and always loads completely. ntg_gwp in particular MUST stay complete: a
- * consumer's current funnel stage is its latest row, however old, and a gap
- * would let an NC re-record an earlier stage.
+ * Everything else (profiles, teams, stores, products, consumers, surveys,
+ * targets, scorecards, conversations) is small or needs full history and
+ * loads completely (for the roles that load it at all — MirroredTable.roles).
+ * ntg_gwp is windowed too: a consumer's current funnel stage, which used to
+ * need its whole history, is kept on the consumer row (current_stage, 0019);
+ * ConsumerDetail fetches one consumer's full history when opened.
  */
 const WINDOWED_TABLES: Array<{
   table: string;
@@ -1273,6 +1297,7 @@ const WINDOWED_TABLES: Array<{
   { table: 'share_of_shelf', key: 'shareOfShelfRows', col: 'created_at', map: mapShareOfShelf, heavy: true },
   { table: 'paid_visibility', key: 'paidVisibilityRows', col: 'created_at', map: mapPaidVisibility, heavy: true },
   { table: 'price_monitoring', key: 'priceMonitoringRows', col: 'created_at', map: mapPriceMonitoring, heavy: true },
+  { table: 'ntg_gwp', key: 'ntgGwps', col: 'created_at', map: mapNtgGwp },
   { table: 'survey_responses', key: 'surveyResponses', col: 'created_at', map: mapSurveyResponse },
   { table: 'report_reviews', key: 'reportReviews', col: 'reviewed_at', keepNull: 'reviewed_at', map: mapReportReview },
   { table: 'coaching_logs', key: 'coachingLogs', col: 'date', map: mapCoachingLog },
@@ -1319,6 +1344,14 @@ interface MirroredTable {
   realtime?: false;
   /** Merges a realtime row with the locally held one (fields the row lacks). */
   keepLocal?: (fresh: any, local: any) => any;
+  /** Only these roles load (and subscribe to) the table; absent = everyone. */
+  roles?: Role[];
+}
+
+/** Whether `role` mirrors table `t` at all — see SNAPSHOT_TABLES. */
+function loadsTable(table: string, role: Role | undefined): boolean {
+  const t = SNAPSHOT_TABLES.find((x) => x.table === table);
+  return !t?.roles || (!!role && t.roles.includes(role));
 }
 
 const SNAPSHOT_TABLES: MirroredTable[] = [
@@ -1337,8 +1370,14 @@ const SNAPSHOT_TABLES: MirroredTable[] = [
   { table: 'products', key: 'products', map: mapProduct },
   { table: 'stock_taking', key: 'stockTakingRows', map: mapStockTaking },
   { table: 'offtake', key: 'offtakeRows', map: mapOfftake },
-  { table: 'consumers', key: 'consumers', map: mapConsumer },
-  { table: 'ntg_gwp', key: 'ntgGwps', map: mapNtgGwp },
+  // Only the NC who registers consumers opens them (Consumers / ConsumerDetail
+  // are reached from the NC's own store visit). The current funnel stage is on
+  // the consumer row (current_stage, 0019), so the full ntg_gwp history isn't
+  // needed to know it.
+  { table: 'consumers', key: 'consumers', map: mapConsumer, roles: ['nc'] },
+  // Recent window only (WINDOWED_TABLES), for the field roles' daily-report
+  // views; dashboards get NTG figures from management_summary (0018).
+  { table: 'ntg_gwp', key: 'ntgGwps', map: mapNtgGwp, roles: ['nc', 'tl', 'arco'] },
   { table: 'share_of_shelf', key: 'shareOfShelfRows', map: mapShareOfShelf },
   { table: 'paid_visibility', key: 'paidVisibilityRows', map: mapPaidVisibility },
   { table: 'price_monitoring', key: 'priceMonitoringRows', map: mapPriceMonitoring },
@@ -1356,8 +1395,15 @@ const SNAPSHOT_TABLES: MirroredTable[] = [
 ];
 
 /** Fetches every SNAPSHOT_TABLES table (windowed ones from `since`). Raw rows, keyed by table. */
-async function fetchSnapshot(w: HistoryWindow): Promise<{ rows: Record<string, any[]>; error: { message: string; code?: string } | null }> {
-  const results = await Promise.all(SNAPSHOT_TABLES.map((t) => fetchAll(t.table, windowFilter(t.table, w))));
+async function fetchSnapshot(
+  w: HistoryWindow,
+  role: Role | undefined,
+): Promise<{ rows: Record<string, any[]>; error: { message: string; code?: string } | null }> {
+  const results = await Promise.all(
+    SNAPSHOT_TABLES.map((t) =>
+      loadsTable(t.table, role) ? fetchAll(t.table, windowFilter(t.table, w)) : Promise.resolve({ data: [] as any[], error: null }),
+    ),
+  );
   const rows: Record<string, any[]> = {};
   SNAPSHOT_TABLES.forEach((t, i) => (rows[t.table] = results[i].data));
   return { rows, error: results.find((r) => r.error)?.error ?? null };
@@ -1392,7 +1438,7 @@ async function hydrateAll(
   if (!me?.active) return 'inactive';
 
   const w = historyWindow(me.role);
-  const { rows, error: snapErr } = await fetchSnapshot(w);
+  const { rows, error: snapErr } = await fetchSnapshot(w, me.role);
   if (snapErr) {
     // Connection dropped mid-load: keep whatever the caller already has rather
     // than replacing it with a partial snapshot.
@@ -1418,7 +1464,7 @@ async function hydrateAll(
   lastRefreshAt = Date.now();
   void setLastUser(userId);
 
-  subscribeRealtime(set, get, userId);
+  subscribeRealtime(set, get, userId, me.role);
   return 'ok';
 }
 
@@ -1766,8 +1812,13 @@ export const useStore = create<StoreState>()((set, get) => ({
   loadFullHistory: async () => {
     const before = get().historyFrom;
     if (before == null) return null;
+    const role = get().users.find((u) => u.id === get().sessionUserId)?.role;
     const results = await Promise.all(
-      WINDOWED_TABLES.map((w) => fetchAll(w.table, { col: w.col, before: new Date(before).toISOString() })),
+      WINDOWED_TABLES.map((w) =>
+        loadsTable(w.table, role)
+          ? fetchAll(w.table, { col: w.col, before: new Date(before).toISOString() })
+          : Promise.resolve({ data: [] as any[], error: null }),
+      ),
     );
     const failed = results.find((r) => r.error);
     if (failed) return failed.error!.message;
@@ -2275,6 +2326,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data NTG & GWP ke server. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
+    raiseConsumerStage(set, get, n);
     return null;
   },
 
@@ -2283,7 +2335,9 @@ export const useStore = create<StoreState>()((set, get) => ({
     const problem = consumerProblem(get, c) ?? (step ? ntgStepProblem(get, step, c.childAgeBracket) : null);
     if (problem) return problem;
 
-    set({ consumers: upsertById(get().consumers, c), ...(step ? { ntgGwps: [step, ...get().ntgGwps] } : {}) });
+    // current_stage is server-owned (0019) — keep what's known rather than what the form passed.
+    const row = { ...c, currentStage: before?.currentStage, currentStageAt: before?.currentStageAt };
+    set({ consumers: upsertById(get().consumers, row), ...(step ? { ntgGwps: [step, ...get().ntgGwps] } : {}) });
     const { error } = await supabase.rpc('save_consumer_with_step', {
       p_consumer: {
         id: c.id,
@@ -2325,6 +2379,16 @@ export const useStore = create<StoreState>()((set, get) => ({
       showDialog('Gagal Menyimpan', serverRuleMessage(error) ?? 'Tidak dapat menyimpan data konsumen. Periksa koneksi internet dan coba lagi.');
       return error.message;
     }
+    if (step) raiseConsumerStage(set, get, step);
+    return null;
+  },
+
+  fetchConsumerHistory: async (consumerId) => {
+    const { data, error } = await supabase.from('ntg_gwp').select('*').eq('consumer_id', consumerId).limit(500);
+    if (error) return error.message;
+    const known = new Set(get().ntgGwps.map((g) => g.id));
+    const older = (data ?? []).map(mapNtgGwp).filter((g) => !known.has(g.id));
+    if (older.length) set({ ntgGwps: [...get().ntgGwps, ...older] });
     return null;
   },
 
@@ -2750,7 +2814,7 @@ export const useStore = create<StoreState>()((set, get) => ({
       return resumeUserId ? 'Masih offline.' : null;
     }
     const role = get().users.find((u) => u.id === get().sessionUserId)?.role;
-    const { rows, error } = await fetchSnapshot(historyWindow(role));
+    const { rows, error } = await fetchSnapshot(historyWindow(role), role);
     if (error) return error.message; // partial data would drop rows from the merge below — keep what we have
     const windowed = new Set(WINDOWED_TABLES.map((w) => w.table));
     const patch: Partial<StoreState> = {};

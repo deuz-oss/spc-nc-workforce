@@ -7,6 +7,7 @@ import { NTG_GWP_STAGE_LABEL } from '../config';
 import { C } from '../theme';
 import { consumerScope, useCurrentUser, useStore } from '../store/useStore';
 import { NtgGwpStage } from '../types';
+import { highestStage } from '../utils/funnel';
 
 /** Consumers list for the NTG & GWP funnel (PRD §5.4). Optionally scoped to a
  * single visit's store — when opened from StoreVisitScreen with a visitId,
@@ -35,16 +36,14 @@ export default function ConsumersScreen() {
     return scoped.filter((c) => c.name.toLowerCase().includes(needle) || c.waContact.toLowerCase().includes(needle));
   }, [scoped, q]);
 
-  // Hydrated rows come back in no particular order, so "latest" must be computed, not assumed from position.
-  const latestStageByConsumer = useMemo(() => {
-    const latest = new Map<string, { stage: NtgGwpStage; createdAt: number }>();
-    for (const g of ntgGwps) {
-      const cur = latest.get(g.consumerId);
-      if (!cur || g.createdAt > cur.createdAt) latest.set(g.consumerId, { stage: g.stage, createdAt: g.createdAt });
-    }
-    return latest;
+  // The consumer row carries its current stage (current_stage, 0019); recent
+  // local rows only matter for a step whose server echo hasn't arrived yet.
+  const recentStages = useMemo(() => {
+    const m = new Map<string, NtgGwpStage[]>();
+    for (const g of ntgGwps) m.set(g.consumerId, [...(m.get(g.consumerId) ?? []), g.stage]);
+    return m;
   }, [ntgGwps]);
-  const latestStage = (consumerId: string) => latestStageByConsumer.get(consumerId)?.stage;
+  const latestStage = (c: (typeof scoped)[number]) => highestStage([c.currentStage, ...(recentStages.get(c.id) ?? [])]);
 
   return (
     <View role="main" style={{ flex: 1 }}>
@@ -64,7 +63,7 @@ export default function ConsumersScreen() {
         contentContainerStyle={{ padding: 16, paddingTop: 0, gap: 10 }}
         ListEmptyComponent={<Empty text="Belum ada data konsumen." />}
         renderItem={({ item: c }) => {
-          const stage = latestStage(c.id);
+          const stage = latestStage(c);
           return (
             <ListRow
               onPress={() => navigation.navigate('ConsumerDetail', { consumerId: c.id, visitId, storeId })}

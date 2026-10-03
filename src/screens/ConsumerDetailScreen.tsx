@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { ScrollView, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useAppRoute } from '../navigation';
@@ -17,7 +17,7 @@ import { C, F } from '../theme';
 import { useCurrentUser, useStore } from '../store/useStore';
 import { Consumer, NtgGwp, NtgGwpStage } from '../types';
 import { uid } from '../utils/uuid';
-import { funnelStepError } from '../utils/funnel';
+import { funnelStepError, highestStage } from '../utils/funnel';
 import { isValidWa } from '../utils/wa';
 import { programDayKey } from '../utils/period';
 import { fmtDateTime } from '../utils/format';
@@ -42,7 +42,13 @@ export default function ConsumerDetailScreen() {
       consumerId ? ntgGwps.filter((g) => g.consumerId === consumerId).sort((a, b) => b.createdAt - a.createdAt) : [],
     [ntgGwps, consumerId],
   );
-  const currentStage: NtgGwpStage = history[0]?.stage ?? 'approached';
+  // The consumer row's current_stage (0019) covers history older than the
+  // loaded window; the full history is fetched below for the list.
+  const currentStage: NtgGwpStage = highestStage([existing?.currentStage, ...history.map((h) => h.stage)]) ?? 'approached';
+  const fetchConsumerHistory = useStore((s) => s.fetchConsumerHistory);
+  useEffect(() => {
+    if (consumerId) void fetchConsumerHistory(consumerId);
+  }, [consumerId, fetchConsumerHistory]);
   const currentStageIdx = NTG_GWP_STAGES.indexOf(currentStage);
 
   const [name, setName] = useState(existing?.name ?? '');
@@ -65,7 +71,8 @@ export default function ConsumerDetailScreen() {
   // PRD §6 / PP 33/2012: an under-1 consumer stays at "approached" (also enforced server-side, 0014).
   const under1 = isUnder1Bracket(childAgeBracket);
   const legacyBracket = !!childAgeBracket && !CHILD_AGE_BRACKETS.some((b) => b.key === childAgeBracket);
-  const historyStages = history.map((h) => h.stage);
+  // Recent rows plus the consumer row's current_stage, which stands for older history.
+  const historyStages = [...history.map((h) => h.stage), ...(existing?.currentStage ? [existing.currentStage] : [])];
   /** Forward-only funnel (0015): the current stage (no change) or a step the server would accept. */
   const stageSelectable = (s: NtgGwpStage) =>
     canAdvanceStage &&

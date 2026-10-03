@@ -534,6 +534,15 @@ async function main() {
     expect((await step('quiz_completed', 5)).error, 'funnel moved backwards');
   });
 
+  await check("consumer's current_stage follows ntg_gwp and can't be set by the client (0019)", async () => {
+    const read = async () => (await admin.from('consumers').select('current_stage').eq('id', consumerId).single()).data?.current_stage;
+    const before = await read();
+    if (before === undefined) throw new Error('consumers.current_stage missing — run migration 0019');
+    expect(before === 'ntg_confirmed', `current_stage is ${before}, expected ntg_confirmed after the funnel steps above`);
+    await nc.client.from('consumers').update({ current_stage: 'wa_followup_scheduled' }).eq('id', consumerId);
+    expect((await read()) === 'ntg_confirmed', 'an NC overwrote current_stage directly');
+  });
+
   await check('a consumer and its funnel step save together or not at all (0017)', async () => {
     const id = `${RUN}_cons_atomic`;
     const res = await nc.client.rpc('save_consumer_with_step', {

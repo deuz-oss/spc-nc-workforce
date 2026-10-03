@@ -173,6 +173,8 @@ export function mapConsumer(c: any): Consumer {
     consentAt: optTime(c.consent_at),
     consentVersion: c.consent_version ?? undefined,
     erasedAt: optTime(c.erased_at),
+    currentStage: c.current_stage ?? undefined,
+    currentStageAt: optTime(c.current_stage_at),
   };
 }
 

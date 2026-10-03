@@ -250,6 +250,10 @@ export interface Consumer {
   consentVersion?: string;
   /** Set once the consumer's personal data was erased on request (erase_consumer, 0015). */
   erasedAt?: number;
+  /** Highest funnel stage reached and when — kept by the server from ntg_gwp
+   * (current_stage, 0019), so it's known without loading the whole history. */
+  currentStage?: NtgGwpStage;
+  currentStageAt?: number;
 }
 
 // --- Product master (Phase 2) — SKU picklist source for Stock Taking /

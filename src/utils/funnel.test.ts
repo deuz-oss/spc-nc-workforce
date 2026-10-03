@@ -1,7 +1,7 @@
 /// <reference types="node" />
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { funnelStepError } from './funnel';
+import { funnelStepError, highestStage } from './funnel';
 
 describe('funnelStepError', () => {
   it('allows the first step and forward moves, including skipping to NTG', () => {
@@ -19,5 +19,12 @@ describe('funnelStepError', () => {
     assert.ok(funnelStepError(['approached'], 'gwp_given'));
     assert.ok(funnelStepError([], 'wa_followup_scheduled'));
     assert.equal(funnelStepError(['ntg_confirmed'], 'gwp_given'), null);
+  });
+});
+
+describe('highestStage', () => {
+  it('picks the furthest stage, ignoring empties', () => {
+    assert.equal(highestStage(['quiz_completed', undefined, 'ntg_confirmed', 'approached']), 'ntg_confirmed');
+    assert.equal(highestStage([null, undefined]), undefined);
   });
 });

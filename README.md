@@ -56,7 +56,7 @@ Postgres + Auth + Realtime + Storage. Migrations live in `supabase/migrations/` 
 triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bucket).
 
 1. Create a project at [supabase.com](https://supabase.com) and run every file in `supabase/migrations/` in
-   the SQL Editor, in filename order (`0001` … `0018`). Existing projects: run only the ones not yet applied —
+   the SQL Editor, in filename order (`0001` … `0019`). Existing projects: run only the ones not yet applied —
    `0008_audit_hardening.sql` (security fixes), `0009_targets_uniqueness.sql` (Targets screen) and
    `0010_scheduled_scorecards.sql` (nightly scorecards via `pg_cron`, locks down `compute_scorecards`) and
    `0011_private_report_media.sql` (evidence photos private, opened via signed URLs) and
@@ -69,8 +69,8 @@ triggers/RPC, `0002_visit_media_storage.sql` = report-evidence photo/document bu
    sessions — **redeploy `admin-users` with it**) and
    `0017_scorecard_fairness_atomic_consumer.sql` (attendance KPI on working days, no score without computable KPIs,
    consumer + funnel step saved atomically) and
-   `0018_client_errors_dashboard_summary.sql` (client crash log, server-side management dashboard figures) are
-   required.
+   `0018_client_errors_dashboard_summary.sql` (client crash log, server-side management dashboard figures) and
+   `0019_consumer_current_stage.sql` (consumer's funnel stage kept on the consumer row) are required.
    Also in **Authentication → Providers → Email**, set the minimum password length to **8** (matches `MIN_PASSWORD`,
    `src/utils/password.ts` — the self-service password change goes straight to Supabase Auth).
    Then in **Authentication → Providers → Email**, turn **off** "Allow new users to sign up" — accounts are only
@@ -200,8 +200,9 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
 - ✅ **Management dashboard computed on the server** (`management_summary`, 0018) for any period / filter; it
   falls back to on-device rows when offline. Non-field roles therefore load only 14 days of the per-SKU report
   tables at login (`NON_FIELD_REPORT_HISTORY_DAYS`) instead of the program's full 62-day history.
-  **Still open:** `ntg_gwp` and `consumers` load in full for every role (the funnel needs each consumer's whole
-  history) — a server-side "current stage" view would remove that too.
+  `consumers` load only for NCs (their own) and `ntg_gwp` only for field roles, for the 62-day window: a
+  consumer's current funnel stage is kept on the consumer row by the server (`current_stage`, 0019), and the
+  consumer screen fetches one consumer's full history when opened.
 - ✅ **Crashes are visible**: an ErrorBoundary shows a recovery screen, and uncaught errors are logged to
   `client_errors` (0018, super_admin-readable, rate-limited). A crash-reporting service (e.g. Sentry) with source
   maps is still recommended before go-live.
@@ -308,7 +309,7 @@ Chat pushes (PRD §17) go Expo → Firebase Cloud Messaging. One-time setup, per
 The current project is a **demo/staging** project: it has the seeded demo accounts, whose passwords are public in
 this repo. Production gets its own Supabase project.
 
-1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0018`
+1. **New Supabase project** (region: Singapore, closest to Indonesia). Run `supabase/migrations/0001` … `0019`
    in order in the SQL Editor. Authentication → Providers → Email → turn **off** "Allow new users to sign up".
    Database → Extensions: confirm **pg_cron** is enabled (0010 schedules the nightly scorecards).
 2. **Do not run `npm run seed:supabase`** against production. Create the first Super Admin with the Supabase
@@ -339,7 +340,7 @@ this repo. Production gets its own Supabase project.
 - **CI** (`.github/workflows/ci.yml`, runs on push/PR): `tsc`, `npm test`, `expo-doctor`
   (SDK version drift, missing assets), a web bundle via `expo export`, and a Deno type check of the edge functions.
 - **Backend smoke test** (manual, writes to a real project — staging/demo only):
-  `npm run smoke -- --project <project-ref>` — 44 RLS/RPC/edge-function checks as each demo role; see
+  `npm run smoke -- --project <project-ref>` — 45 RLS/RPC/edge-function checks as each demo role; see
   `scripts/smoke-rls.ts`. Run it after every migration or edge-function change.
 
 ## Reused vs New (PRD §3)
@@ -377,7 +378,7 @@ src/
                            # LeafletMap, LiveTeamMap, ErrorBoundary
   screens/                 # one file per screen (field reports, validation, dashboards, admin)
 supabase/
-  migrations/0001…0018     # schema, RLS, triggers, RPCs — run in order (see Backend)
+  migrations/0001…0019     # schema, RLS, triggers, RPCs — run in order (see Backend)
   functions/admin-users    # account creation / password reset (service role, audit-logged)
   functions/send-push      # chat push notifications (push_tokens)
 scripts/seed-supabase.ts   # seed demo accounts + stores into a demo/staging project
