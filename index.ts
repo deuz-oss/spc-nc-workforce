@@ -1,5 +1,7 @@
 import { registerRootComponent } from 'expo';
 
+// First, so crashes while the rest loads are reported (no-op without a DSN).
+import './src/sentry';
 import './src/tasks/locationTask';
 import App from './App';
 

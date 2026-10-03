@@ -1,11 +1,12 @@
 import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import { supabase } from '../lib/supabase';
+import { captureToSentry } from '../sentry';
 
 /**
  * Minimal crash reporting: uncaught errors and render crashes are written to
- * the client_errors table (migration 0018) so they can be seen at all — a
- * stopgap until a crash-reporting service (e.g. Sentry) is set up. Best-effort
+ * the client_errors table (migration 0018), and also sent to Sentry when it is
+ * configured (src/sentry.ts) — client_errors stays as the fallback. Best-effort
  * and never throws; repeats of the same message are dropped for a minute and
  * a session sends at most MAX_PER_SESSION reports (the server rate-limits too).
  */
@@ -20,6 +21,10 @@ export function reportError(error: unknown, context: string): void {
     const err = error instanceof Error ? error : new Error(String(error));
     const message = `${err.name}: ${err.message}`.slice(0, 2000);
     console.warn(`[${context}]`, message);
+    // Uncaught errors reach Sentry through its own global handler already.
+    if (!context.startsWith('global') && !context.startsWith('window.') && context !== 'unhandledrejection') {
+      captureToSentry(err, context);
+    }
     const now = Date.now();
     if (sent >= MAX_PER_SESSION || now - (lastSentAt.get(message) ?? 0) < REPEAT_WINDOW_MS) return;
     lastSentAt.set(message, now);

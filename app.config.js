@@ -15,8 +15,17 @@ const path = require('path');
 module.exports = ({ config }) => {
   const local = path.join(__dirname, 'google-services.json');
   const googleServicesFile = process.env.GOOGLE_SERVICES_JSON || (fs.existsSync(local) ? './google-services.json' : undefined);
+  // Sentry source-map upload at build time, only once the project is set up on
+  // EAS (SENTRY_ORG / SENTRY_PROJECT plain, SENTRY_AUTH_TOKEN secret). Crash
+  // reporting itself only needs EXPO_PUBLIC_SENTRY_DSN (src/sentry.ts).
+  const { SENTRY_ORG, SENTRY_PROJECT, SENTRY_AUTH_TOKEN } = process.env;
+  const sentryPlugin =
+    SENTRY_ORG && SENTRY_PROJECT && SENTRY_AUTH_TOKEN
+      ? [['@sentry/react-native/expo', { organization: SENTRY_ORG, project: SENTRY_PROJECT }]]
+      : [];
   return {
     ...config,
+    plugins: [...(config.plugins ?? []), ...sentryPlugin],
     android: {
       ...config.android,
       ...(googleServicesFile ? { googleServicesFile } : {}),

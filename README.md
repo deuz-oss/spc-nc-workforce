@@ -206,8 +206,10 @@ All 5 phases from the PRD's phasing plan (§16) are implemented:
   consumer's current funnel stage is kept on the consumer row by the server (`current_stage`, 0019), and the
   consumer screen fetches one consumer's full history when opened.
 - ✅ **Crashes are visible**: an ErrorBoundary shows a recovery screen, and uncaught errors are logged to
-  `client_errors` (0018, super_admin-readable, rate-limited). A crash-reporting service (e.g. Sentry) with source
-  maps is still recommended before go-live.
+  `client_errors` (0018, super_admin-readable, rate-limited). Sentry (`src/sentry.ts`) turns on when
+  `EXPO_PUBLIC_SENTRY_DSN` is set in the EAS environment (plus `EXPO_PUBLIC_SENTRY_ENVIRONMENT=staging` for
+  preview): native + JS crashes, no PII (user id only, URL query strings stripped). Source maps upload at build time
+  once `SENTRY_ORG`, `SENTRY_PROJECT` and the secret `SENTRY_AUTH_TOKEN` are set on EAS (`app.config.js`).
 - ✅ Code health: typed navigation (`src/navigation.ts`), shared `SkuPicker`, mappers out of the store, one
   table-driven realtime handler, per-row rollback of failed optimistic writes, forms ask before dropping SKU rows
   left empty.
